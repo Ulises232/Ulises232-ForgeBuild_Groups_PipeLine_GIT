@@ -1,0 +1,483 @@
+paths:
+  workspaces:
+    PDF: C:/Proyectos/PDF
+  output_base: C:/Users/licen/Documents/Compiladores/Paquetes
+artifact_patterns:
+- '*.war'
+- '*.jar'
+projects: []
+profiles:
+- Desarrollo
+default_execution_mode: integrated
+deploy_targets: []
+groups:
+- key: PDF
+  repos:
+    PDF: C:/Proyectos/PDF
+  output_base: C:/Users/licen/Documents/Compiladores/Paquetes/
+  profiles:
+  - desarrollo
+  - qa
+  - produccion
+  projects:
+  - key: PDF
+    modules:
+    - version_files: []
+      name: fp-commons
+      path: fp-commons
+      goals:
+      - clean
+      - install
+      optional: true
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: true
+      run_once: true
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: wscore
+      path: wscore
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: true
+    - version_files: []
+      name: fp-core
+      path: fp-core
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: true
+    - version_files: []
+      name: fp-facturacion
+      path: fp-facturacion
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: true
+    profiles: null
+    execution_mode: integrated
+    workspace: null
+    repo: PDF
+  deploy_targets:
+  - name: Auto-qa
+    project_key: PDF
+    profiles:
+    - qa
+    path_template: \\192.168.8.236\repositorio\PDF\Versiones QA\{version}\
+    hotfix_path_template: \\192.168.8.236\repositorio\PDF\hotfix\{version}\
+  - name: Auto-produccion
+    project_key: PDF
+    profiles:
+    - produccion
+    path_template: \\192.168.8.236\repositorio\PDF\versiones\{version}\
+    hotfix_path_template: \\192.168.8.236\repositorio\PDF\hotfix
+  - name: Auto-desarrollo
+    project_key: PDF
+    profiles:
+    - desarrollo
+    path_template: C:\Users\licen\Documents\Compiladores
+    hotfix_path_template: null
+- key: ELLIS
+  repos:
+    ELLIS: C:/Proyectos/ElliS
+  output_base: C:/Users/licen/Documents/Compiladores/Paquetes/
+  profiles:
+  - ProduccionAExpansion
+  - ProduccionImpulso
+  - ProduccionFN2
+  - ProduccionProfinancia
+  - ProduccionAsset
+  - ProduccionActiva
+  - ProduccionTaiyari
+  - ProduccionSmart
+  - Desarrollo
+  - ProduccionCentral
+  - ProduccionTactical
+  - ProduccionCapital
+  projects:
+  - key: ELLIS
+    modules:
+    - version_files: []
+      name: lease-commons
+      path: lease-commons
+      goals:
+      - clean
+      - install
+      optional: true
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: true
+      run_once: true
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: core
+      path: core
+      goals:
+      - clean
+      - package
+      optional: true
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: true
+      copy_to_root: false
+    - version_files: []
+      name: ellis
+      path: ellis
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: true
+      copy_to_root: false
+    - version_files: []
+      name: ellis_admin
+      path: ellis_admin
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: true
+      copy_to_root: false
+    - version_files: []
+      name: ui-ellis
+      path: ui-ellis
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: false
+      copy_to_profile_ui: true
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: true
+      copy_to_root: false
+    profiles: null
+    execution_mode: integrated
+    workspace: null
+    repo: ELLiS
+  deploy_targets:
+  - name: Auto-ProduccionAExpansion
+    project_key: ELLIS
+    profiles:
+    - ProduccionAExpansion
+    path_template: \\192.168.8.236\repositorio\ELLiS\AExpansion\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionImpulso
+    project_key: ELLIS
+    profiles:
+    - ProduccionImpulso
+    path_template: \\192.168.8.236\repositorio\ELLiS\Impulso\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionFN2
+    project_key: ELLIS
+    profiles:
+    - ProduccionFN2
+    path_template: \\192.168.8.236\repositorio\ELLiS\FN2\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionProfinancia
+    project_key: ELLIS
+    profiles:
+    - ProduccionProfinancia
+    path_template: \\192.168.8.236\repositorio\ELLiS\Profinancia\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionAsset
+    project_key: ELLIS
+    profiles:
+    - ProduccionAsset
+    path_template: \\192.168.8.236\repositorio\ELLiS\Asset\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionActiva
+    project_key: ELLIS
+    profiles:
+    - ProduccionActiva
+    path_template: \\192.168.8.236\repositorio\ELLiS\Activa\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionTaiyari
+    project_key: ELLIS
+    profiles:
+    - ProduccionTaiyari
+    path_template: \\192.168.8.236\repositorio\ELLiS\Taiyari\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-ProduccionSmart
+    project_key: ELLIS
+    profiles:
+    - ProduccionSmart
+    path_template: \\192.168.8.236\repositorio\ELLiS\Smart\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-Desarrollo
+    project_key: ELLIS
+    profiles:
+    - Desarrollo
+    path_template: C:\Users\licen\Documents\Compiladores
+    hotfix_path_template: null
+  - name: ProduccionCentral
+    project_key: ELLIS
+    profiles:
+    - ProduccionCentral
+    path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\versiones\{version}\Clear
+      Leasing
+    hotfix_path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Clear
+      Leasing
+  - name: ProduccionTactical
+    project_key: ELLIS
+    profiles:
+    - ProduccionTactical
+    path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\versiones\{version}\Tactical
+    hotfix_path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Tactical
+  - name: ProduccionCapital
+    project_key: ELLIS
+    profiles:
+    - ProduccionCapital
+    path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\versiones\{version}\Capital
+    hotfix_path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Capital
+- key: GSA
+  repos:
+    GSA: C:/Proyectos/GSA
+  output_base: C:/Users/licen/Documents/Compiladores/Paquetes/GSA
+  profiles:
+  - ProduccionGSA
+  - Desarrollo
+  projects:
+  - key: GSA
+    modules:
+    - version_files: []
+      name: lease-commons
+      path: Lease-Commons
+      goals:
+      - clean
+      - install
+      optional: true
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: true
+      run_once: true
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: core
+      path: core
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: ellis
+      path: ellis
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: ellis_admin
+      path: ellis_admin
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: true
+      copy_to_profile_ui: false
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: ui-ellis
+      path: ui-ellis
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: false
+      copy_to_profile_ui: true
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    - version_files: []
+      name: ui-ellis_vonmex
+      path: ui-ellis
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: false
+      copy_to_profile_ui: true
+      copy_to_subfolder: null
+      rename_jar_to: null
+      no_profile: false
+      run_once: false
+      select_pattern: null
+      serial_across_profiles: false
+      copy_to_root: false
+    profiles: null
+    execution_mode: integrated
+    workspace: null
+    repo: GSA
+  deploy_targets:
+  - name: Auto-ProduccionGSA
+    project_key: GSA
+    profiles:
+    - ProduccionGSA
+    path_template: \\192.168.8.236\repositorio\ELLiS\GSA_Leasing\versiones\{version}\
+    hotfix_path_template: null
+  - name: Auto-Desarrollo
+    project_key: GSA
+    profiles:
+    - Desarrollo
+    path_template: C:\Users\licen\Documents\Compiladores
+    hotfix_path_template: null
+- key: fp-correos
+  repos:
+    fp-correos: C:\Proyectos\PDF
+  output_base: C:\Users\licen\Documents\Compiladores\Paquetes\PDF
+  profiles:
+  - desarrollo
+  - produccion
+  projects:
+  - key: fp-correos
+    modules:
+    - version_files: []
+      name: fp-correos
+      path: fp-correos
+      goals:
+      - clean
+      - package
+      optional: false
+      profile_override: null
+      only_if_profile_equals: null
+      copy_to_profile_war: false
+      copy_to_profile_ui: false
+      copy_to_subfolder: fp-correos
+      rename_jar_to: fp-correos
+      no_profile: true
+      run_once: true
+      select_pattern: '*-jar-with-dependencies'
+      serial_across_profiles: false
+      copy_to_root: false
+    profiles: null
+    execution_mode: integrated
+    workspace: null
+    repo: fp-correos
+  deploy_targets:
+  - name: Auto-desarrollo
+    project_key: fp-correos
+    profiles:
+    - desarrollo
+    - produccion
+    path_template: \\192.168.8.236\repositorio\PDF\FPCorreos\versiones\{version}\
+    hotfix_path_template: \\192.168.8.236\repositorio\PDF\FPCorreos\versiones\{version}\
