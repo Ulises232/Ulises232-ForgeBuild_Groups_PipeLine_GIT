@@ -2,3 +2,5 @@
 wheels
 *__pycache__
 .venv
+_nas_dev/
+*.lock

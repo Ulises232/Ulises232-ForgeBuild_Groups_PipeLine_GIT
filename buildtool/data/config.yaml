@@ -1,3 +1,6 @@
+nas:
+  path: "C:\NAS"
+  timezone: "-06:00"
 paths:
   workspaces:
     PDF: C:/Proyectos/PDF
