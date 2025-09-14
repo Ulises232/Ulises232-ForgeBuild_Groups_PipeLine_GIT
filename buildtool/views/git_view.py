@@ -19,6 +19,9 @@ from ..core import errguard
 from ..core.bg import run_in_thread
 from ..core.discover import discover_status_fast
 from ..core.state import STATE
+from PySide6 import QtCore, QtWidgets
+import shiboken6
+from buildtool.core import errguard
 
 def safe_slot(fn: Callable):
     @wraps(fn)
@@ -29,6 +32,13 @@ def safe_slot(fn: Callable):
             self._dbg(f"!! {fn.__name__}: {e}")
             return None
     return wrapper
+
+def _is_valid_qobj(obj) -> bool:
+    try:
+        return obj is not None and shiboken6.isValid(obj)
+    except Exception:
+        return False
+
 
 class Logger(QObject):
     line = Signal(str)
@@ -239,38 +249,45 @@ class GitView(QWidget):
 
     def _refresh_history(self):
         self._dbg("_refresh_history: start")
+        if not _is_valid_qobj(self):
+            return
         try:
-            self.cboHistorySwitch.blockSignals(True); self.cboDeleteBranch.blockSignals(True)
+            # Usa QSignalBlocker para no olvidar desbloquear si hay excepciones
+            b1 = QtCore.QSignalBlocker(self.cboHistorySwitch)
+            b2 = QtCore.QSignalBlocker(self.cboDeleteBranch)
             self.cboHistorySwitch.clear(); self.cboDeleteBranch.clear()
             gkey, pkey = self._current_keys()
-            hist = STATE.get_history(gkey, pkey)
+            hist = STATE.get_history(gkey, pkey) or []
             for br in hist[:50]:
                 self.cboHistorySwitch.addItem(br)
                 self.cboDeleteBranch.addItem(br)
             self._dbg("_refresh_history: loaded")
         except Exception as e:
             self._dbg(f"_refresh_history: ERROR {e}")
-        finally:
-            self.cboHistorySwitch.blockSignals(False); self.cboDeleteBranch.blockSignals(False)
 
     def _refresh_summary(self):
         self._dbg("_refresh_summary: start")
+        if not _is_valid_qobj(self) or not _is_valid_qobj(self.tree):
+            return
         try:
             self.tree.setUpdatesEnabled(False)
             self.tree.clear()
+
             gkey, pkey = self._current_keys()
-            items = discover_status_fast(self.cfg, gkey, pkey)
+            items = discover_status_fast(self.cfg, gkey, pkey) or []
             for name, br, path in items:
                 locals_, remotes_ = STATE.get_presence(gkey, pkey, name)
                 current = STATE.get_current(gkey, pkey, name) or br or "?"
                 branches = sorted(set(locals_) | set(remotes_) | ({current} if current else set()))
                 if not branches:
                     branches = [current]
+
                 for b in branches:
-                    estado = "origin" if b in remotes_ else "local" if b in locals_ else "¿?"
+                    estado = "origin" if b in remotes_ else ("local" if b in locals_ else "¿?")
                     curflag = "Sí" if b == current else ""
-                    it = QTreeWidgetItem([name, b, estado, curflag])
+                    it = QtWidgets.QTreeWidgetItem([name, b, estado, curflag])
                     self.tree.addTopLevelItem(it)
+
             self.tree.resizeColumnToContents(0)
             self.tree.resizeColumnToContents(1)
             self.tree.resizeColumnToContents(2)
@@ -278,7 +295,8 @@ class GitView(QWidget):
         except Exception as e:
             self._dbg(f"_refresh_summary: ERROR {e}")
         finally:
-            self.tree.setUpdatesEnabled(True)
+            if _is_valid_qobj(self.tree):
+                self.tree.setUpdatesEnabled(True)
 
     # en buildtool/views/git_view.py (dentro de GitView)
     def _init_thread_store(self):
@@ -289,34 +307,56 @@ class GitView(QWidget):
         self._dbg(f"task start: {title}")
         th, worker = run_in_thread(fn, *args, **kwargs)
 
-        # Mantén referencia si quieres, pero con TRACKER ya no se pierden
+        # Si quieres conservar un callback de "done":
+        self._pending_done_cb = done_cb
+
+        # Señales (no toques UI aquí; sólo enruta a la UI con el slot)
         worker.progress.connect(self.logger.line.emit)
 
-        def _on_finish(ok: bool, _th=th, _worker=worker, _title=title):
-            try:
-                self._dbg(f"task end: {_title} ok={ok}")
-                self._refresh_history()
-                self._refresh_summary()
-                if done_cb:
-                    done_cb(ok)
-            finally:
-                try:
-                    _th.quit()
-                    _th.wait()
-                finally:
-                    try:
-                        _worker.deleteLater()
-                    except Exception:
-                        pass
-                    try:
-                        _th.deleteLater()
-                    except Exception:
-                        pass
-                    from buildtool.core.thread_tracker import TRACKER
-                    TRACKER.remove(_th)
+        # Conexión QUEUED garantiza que el slot se ejecute en el hilo del receptor (self = UI)
+        worker.finished.connect(self._on_task_finish, QtCore.Qt.QueuedConnection)
 
-        worker.finished.connect(_on_finish)
+        # Limpieza del hilo/worker cuando termine (sin tocar UI)
+        def _cleanup():
+            try:
+                th.quit()
+                th.wait()
+            except Exception:
+                pass
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            try:
+                th.deleteLater()
+            except Exception:
+                pass
+            try:
+                from buildtool.core.thread_tracker import TRACKER
+                TRACKER.remove(th)
+            except Exception:
+                pass
+
+        worker.finished.connect(_cleanup, QtCore.Qt.QueuedConnection)
         th.start()
+
+    @QtCore.Slot(bool)
+    def _on_task_finish(self, ok: bool):
+        """Este slot SIEMPRE corre en el hilo de la UI (QueuedConnection)."""
+        try:
+            self._dbg(f"task end (slot): ok={ok}")
+            # Toca UI sólo aquí (hilo principal):
+            self._refresh_history()
+            self._refresh_summary()
+            # Si tu _start_task quiere permitir callbacks externos:
+            cb = getattr(self, "_pending_done_cb", None)
+            if cb:
+                try:
+                    cb(ok)
+                finally:
+                    self._pending_done_cb = None
+        except Exception as e:
+            errguard.log(f"_on_task_finish error: {e}", level=40)
 
 
     def _set_task_buttons_enabled(self, enabled: bool):
