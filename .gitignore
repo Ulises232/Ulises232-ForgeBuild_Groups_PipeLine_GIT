@@ -1,3 +1,4 @@
 .forgebuild
 wheels
 *__pycache__
+.venv
