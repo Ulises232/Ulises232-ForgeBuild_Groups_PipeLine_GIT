@@ -110,7 +110,6 @@ def apply_environment(cfg: Config) -> None:
 
     _APPLIED_ENV_KEYS = set(env_map.keys())
 
-
 def load_config() -> Config:
     cfg_path = _cfg_file()
     if cfg_path.exists():
@@ -123,6 +122,7 @@ def load_config() -> Config:
     if _PACKAGE_CFG_FILE.exists():
         with open(_PACKAGE_CFG_FILE, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
+
         cfg = Config(**data)
         try:
             cfg_path.parent.mkdir(parents=True, exist_ok=True)
@@ -146,5 +146,6 @@ def save_config(cfg: Config) -> str:
     with open(cfg_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
     apply_environment(cfg)
+
     return str(cfg_path)
 
