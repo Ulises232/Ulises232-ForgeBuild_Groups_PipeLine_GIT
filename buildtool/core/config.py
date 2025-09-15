@@ -7,6 +7,7 @@ import yaml, pathlib
 class Paths(BaseModel):
     workspaces: Dict[str, str] = Field(default_factory=dict)
     output_base: str = ""
+    nas_dir: str = ""
 
 class Module(BaseModel):
     version_files: List[str] = Field(default_factory=list)  # archivos relativos al módulo para actualizar versión
@@ -67,7 +68,7 @@ def load_config() -> Config:
             data = yaml.safe_load(f) or {}
         return Config(**data)
     # default
-    return Config(paths=Paths(workspaces={}, output_base=""))
+    return Config(paths=Paths(workspaces={}, output_base="", nas_dir=""))
 
 def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()

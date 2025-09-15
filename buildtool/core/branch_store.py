@@ -6,6 +6,7 @@ import json
 import os
 import time
 
+from .config import load_config
 # ---------------- paths helpers -----------------
 
 def _root_dir() -> Path:
@@ -16,13 +17,20 @@ def _root_dir() -> Path:
 
 
 def _state_dir() -> Path:
-    d = _root_dir() / ".forgebuild"
+    base = os.environ.get("APPDATA")
+    if base:
+        d = Path(base) / "forgebuild"
+    else:
+        d = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "forgebuild"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def _nas_dir() -> Path:
-    base = os.environ.get("NAS_DIR")
+    cfg = load_config()
+    base = getattr(getattr(cfg, "paths", {}), "nas_dir", "")
+    if not base:
+        base = os.environ.get("NAS_DIR")
     if not base:
         base = str(_root_dir() / "_nas_dev")
     p = Path(base)
@@ -125,7 +133,7 @@ def record_activity(action: str, rec: BranchRecord, result: str = "ok", message:
 
 # ---------------- basic mutations -----------------
 
-def upsert(rec: BranchRecord, index: Optional[Index] = None) -> Index:
+def upsert(rec: BranchRecord, index: Optional[Index] = None, action: str = "upsert") -> Index:
     idx = index or load_index()
     now = int(time.time())
     rec.last_updated_at = now
@@ -133,7 +141,7 @@ def upsert(rec: BranchRecord, index: Optional[Index] = None) -> Index:
         rec.created_at = now
     idx[rec.key()] = rec
     save_index(idx)
-    record_activity("upsert", rec)
+    record_activity(action, rec)
     return idx
 
 

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Optional, Iterable, Tuple, List, Iterator
 import os
 import subprocess
+import getpass
 
+from buildtool.core.branch_store import BranchRecord, load_index, upsert, remove
 from buildtool.core.git_console_trace import clog
 
 # --------------------- helpers de salida y ejecución ---------------------
@@ -44,6 +46,19 @@ def _run(cmd: List[str], cwd: Path, emit=None) -> Tuple[int, str]:
     rc = p.wait()
     _out(emit, f"[rc={rc}] {' '.join(cmd)}")
     return rc, out
+
+
+def _current_user() -> str:
+    return os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+
+
+def _get_record(index, gkey, pkey, branch) -> BranchRecord:
+    key = f"{gkey or ''}/{pkey or ''}/{branch}"
+    rec = index.get(key)
+    if not rec:
+        user = _current_user()
+        rec = BranchRecord(branch=branch, group=gkey, project=pkey, created_by=user, last_updated_by=user)
+    return rec
 
 
 def _is_git_repo(path: Path, emit=None) -> bool:
@@ -200,6 +215,13 @@ def create_branches_local(
             ok_all = False
         else:
             _out(emit, f"[{mname}] ✅ rama lista: {bname}")
+    if ok_all:
+        idx = load_index()
+        rec = _get_record(idx, gkey, pkey, bname)
+        rec.exists_local = True
+        rec.last_action = "create_local"
+        rec.last_updated_by = _current_user()
+        upsert(rec, idx, action="create_local")
     return ok_all
 
 
@@ -237,6 +259,13 @@ def switch_branch(
                 _out(emit, f"[{mname}] ✅ switch con checkout: {bname}")
         else:
             _out(emit, f"[{mname}] ✅ switch: {bname}")
+    if ok_all:
+        idx = load_index()
+        rec = _get_record(idx, gkey, pkey, bname)
+        rec.exists_local = True
+        rec.last_action = "switch"
+        rec.last_updated_by = _current_user()
+        upsert(rec, idx, action="switch")
     return ok_all
 
 
@@ -263,6 +292,33 @@ def delete_local_branch_by_name(
             ok_all = False
         else:
             _out(emit, f"[{mname}] 🗑️ rama eliminada: {bname}")
+
+    exists_local = False
+    exists_origin = False
+    for mname, mpath in repos:
+        if _is_git_repo(mpath):
+            rc, _ = _run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{bname}"], mpath)
+            if rc == 0:
+                exists_local = True
+            rc2, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], mpath)
+            if rc2 == 0:
+                exists_origin = True
+
+    idx = load_index()
+    key_rec = f"{gkey or ''}/{pkey or ''}/{bname}"
+    rec = idx.get(key_rec)
+    if exists_origin:
+        if not rec:
+            rec = BranchRecord(branch=bname, group=gkey, project=pkey, created_by=_current_user())
+        rec.exists_local = exists_local
+        rec.exists_origin = True
+        rec.last_action = "delete_local" if not exists_local else rec.last_action
+        rec.last_updated_by = _current_user()
+        upsert(rec, idx, action="delete_local" if not exists_local else "update")
+    else:
+        if rec:
+            rec.last_updated_by = _current_user()
+            remove(rec, idx)
     return ok_all
 
 
@@ -275,6 +331,20 @@ def push_branch(
         raise RuntimeError("Nombre de rama vacío en push.")
 
     repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
+    if repos:
+        first = repos[0][1]
+        if _is_git_repo(first):
+            rc, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], first)
+            if rc == 0:
+                _out(emit, f"La rama ya existe en origin: {bname}")
+                idx = load_index()
+                rec = _get_record(idx, gkey, pkey, bname)
+                rec.exists_local = True
+                rec.exists_origin = True
+                rec.last_action = "push_skip"
+                rec.last_updated_by = _current_user()
+                upsert(rec, idx, action="push_skip")
+                return False
     ok_all = True
     for mname, mpath in repos:
         if not _is_git_repo(mpath, emit=emit):
@@ -288,4 +358,20 @@ def push_branch(
             ok_all = False
         else:
             _out(emit, f"[{mname}] ☁️ push origin {bname}")
+
+    exists_origin = False
+    for _, mpath in repos:
+        if _is_git_repo(mpath):
+            rc, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], mpath)
+            if rc == 0:
+                exists_origin = True
+                break
+
+    idx = load_index()
+    rec = _get_record(idx, gkey, pkey, bname)
+    rec.exists_local = True
+    rec.exists_origin = exists_origin
+    rec.last_action = "push_origin" if ok_all else "push_failed"
+    rec.last_updated_by = _current_user()
+    upsert(rec, idx, action=rec.last_action)
     return ok_all
