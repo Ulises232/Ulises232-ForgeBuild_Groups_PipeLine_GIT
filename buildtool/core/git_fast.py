@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional, List
+import subprocess
 
 def _resolve_gitdir(repo: Path) -> Optional[Path]:
     git_path = repo / ".git"
@@ -20,20 +21,34 @@ def _resolve_gitdir(repo: Path) -> Optional[Path]:
     return None
 
 def get_current_branch_fast(repo: Path) -> Optional[str]:
+    # Prefer invoking git directly to ensure the branch matches the working tree
+    try:
+        out = subprocess.check_output(
+            ["git", "branch", "--show-current"],
+            cwd=str(repo),
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        br = out.strip()
+        if br:
+            return br
+    except Exception:
+        pass
+    # Fallback to reading HEAD manually
     g = _resolve_gitdir(repo)
     if not g:
         return None
     head = g / "HEAD"
     try:
         txt = head.read_text(encoding="utf-8", errors="ignore").strip()
+        if txt.startswith("ref:"):
+            ref = txt.split("ref:", 1)[1].strip()
+            if ref.startswith("refs/heads/"):
+                return ref.split("refs/heads/", 1)[1]
+            return ref
+        return "(detached)"
     except Exception:
         return None
-    if txt.startswith("ref:"):
-        ref = txt.split("ref:",1)[1].strip()
-        if ref.startswith("refs/heads/"):
-            return ref.split("refs/heads/",1)[1]
-        return ref
-    return "(detached)"
 
 def list_local_branches_fast(repo: Path) -> List[str]:
     g = _resolve_gitdir(repo)
