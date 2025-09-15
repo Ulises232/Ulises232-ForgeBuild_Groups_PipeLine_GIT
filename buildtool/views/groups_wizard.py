@@ -637,8 +637,40 @@ class GroupEditor(QWidget):
     def _load_group(self):
         key = self.cboGroup.currentData()
         grp = self._find_group(key)
+        prev_group = getattr(self, "group", None)
+        prev_project_key: Optional[str] = None
+        prev_target_name: Optional[str] = None
+        if (
+            prev_group
+            and grp
+            and prev_group.key == grp.key
+            and 0 <= self._current_project_row < len(prev_group.projects or [])
+        ):
+            prev_project_key = prev_group.projects[self._current_project_row].key
+        if (
+            prev_group
+            and grp
+            and prev_group.key == grp.key
+            and 0 <= self._current_target_row < len(prev_group.deploy_targets or [])
+        ):
+            prev_target_name = prev_group.deploy_targets[self._current_target_row].name
+
         self.group = grp
+        self._current_project_row = -1
+        self._current_target_row = -1
+
         if not grp:
+            self.lstRepos.clear(); self.txtRepoKey.clear(); self.txtRepoPath.clear()
+            self.txtOutputBase.clear()
+            self.lstProfiles.clear(); self.txtProfile.clear()
+            self.lstProjects.clear()
+            self.projectEditor.set_from_project(Project(key="", repo="", execution_mode="integrated", modules=[]))
+            self.lstTargets.clear()
+            empty_editor = TargetRow(None, self.cfg)
+            self._deploy_layout.replaceWidget(self.targetEditor, empty_editor)
+            self.targetEditor.setParent(None)
+            self.targetEditor.deleteLater()
+            self.targetEditor = empty_editor
             return
 
         # General
@@ -653,37 +685,66 @@ class GroupEditor(QWidget):
             self.lstProfiles.addItem(QListWidgetItem(p))
         self.txtProfile.clear()
 
+        # actualizar combo de repo del projectEditor antes de cargar proyecto
+        self.projectEditor._group = grp
+        self.projectEditor.cboRepo.blockSignals(True)
+        self.projectEditor.cboRepo.clear()
+        for rk in (grp.repos or {}).keys():
+            self.projectEditor.cboRepo.addItem(rk, rk)
+        self.projectEditor.cboRepo.blockSignals(False)
+
         # Proyectos
+        desired_project_idx = 0
+        if prev_project_key:
+            for idx, proj in enumerate(grp.projects or []):
+                if proj.key == prev_project_key:
+                    desired_project_idx = idx
+                    break
+        self.lstProjects.blockSignals(True)
         self.lstProjects.clear()
         for p in (grp.projects or []):
             self.lstProjects.addItem(QListWidgetItem(p.key))
-        self.projectEditor._group = grp
-        self._current_project_row = 0 if grp.projects else -1
         if grp.projects:
-            self.lstProjects.setCurrentRow(0)
-            self.projectEditor.set_from_project(grp.projects[0])
+            self.lstProjects.setCurrentRow(desired_project_idx)
         else:
+            self.lstProjects.clearSelection()
+        self.lstProjects.blockSignals(False)
+
+        if grp.projects:
+            self._current_project_row = desired_project_idx
+            self.projectEditor.set_from_project(grp.projects[desired_project_idx])
+        else:
+            self._current_project_row = -1
             self.projectEditor.set_from_project(Project(key="", repo="", execution_mode="integrated", modules=[]))
 
         # Deploy
+        desired_target_idx = 0
+        if prev_target_name:
+            for idx, target in enumerate(grp.deploy_targets or []):
+                if target.name == prev_target_name:
+                    desired_target_idx = idx
+                    break
+        self.lstTargets.blockSignals(True)
         self.lstTargets.clear()
         for t in (grp.deploy_targets or []):
             self.lstTargets.addItem(QListWidgetItem(t.name))
-        # Asegurar que el editor corresponde al grupo actual
+        if grp.deploy_targets:
+            self.lstTargets.setCurrentRow(desired_target_idx)
+        else:
+            self.lstTargets.clearSelection()
+        self.lstTargets.blockSignals(False)
+
         new_editor = TargetRow(grp, self.cfg)
         self._deploy_layout.replaceWidget(self.targetEditor, new_editor)
         self.targetEditor.setParent(None)
         self.targetEditor.deleteLater()
         self.targetEditor = new_editor
-        self._current_target_row = 0 if grp.deploy_targets else -1
-        if grp.deploy_targets:
-            self.lstTargets.setCurrentRow(0)
-            self.targetEditor.set_from_target(grp.deploy_targets[0])
 
-        # actualizar combo de repo del projectEditor
-        self.projectEditor.cboRepo.clear()
-        for rk in (grp.repos or {}).keys():
-            self.projectEditor.cboRepo.addItem(rk, rk)
+        if grp.deploy_targets:
+            self._current_target_row = desired_target_idx
+            self.targetEditor.set_from_target(grp.deploy_targets[desired_target_idx])
+        else:
+            self._current_target_row = -1
 
     # --------------- Repos ---------------
 
