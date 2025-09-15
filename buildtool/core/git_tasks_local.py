@@ -9,7 +9,13 @@ import os
 import subprocess
 import getpass
 
-from buildtool.core.branch_store import BranchRecord, load_index, upsert, remove
+from buildtool.core.branch_store import (
+    BranchRecord,
+    load_index,
+    upsert,
+    remove,
+    record_activity,
+)
 from buildtool.core.git_console_trace import clog
 
 # --------------------- helpers de salida y ejecución ---------------------
@@ -292,6 +298,16 @@ def delete_local_branch_by_name(
             ok_all = False
         else:
             _out(emit, f"[{mname}] 🗑️ rama eliminada: {bname}")
+    idx = load_index()
+    key_rec = f"{gkey or ''}/{pkey or ''}/{bname}"
+    rec = idx.get(key_rec)
+    if not ok_all:
+        if rec:
+            rec.last_updated_by = _current_user()
+            record_activity(
+                "delete_local", rec, result="error", message="git branch delete failed"
+            )
+        return False
 
     exists_local = False
     exists_origin = False
@@ -303,10 +319,6 @@ def delete_local_branch_by_name(
             rc2, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], mpath)
             if rc2 == 0:
                 exists_origin = True
-
-    idx = load_index()
-    key_rec = f"{gkey or ''}/{pkey or ''}/{bname}"
-    rec = idx.get(key_rec)
     if exists_origin:
         if not rec:
             rec = BranchRecord(branch=bname, group=gkey, project=pkey, created_by=_current_user())
@@ -319,7 +331,8 @@ def delete_local_branch_by_name(
         if rec:
             rec.last_updated_by = _current_user()
             remove(rec, idx)
-    return ok_all
+    return True
+
 
 
 def push_branch(
