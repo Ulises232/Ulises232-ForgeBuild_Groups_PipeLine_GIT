@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import List, Optional
+from typing import List, Optional, Dict
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QPushButton, QComboBox, QListWidget, QListWidgetItem,
-    QFileDialog, QMessageBox, QCheckBox, QSplitter, QTabWidget
+    QFileDialog, QMessageBox, QCheckBox, QSplitter, QTabWidget, QGroupBox
 )
 import yaml
 from ..core.config import (
@@ -380,6 +380,37 @@ class GroupEditor(QWidget):
         nas_row.addWidget(self.btnNasExport)
         main.addLayout(nas_row)
 
+        # Environment variables editor
+        env_box = QGroupBox("Variables de entorno (globales)")
+        env_grid = QGridLayout(env_box)
+        env_grid.setHorizontalSpacing(8)
+        env_grid.setVerticalSpacing(6)
+
+        self.lstEnv = QListWidget()
+        env_grid.addWidget(self.lstEnv, 0, 0, 4, 1)
+
+        env_form = QGridLayout()
+        env_form.setHorizontalSpacing(6)
+        env_form.setVerticalSpacing(6)
+        self.txtEnvKey = QLineEdit(); self.txtEnvKey.setPlaceholderText("HERR_REPO")
+        self.txtEnvValue = QLineEdit(); self.txtEnvValue.setPlaceholderText(r"C:\\Proyectos\\...")
+        env_form.addWidget(QLabel("Variable:"), 0, 0); env_form.addWidget(self.txtEnvKey, 0, 1)
+        env_form.addWidget(QLabel("Valor:"), 1, 0); env_form.addWidget(self.txtEnvValue, 1, 1)
+
+        env_btns = QHBoxLayout()
+        self.btnEnvSave = QPushButton("Guardar variable")
+        self.btnEnvDelete = QPushButton("Eliminar")
+        self.btnEnvClear = QPushButton("Limpiar campos")
+        env_btns.addWidget(self.btnEnvSave)
+        env_btns.addWidget(self.btnEnvDelete)
+        env_btns.addWidget(self.btnEnvClear)
+        env_btns.addStretch(1)
+        env_form.addLayout(env_btns, 2, 0, 1, 2)
+
+        env_grid.addLayout(env_form, 0, 1, 4, 1)
+        main.addWidget(env_box)
+
+
         # Top: selector de grupo
         top = QHBoxLayout()
         self.cboGroup = QComboBox()
@@ -528,7 +559,17 @@ class GroupEditor(QWidget):
         self.btnNasExport.clicked.connect(self._export_cfg)
         self.txtNasDir.editingFinished.connect(self._save_nas_dir)
 
+        self.lstEnv.currentRowChanged.connect(self._load_env_row)
+        self.btnEnvSave.clicked.connect(self._save_env_entry)
+        self.btnEnvDelete.clicked.connect(self._del_env_entry)
+        self.btnEnvClear.clicked.connect(self._clear_env_fields)
+        self.txtEnvValue.editingFinished.connect(self._auto_apply_env_value)
+        self.txtEnvKey.editingFinished.connect(self._auto_rename_env_key)
+
         self.tabs.currentChanged.connect(lambda _: self._save(silent=True))
+
+        self._refresh_env_list()
+
 
         # init groups
         for g in (self.cfg.groups or []):
@@ -536,6 +577,129 @@ class GroupEditor(QWidget):
         if self.cfg.groups:
             self.cboGroup.setCurrentIndex(0)
             self._load_group()
+
+    # --------------- Environment vars ---------------
+
+    def _env_map(self) -> Dict[str, str]:
+        env = getattr(self.cfg, "environment", None)
+        if env is None:
+            env = {}
+            self.cfg.environment = env
+        return env
+
+    def _refresh_env_list(self, select_key: Optional[str] = None):
+        env = self._env_map()
+        items = sorted(env.items(), key=lambda kv: kv[0].lower())
+        self.lstEnv.blockSignals(True)
+        self.lstEnv.clear()
+        for key, value in items:
+            label = f"{key} = {value}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, key)
+            self.lstEnv.addItem(item)
+        self.lstEnv.blockSignals(False)
+        if select_key:
+            self._select_env_key(select_key)
+        elif self.lstEnv.count():
+            self.lstEnv.setCurrentRow(0)
+        else:
+            self._clear_env_fields()
+
+    def _select_env_key(self, key: str):
+        for row in range(self.lstEnv.count()):
+            item = self.lstEnv.item(row)
+            if item.data(Qt.UserRole) == key:
+                self.lstEnv.setCurrentRow(row)
+                return
+
+    def _load_env_row(self, row: int):
+        env = self._env_map()
+        if row < 0 or row >= self.lstEnv.count():
+            self.txtEnvKey.clear(); self.txtEnvValue.clear()
+            return
+        item = self.lstEnv.item(row)
+        key = item.data(Qt.UserRole) or ""
+        self.txtEnvKey.setText(key)
+        self.txtEnvValue.setText(env.get(key, ""))
+
+    def _save_env_entry(self):
+        key = self.txtEnvKey.text().strip()
+        if not key:
+            QMessageBox.warning(self, "Variables", "Escribe el nombre de la variable.")
+            return
+        value = self.txtEnvValue.text()
+        env = dict(self._env_map())
+        row = self.lstEnv.currentRow()
+        if row >= 0:
+            item = self.lstEnv.item(row)
+            old_key = item.data(Qt.UserRole)
+            if old_key and old_key != key and old_key in env:
+                del env[old_key]
+        env[key] = value
+        self.cfg.environment = env
+        save_config(self.cfg)
+        self._refresh_env_list(select_key=key)
+
+    def _del_env_entry(self):
+        row = self.lstEnv.currentRow()
+        if row < 0:
+            self.txtEnvKey.clear(); self.txtEnvValue.clear()
+            return
+        item = self.lstEnv.item(row)
+        key = item.data(Qt.UserRole)
+        if not key:
+            return
+        env = dict(self._env_map())
+        if key in env:
+            del env[key]
+        self.cfg.environment = env
+        save_config(self.cfg)
+        self._refresh_env_list()
+
+    def _clear_env_fields(self):
+        self.lstEnv.clearSelection()
+        self.txtEnvKey.clear()
+        self.txtEnvValue.clear()
+
+    def _auto_apply_env_value(self):
+        row = self.lstEnv.currentRow()
+        if row < 0:
+            return
+        item = self.lstEnv.item(row)
+        key = item.data(Qt.UserRole)
+        if not key:
+            return
+        env = dict(self._env_map())
+        value = self.txtEnvValue.text()
+        if env.get(key, "") == value:
+            return
+        env[key] = value
+        self.cfg.environment = env
+        save_config(self.cfg)
+        self._refresh_env_list(select_key=key)
+
+    def _auto_rename_env_key(self):
+        row = self.lstEnv.currentRow()
+        if row < 0:
+            return
+        item = self.lstEnv.item(row)
+        old_key = item.data(Qt.UserRole)
+        if not old_key:
+            return
+        new_key = self.txtEnvKey.text().strip()
+        if not new_key or new_key == old_key:
+            return
+        env = dict(self._env_map())
+        if new_key in env and new_key != old_key:
+            QMessageBox.warning(self, "Variables", "Ya existe una variable con ese nombre.")
+            self.txtEnvKey.setText(old_key)
+            return
+        value = self.txtEnvValue.text()
+        env.pop(old_key, None)
+        env[new_key] = value
+        self.cfg.environment = env
+        save_config(self.cfg)
+        self._refresh_env_list(select_key=new_key)
 
     # --------------- Group handlers ---------------
 
@@ -626,12 +790,15 @@ class GroupEditor(QWidget):
         if hasattr(self.window(), "_cfg"):
             self.window()._cfg = self.cfg
         self.txtNasDir.setText(getattr(getattr(self.cfg, "paths", {}), "nas_dir", ""))
+        self.projectEditor._cfg = self.cfg
         self.cboGroup.clear()
         for g in (self.cfg.groups or []):
             self.cboGroup.addItem(g.key, g.key)
         if self.cfg.groups:
             self.cboGroup.setCurrentIndex(0)
         self._load_group()
+        self._refresh_env_list()
+
         save_config(self.cfg)
 
     def _export_cfg(self):
@@ -675,6 +842,7 @@ class GroupEditor(QWidget):
         self._current_project_row = -1
         self._current_target_row = -1
 
+        self.projectEditor._cfg = self.cfg
         if not grp:
             self.lstRepos.clear(); self.txtRepoKey.clear(); self.txtRepoPath.clear()
             self.txtOutputBase.clear()

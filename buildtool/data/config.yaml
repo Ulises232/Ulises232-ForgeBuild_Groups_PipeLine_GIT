@@ -3,6 +3,7 @@ paths:
   workspaces:
     PDF: C:/Proyectos/PDF
   output_base: C:/Users/licen/Documents/Compiladores/Paquetes
+environment: {}
 artifact_patterns:
 - '*.war'
 - '*.jar'

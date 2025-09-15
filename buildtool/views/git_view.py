@@ -37,7 +37,6 @@ from PySide6 import QtCore, QtWidgets
 from datetime import datetime
 from ..core.git_fast import get_current_branch_fast
 import shiboken6
-from buildtool.core import errguard
 from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
 
 def safe_slot(fn: Callable):
@@ -233,7 +232,7 @@ class GitView(QWidget):
         clog_layout.addLayout(hcl)
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
-    
+
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
         self.btnRefresh.clicked.connect(self._post_project_change)
@@ -429,7 +428,6 @@ class GitView(QWidget):
             self.treeHist.resizeColumnToContents(0)
             self.treeHist.resizeColumnToContents(1)
             self.treeHist.resizeColumnToContents(2)
-
         except Exception as e:
             self._dbg(f"_refresh_branch_index: ERROR {e}")
         finally:
