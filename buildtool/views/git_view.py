@@ -5,8 +5,22 @@ import os
 from pathlib import Path
 from functools import wraps
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QGridLayout, QLabel, QComboBox, QLineEdit,
-    QPushButton, QCheckBox, QTextEdit, QHBoxLayout, QGroupBox, QTreeWidget, QTreeWidgetItem, QApplication
+    QWidget,
+    QVBoxLayout,
+    QGridLayout,
+    QLabel,
+    QComboBox,
+    QLineEdit,
+    QPushButton,
+    QCheckBox,
+    QTextEdit,
+    QHBoxLayout,
+    QGroupBox,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QApplication,
+    QTabWidget,
+    QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from ..core.config import Config
@@ -20,6 +34,8 @@ from ..core.bg import run_in_thread
 from ..core.discover import discover_status_fast
 from ..core.state import STATE
 from PySide6 import QtCore, QtWidgets
+from datetime import datetime
+from ..core.git_fast import get_current_branch_fast
 import shiboken6
 from buildtool.core import errguard
 from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
@@ -85,59 +101,129 @@ class GitView(QWidget):
         if note:
             self.logger.line.emit(note)
 
+    def _alert(self, msg: str, error: bool = False):
+        try:
+            if error:
+                QMessageBox.critical(self, "Git", msg)
+            else:
+                QMessageBox.information(self, "Git", msg)
+        except Exception:
+            self._dbg(f"ALERT: {msg}")
+
     def _setup_ui(self):
-        root = QVBoxLayout(self); root.setContentsMargins(8,8,8,8); root.setSpacing(8)
-        top = QGridLayout(); top.setHorizontalSpacing(8); top.setVerticalSpacing(6)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+
+        tabs = QTabWidget()
+        root.addWidget(tabs, 1)
+
+        main = QWidget()
+        tabs.addTab(main, "Repos Git")
+        top_wrap = QVBoxLayout(main)
+
+        proj = QGridLayout()
+        proj.setHorizontalSpacing(8)
+        proj.setVerticalSpacing(6)
         row = 0
-        top.addWidget(QLabel("Proyecto:"), row, 0)
-        self.cboProject = QComboBox(); top.addWidget(self.cboProject, row, 1); row += 1
+        proj.addWidget(QLabel("Proyecto:"), row, 0)
+        self.cboProject = QComboBox(); proj.addWidget(self.cboProject, row, 1); row += 1
 
-        self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual."); top.addWidget(self.lblScope, row, 0, 1, 4); row += 1
+        self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual."); proj.addWidget(self.lblScope, row, 0, 1, 4); row += 1
+        self.lblCurrent = QLabel("Rama actual: ?"); proj.addWidget(self.lblCurrent, row, 0, 1, 4); row += 1
+        top_wrap.addLayout(proj)
 
+        ops = QGroupBox("Acciones de ramas")
+        opsl = QGridLayout(ops)
+        opsl.setHorizontalSpacing(8)
+        opsl.setVerticalSpacing(6)
+        opsl.setColumnStretch(0, 1)
+        opsl.setColumnStretch(1, 1)
+
+        # switch
         self.cboHistorySwitch = QComboBox(); self.cboHistorySwitch.setEditable(True)
         self.btnSwitch = QPushButton("Switch (global)")
-        hs = QHBoxLayout(); hs.addWidget(QLabel("Rama:")); hs.addWidget(self.cboHistorySwitch, 1); hs.addWidget(self.btnSwitch)
-        top.addLayout(hs, row, 0, 1, 4); row += 1
+        grp_switch = QGroupBox("Cambiar a otra rama")
+        hs = QHBoxLayout(grp_switch)
+        hs.addWidget(self.cboHistorySwitch, 1); hs.addWidget(self.btnSwitch)
 
+        # create / push
         self.txtNewBranch = QLineEdit(); self.txtNewBranch.setPlaceholderText("Nombre de la nueva rama")
-        self.btnCreateLocal = QPushButton("Crear rama (local, global)"); self.btnPushBranch = QPushButton("Push rama (global)")
-        hnew = QHBoxLayout(); hnew.addWidget(QLabel("Nueva rama:")); hnew.addWidget(self.txtNewBranch, 1); hnew.addWidget(self.btnCreateLocal); hnew.addWidget(self.btnPushBranch)
-        top.addLayout(hnew, row, 0, 1, 4); row += 1
+        self.btnCreateLocal = QPushButton("Crear (local, global)")
+        self.btnPushBranch = QPushButton("Push (global)")
+        grp_new = QGroupBox("Nueva rama")
+        hnew = QHBoxLayout(grp_new)
+        hnew.addWidget(self.txtNewBranch, 1); hnew.addWidget(self.btnCreateLocal); hnew.addWidget(self.btnPushBranch)
 
+        # delete
         self.cboDeleteBranch = QComboBox(); self.cboDeleteBranch.setEditable(True)
         self.chkConfirmDelete = QCheckBox("Confirmar")
-        self.btnDeleteBranch = QPushButton("Eliminar rama local (global)")
-        hd = QHBoxLayout(); hd.addWidget(QLabel("Eliminar:")); hd.addWidget(self.cboDeleteBranch, 1); hd.addWidget(self.chkConfirmDelete); hd.addWidget(self.btnDeleteBranch)
-        top.addLayout(hd, row, 0, 1, 4); row += 1
+        self.btnDeleteBranch = QPushButton("Eliminar local (global)")
+        grp_del = QGroupBox("Eliminar rama")
+        hd = QHBoxLayout(grp_del)
+        hd.addWidget(self.cboDeleteBranch, 1); hd.addWidget(self.chkConfirmDelete); hd.addWidget(self.btnDeleteBranch)
 
+        # version
         self.txtVersion = QLineEdit(); self.txtVersion.setPlaceholderText("3.00.17")
-        self.chkQA = QCheckBox("Crear *_QA"); self.btnRunCreateVersion = QPushButton("Crear ramas de versión (local, global)")
-        hv = QHBoxLayout(); hv.addWidget(QLabel("Versión:")); hv.addWidget(self.txtVersion, 1); hv.addWidget(self.chkQA); hv.addWidget(self.btnRunCreateVersion)
-        top.addLayout(hv, row, 0, 1, 4); row += 1
+        self.chkQA = QCheckBox("Crear *_QA")
+        self.btnRunCreateVersion = QPushButton("Crear ramas de versión (local, global)")
+        grp_ver = QGroupBox("Ramas de versión")
+        hv = QHBoxLayout(grp_ver)
+        hv.addWidget(self.txtVersion, 1); hv.addWidget(self.chkQA); hv.addWidget(self.btnRunCreateVersion)
 
-        self.btnRefresh = QPushButton("Refrescar vista"); self.btnReconcile = QPushButton("Reconciliar con Git (solo local)")
-        self.btnNasRecover = QPushButton("Recuperar NAS"); self.btnNasPublish = QPushButton("Publicar NAS")
-        hr = QHBoxLayout(); hr.addWidget(self.btnRefresh); hr.addWidget(self.btnNasRecover); hr.addWidget(self.btnNasPublish); hr.addStretch(); hr.addWidget(self.btnReconcile)
-        top.addLayout(hr, row, 0, 1, 4); row += 1
+        # arrange groups in a grid to reduce vertical space
+        opsl.addWidget(grp_switch, 0, 0)
+        opsl.addWidget(grp_new, 0, 1)
+        opsl.addWidget(grp_del, 1, 0)
+        opsl.addWidget(grp_ver, 1, 1)
 
-        gr = QGroupBox("Resumen de ramas (cache/local)")
+        # misc buttons
+        self.btnRefresh = QPushButton("Refrescar vista")
+        self.btnReconcile = QPushButton("Reconciliar con Git (solo local)")
+        self.btnNasRecover = QPushButton("Recuperar NAS")
+        self.btnNasPublish = QPushButton("Publicar NAS")
+        hr = QHBoxLayout()
+        hr.addWidget(self.btnRefresh)
+        hr.addWidget(self.btnNasRecover)
+        hr.addWidget(self.btnNasPublish)
+        hr.addStretch()
+        hr.addWidget(self.btnReconcile)
+        opsl.addLayout(hr, 2, 0, 1, 2)
+
+        top_wrap.addWidget(ops)
+
+        gr = QGroupBox("Módulos y ramas actuales")
         grl = QVBoxLayout(gr)
-        self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Módulo", "Rama", "Estado", "Actual"])
+        self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Módulo", "Rama actual"])
         self.tree.setRootIsDecorated(False); self.tree.setAlternatingRowColors(True)
         grl.addWidget(self.tree, 1)
-        top.addWidget(gr, row, 0, 1, 4); row += 1
+        top_wrap.addWidget(gr)
 
         grh = QGroupBox("Historial de ramas")
         grhl = QVBoxLayout(grh)
-        self.treeHist = QTreeWidget(); self.treeHist.setHeaderLabels(["Rama", "Local", "Origin", "Merge"])
-        self.treeHist.setRootIsDecorated(False); self.treeHist.setAlternatingRowColors(True)
+        self.treeHist = QTreeWidget()
+        self.treeHist.setHeaderLabels(["Rama", "Usuario", "Creación", "Local", "Origin", "Merge"])
+        self.treeHist.setRootIsDecorated(False)
+        self.treeHist.setAlternatingRowColors(True)
         grhl.addWidget(self.treeHist, 1)
-        top.addWidget(grh, row, 0, 1, 4); row += 1
+        top_wrap.addWidget(grh)
 
-        root.addLayout(top)
-        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setLineWrapMode(QTextEdit.NoWrap)
-        root.addWidget(self.log, 1)
-        self.logger = Logger(); self.logger.line.connect(self.log.append)
+        console = QWidget()
+        tabs.addTab(console, "Consola")
+        clog_layout = QVBoxLayout(console)
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setLineWrapMode(QTextEdit.NoWrap)
+        clog_layout.addWidget(self.log, 1)
+        self.btnClearLog = QPushButton("Limpiar")
+        hcl = QHBoxLayout()
+        hcl.addStretch()
+        hcl.addWidget(self.btnClearLog)
+        clog_layout.addLayout(hcl)
+
+        self.logger = Logger()
+        self.logger.line.connect(self.log.append)
+
 
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
@@ -150,6 +236,7 @@ class GitView(QWidget):
         self.btnRunCreateVersion.clicked.connect(self._do_create_version)
         self.btnNasRecover.clicked.connect(self._do_recover_nas)
         self.btnNasPublish.clicked.connect(self._do_publish_nas)
+        self.btnClearLog.clicked.connect(self.log.clear)
 
 
     def _load_projects_flat(self):
@@ -290,22 +377,18 @@ class GitView(QWidget):
 
             gkey, pkey = self._current_keys()
             items = discover_status_fast(self.cfg, gkey, pkey) or []
+            proj_current = None
             for name, br, path in items:
-                locals_, remotes_ = STATE.get_presence(gkey, pkey, name)
-                current = STATE.get_current(gkey, pkey, name) or br or "?"
-                branches = sorted(set(locals_) | set(remotes_) | ({current} if current else set()))
-                if not branches:
-                    branches = [current]
+                current = get_current_branch_fast(path) or br or "?"
+                STATE.set_current(gkey, pkey, name, current)
+                if proj_current is None:
+                    proj_current = current
+                it = QtWidgets.QTreeWidgetItem([name, current])
+                self.tree.addTopLevelItem(it)
 
-                for b in branches:
-                    estado = "origin" if b in remotes_ else ("local" if b in locals_ else "¿?")
-                    curflag = "Sí" if b == current else ""
-                    it = QtWidgets.QTreeWidgetItem([name, b, estado, curflag])
-                    self.tree.addTopLevelItem(it)
-
+            self.lblCurrent.setText(f"Rama actual: {proj_current or '?'}")
             self.tree.resizeColumnToContents(0)
             self.tree.resizeColumnToContents(1)
-            self.tree.resizeColumnToContents(2)
             self._dbg(f"_refresh_summary: {self.tree.topLevelItemCount()} rows")
         except Exception as e:
             self._dbg(f"_refresh_summary: ERROR {e}")
@@ -327,9 +410,17 @@ class GitView(QWidget):
             for rec in records:
                 loc = "Sí" if rec.exists_local else ""
                 orig = "Sí" if rec.exists_origin else ""
-                it = QtWidgets.QTreeWidgetItem([rec.branch, loc, orig, rec.merge_status])
+                fecha = ""
+                if rec.created_at:
+                    fecha = datetime.fromtimestamp(rec.created_at).strftime("%Y-%m-%d %H:%M")
+                it = QtWidgets.QTreeWidgetItem(
+                    [rec.branch, rec.created_by, fecha, loc, orig, rec.merge_status]
+                )
                 self.treeHist.addTopLevelItem(it)
             self.treeHist.resizeColumnToContents(0)
+            self.treeHist.resizeColumnToContents(1)
+            self.treeHist.resizeColumnToContents(2)
+
         except Exception as e:
             self._dbg(f"_refresh_branch_index: ERROR {e}")
         finally:
@@ -341,12 +432,13 @@ class GitView(QWidget):
         if not hasattr(self, "_live_threads"):
             self._live_threads = set()
 
-    def _start_task(self, title, fn, done_cb=None, *args, **kwargs):
+    def _start_task(self, title, fn, done_cb=None, *args, success: str | None = None, error: str | None = None, **kwargs):
         self._dbg(f"task start: {title}")
         th, worker = run_in_thread(fn, *args, **kwargs)
 
-        # Si quieres conservar un callback de "done":
         self._pending_done_cb = done_cb
+        self._pending_success = success
+        self._pending_error = error
 
         # Señales (no toques UI aquí; sólo enruta a la UI con el slot)
         worker.progress.connect(self.logger.line.emit)
@@ -383,20 +475,24 @@ class GitView(QWidget):
         """Este slot SIEMPRE corre en el hilo de la UI (QueuedConnection)."""
         try:
             self._dbg(f"task end (slot): ok={ok}")
-            # Toca UI sólo aquí (hilo principal):
             self._refresh_history()
             self._refresh_summary()
             self._refresh_branch_index()
-            # Si tu _start_task quiere permitir callbacks externos:
+
             cb = getattr(self, "_pending_done_cb", None)
             if cb:
                 try:
                     cb(ok)
                 finally:
                     self._pending_done_cb = None
+            msg = self._pending_success if ok else self._pending_error
+            if msg:
+                self._alert(msg, error=not ok)
         except Exception as e:
             errguard.log(f"_on_task_finish error: {e}", level=40)
-
+        finally:
+            self._pending_success = None
+            self._pending_error = None
 
     def _set_task_buttons_enabled(self, enabled: bool):
         for btn in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch, self.btnSwitch):
@@ -408,22 +504,26 @@ class GitView(QWidget):
     def _do_switch(self):
         branch = self.cboHistorySwitch.currentText().strip()
         if not branch:
-            self._dbg("_do_switch: empty"); return
+            self._alert("Especifica una rama", error=True); return
         gkey, pkey = self._current_keys()
         def _after():
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.set_current(gkey, pkey, name, branch)
             STATE.add_history(gkey, pkey, branch)
-        self._start_task(f"Switch a {branch} (global)",
+        self._start_task(
+            f"Switch a {branch} (global)",
             lambda cfg, gk, pk, br, emit=self.logger.line.emit: switch_branch(cfg, gk, pk, br, emit, only_modules=None),
-            _after, self.cfg, gkey, pkey, branch)
+            _after, self.cfg, gkey, pkey, branch,
+            success=f"Cambiaste a {branch}",
+            error=f"No se pudo cambiar a {branch}"
+        )
 
     @safe_slot
     def _do_create_local(self):
         gkey, pkey = self._current_keys()
         name = self.txtNewBranch.text().strip()
         if not name:
-            self._dbg("_do_create_local: empty"); return
+            self._alert("Indica el nombre de la rama", error=True); return
         
         def task(cfg, gk, pk, br, emit=self.logger.line.emit):
             emit(f"[task] Crear rama local '{br}' (global)")
@@ -431,42 +531,55 @@ class GitView(QWidget):
             emit("[task] DONE" if ok else "[task] DONE with errors")
             return ok
 
-        self._start_task(f"Crear rama local {name} (global)", task, None, self.cfg, gkey, pkey, name)
+        self._start_task(
+            f"Crear rama local {name} (global)",
+            task, None, self.cfg, gkey, pkey, name,
+            success=f"Rama {name} creada",
+            error=f"No se pudo crear {name}"
+        )
 
 
     @safe_slot
     def _do_push_branch(self):
         nb = self.txtNewBranch.text().strip() or self.cboHistorySwitch.currentText().strip()
         if not nb:
-            self._dbg("_do_push_branch: empty"); return
+            self._alert("Indica la rama a enviar", error=True); return
         gkey, pkey = self._current_keys()
         def _after():
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.add_remote(gkey, pkey, name, nb)
-        self._start_task(f"Push rama {nb} (global)",
+        self._start_task(
+            f"Push rama {nb} (global)",
             lambda cfg, gk, pk, name, emit=self.logger.line.emit: push_branch(cfg, gk, pk, name, emit, only_modules=None),
-            _after, self.cfg, gkey, pkey, nb)
+            _after, self.cfg, gkey, pkey, nb,
+            success=f"Rama {nb} enviada a origin",
+            error=f"No se pudo enviar {nb}"
+        )
 
     @safe_slot
     def _do_delete_branch(self):
         nb = self.cboDeleteBranch.currentText().strip()
         if not nb:
-            self._dbg("_do_delete_branch: empty"); return
+            self._alert("Indica la rama a eliminar", error=True); return
         if not self.chkConfirmDelete.isChecked():
-            self._dbg("_do_delete_branch: confirmar"); return
+            self._alert("Confirma la eliminación", error=True); return
         gkey, pkey = self._current_keys()
         def _after():
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.remove_local(gkey, pkey, name, nb)
-        self._start_task(f"Eliminar rama local {nb} (global)",
+        self._start_task(
+            f"Eliminar rama local {nb} (global)",
             lambda cfg, gk, pk, name, confirm, emit=self.logger.line.emit: delete_local_branch_by_name(cfg, gk, pk, name, confirm, emit, only_modules=None),
-            _after, self.cfg, gkey, pkey, nb, True)
+            _after, self.cfg, gkey, pkey, nb, True,
+            success=f"Rama {nb} eliminada",
+            error=f"No se pudo eliminar {nb}"
+        )
 
     @safe_slot
     def _do_create_version(self):
         ver = self.txtVersion.text().strip()
         if not ver:
-            self._dbg("_do_create_version: empty"); return
+            self._alert("Indica la versión", error=True); return
         create_qa = self.chkQA.isChecked()
         gkey, pkey = self._current_keys()
         def _after():
@@ -479,9 +592,13 @@ class GitView(QWidget):
             STATE.add_history(gkey, pkey, ver)
             if create_qa:
                 STATE.add_history(gkey, pkey, f"{ver}_QA")
-        self._start_task(f"Crear ramas versión {ver} (global)",
+        self._start_task(
+            f"Crear ramas versión {ver} (global)",
             lambda cfg, gk, pk, v, qa, emit=self.logger.line.emit: create_version_branches(cfg, gk, pk, v, qa, {}, [], emit, only_modules=None),
-            _after, self.cfg, gkey, pkey, ver, create_qa)
+            _after, self.cfg, gkey, pkey, ver, create_qa,
+            success=f"Ramas {ver} creadas",
+            error=f"No se pudieron crear ramas {ver}"
+        )
 
     @safe_slot
     def _do_reconcile(self):
@@ -496,7 +613,12 @@ class GitView(QWidget):
                 for b in list_local_branches_fast(path):
                     STATE.add_local(gk, pk, name, b)
             return True
-        self._start_task("Reconciliar con Git (local)", reconcile_task, None, self.cfg, gkey, pkey)
+        self._start_task(
+            "Reconciliar con Git (local)", reconcile_task, None, self.cfg, gkey, pkey,
+            success="Reconciliación completa",
+            error="Error al reconciliar"
+        )
+
 
     @safe_slot
     def _do_recover_nas(self):
@@ -506,7 +628,8 @@ class GitView(QWidget):
             recover_from_nas()
             emit("[task] DONE")
             return True
-        self._start_task("Recuperar NAS", task)
+        self._start_task("Recuperar NAS", task, success="Historial recuperado de NAS", error="Error al recuperar NAS")
+
 
     @safe_slot
     def _do_publish_nas(self):
@@ -516,4 +639,5 @@ class GitView(QWidget):
             publish_to_nas()
             emit("[task] DONE")
             return True
-        self._start_task("Publicar NAS", task)
+        self._start_task("Publicar NAS", task, success="Historial publicado en NAS", error="Error al publicar NAS")
+

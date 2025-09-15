@@ -319,6 +319,7 @@ def delete_local_branch_by_name(
             rc2, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], mpath)
             if rc2 == 0:
                 exists_origin = True
+
     if exists_origin:
         if not rec:
             rec = BranchRecord(branch=bname, group=gkey, project=pkey, created_by=_current_user())
