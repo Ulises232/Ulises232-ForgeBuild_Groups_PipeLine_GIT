@@ -68,6 +68,7 @@ class GitView(QWidget):
         self.cfg = cfg
         self.logger = Logger()
         self._threads: list = []
+        self._debug_enabled = bool(int(os.environ.get("FORGEBUILD_GITVIEW_DEBUG", "0")))
         self._setup_ui()
         self._wire_events()
         self._dbg(f"git_view.py from: {__file__}")
@@ -75,14 +76,24 @@ class GitView(QWidget):
         QTimer.singleShot(0, self._post_init)
         self._dbg("init: post_init scheduled")
 
-    def _dbg(self, msg: str):
+    def _dbg(self, msg: str, force: bool = False):
+        lowered = msg.lower()
+        important = force or "error" in lowered or "warn" in lowered or "fail" in lowered
+        if not (important or self._debug_enabled):
+            return
         s = f"[GitView] {msg}"
-        try: errguard.log(s)
-        except Exception: pass
-        try: print(s)
-        except Exception: pass
-        try: self.logger.line.emit(s)
-        except Exception: pass
+        try:
+            errguard.log(s)
+        except Exception:
+            pass
+        try:
+            print(s)
+        except Exception:
+            pass
+        try:
+            self.logger.line.emit(s)
+        except Exception:
+            pass
 
     def _set_busy(self, busy: bool, note: str = ""):
         for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
@@ -472,7 +483,7 @@ class GitView(QWidget):
     def _on_task_finish(self, ok: bool):
         """Este slot SIEMPRE corre en el hilo de la UI (QueuedConnection)."""
         try:
-            self._dbg(f"task end (slot): ok={ok}")
+            self._dbg(f"task end (slot): ok={ok}", force=not ok)
             self._refresh_history()
             self._refresh_summary()
             self._refresh_branch_index()
