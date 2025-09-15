@@ -154,6 +154,27 @@ def remove(rec: BranchRecord, index: Optional[Index] = None) -> Index:
     return idx
 
 
+# ---------------- filtering helpers -----------------
+
+def _filter_origin(index: Index) -> Index:
+    """Keep only records that were pushed to origin."""
+    return {k: v for k, v in index.items() if v.exists_origin}
+
+
+def _filter_log_by_index(lines: List[str], index: Index) -> List[str]:
+    keys = set(index.keys())
+    out: List[str] = []
+    for ln in lines:
+        try:
+            entry = json.loads(ln)
+            key = f"{entry.get('group') or ''}/{entry.get('project') or ''}/{entry.get('branch') or ''}"
+        except Exception:
+            continue
+        if key in keys:
+            out.append(ln)
+    return out
+
+
 # ---------------- NAS sync -----------------
 
 LOCK_NAME = "branches.lock"
@@ -181,13 +202,14 @@ def _release_lock(base: Path) -> None:
 def recover_from_nas() -> Index:
     base = _nas_dir()
     local = load_index()
-    nas = load_index(_index_path(base))
+    nas = _filter_origin(load_index(_index_path(base)))
     merged = merge_indexes(local, nas)
     save_index(merged)
 
     # merge activity log
     local_log = _load_log(_log_path(_state_dir()))
-    nas_log = _load_log(_log_path(base))
+    nas_log_raw = _load_log(_log_path(base))
+    nas_log = _filter_log_by_index(nas_log_raw, nas)
     seen = set(local_log)
     new_lines = [ln for ln in nas_log if ln not in seen]
     if new_lines:
@@ -200,18 +222,23 @@ def publish_to_nas() -> Index:
     if not _acquire_lock(base):
         raise RuntimeError("NAS lock busy")
     try:
-        local = load_index()
-        remote = load_index(_index_path(base))
+        local = _filter_origin(load_index())
+        remote = _filter_origin(load_index(_index_path(base)))
         merged = merge_indexes(remote, local)
         save_index(merged, _index_path(base))
 
         # publish activity log
-        local_log = _load_log(_log_path(_state_dir()))
-        remote_log = _load_log(_log_path(base))
+        base_log = _log_path(base)
+        local_log_raw = _load_log(_log_path(_state_dir()))
+        local_log = _filter_log_by_index(local_log_raw, local)
+        remote_log_raw = _load_log(base_log)
+        remote_log = _filter_log_by_index(remote_log_raw, remote)
+        if remote_log != remote_log_raw:
+            base_log.write_text("\n".join(remote_log) + ("\n" if remote_log else ""), encoding="utf-8")
         seen = set(remote_log)
         new_lines = [ln for ln in local_log if ln not in seen]
         if new_lines:
-            _append_log(new_lines, _log_path(base))
+            _append_log(new_lines, base_log)
         return merged
     finally:
         _release_lock(base)
