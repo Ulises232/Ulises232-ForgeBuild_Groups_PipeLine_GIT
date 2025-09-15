@@ -180,6 +180,7 @@ class GitView(QWidget):
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
 
+
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
         self.btnRefresh.clicked.connect(self._post_project_change)
@@ -192,6 +193,7 @@ class GitView(QWidget):
         self.btnNasRecover.clicked.connect(self._do_recover_nas)
         self.btnNasPublish.clicked.connect(self._do_publish_nas)
         self.btnClearLog.clicked.connect(self.log.clear)
+
 
 
     def _load_projects_flat(self):
@@ -375,6 +377,7 @@ class GitView(QWidget):
                 self.treeHist.addTopLevelItem(it)
             self.treeHist.resizeColumnToContents(0)
             self.treeHist.resizeColumnToContents(1)
+
         except Exception as e:
             self._dbg(f"_refresh_branch_index: ERROR {e}")
         finally:
