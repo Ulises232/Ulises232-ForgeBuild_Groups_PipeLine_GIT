@@ -1,9 +1,17 @@
 # buildtool/app.py
 from __future__ import annotations
-import sys, os, traceback, atexit
 
-from .core.errguard import install_error_guard, on_about_to_quit_flush, log
-from .core.qt_silence import setup_qt_logging  # ← filtra niveles de Qt (no instala handler)
+import sys, os, traceback, atexit
+from pathlib import Path
+
+# PyInstaller ejecuta este archivo como script suelto (sin paquete). Aseguramos que el
+# paquete `buildtool` sea importable agregando el directorio raíz al sys.path cuando
+# no hay paquete padre definido.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from buildtool.core.errguard import install_error_guard, on_about_to_quit_flush, log
+from buildtool.core.qt_silence import setup_qt_logging  # ← filtra niveles de Qt (no instala handler)
 
 # Bitácora adicional (opcional) en el HOME del usuario
 CRASH_LOG = os.path.join(os.path.expanduser("~"), "forgebuild_crash.log")
@@ -89,7 +97,7 @@ def main():
         sys.unraisablehook = _unraisable_hook
 
     # 6) Crear y mostrar la ventana principal
-    from .main_window import MainWindow
+    from buildtool.main_window import MainWindow
     log("== app.main: importing MainWindow ok ==")
     w = MainWindow()
     log("== app.main: MainWindow() constructed ==")
@@ -109,7 +117,7 @@ def main():
         rc = app.exec()
     finally:
         try:
-            from .core.thread_tracker import TRACKER
+            from buildtool.core.thread_tracker import TRACKER
             TRACKER.stop_all(timeout_ms=7000)
         except Exception:
             pass
