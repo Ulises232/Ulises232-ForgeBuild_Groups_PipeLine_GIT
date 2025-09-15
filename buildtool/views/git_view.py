@@ -136,37 +136,55 @@ class GitView(QWidget):
         ops = QGroupBox("Acciones de ramas")
         opsl = QVBoxLayout(ops)
 
+        # switch
         self.cboHistorySwitch = QComboBox(); self.cboHistorySwitch.setEditable(True)
         self.btnSwitch = QPushButton("Switch (global)")
-        hs = QHBoxLayout(); hs.addWidget(QLabel("Rama:")); hs.addWidget(self.cboHistorySwitch, 1); hs.addWidget(self.btnSwitch)
-        opsl.addLayout(hs)
+        grp_switch = QGroupBox("Cambiar a otra rama")
+        hs = QHBoxLayout(grp_switch)
+        hs.addWidget(self.cboHistorySwitch, 1); hs.addWidget(self.btnSwitch)
+        opsl.addWidget(grp_switch)
 
+        # create / push
         self.txtNewBranch = QLineEdit(); self.txtNewBranch.setPlaceholderText("Nombre de la nueva rama")
-        self.btnCreateLocal = QPushButton("Crear rama (local, global)"); self.btnPushBranch = QPushButton("Push rama (global)")
-        hnew = QHBoxLayout(); hnew.addWidget(QLabel("Nueva rama:")); hnew.addWidget(self.txtNewBranch, 1); hnew.addWidget(self.btnCreateLocal); hnew.addWidget(self.btnPushBranch)
-        opsl.addLayout(hnew)
+        self.btnCreateLocal = QPushButton("Crear (local, global)")
+        self.btnPushBranch = QPushButton("Push (global)")
+        grp_new = QGroupBox("Nueva rama")
+        hnew = QHBoxLayout(grp_new)
+        hnew.addWidget(self.txtNewBranch, 1); hnew.addWidget(self.btnCreateLocal); hnew.addWidget(self.btnPushBranch)
+        opsl.addWidget(grp_new)
 
+        # delete
         self.cboDeleteBranch = QComboBox(); self.cboDeleteBranch.setEditable(True)
         self.chkConfirmDelete = QCheckBox("Confirmar")
-        self.btnDeleteBranch = QPushButton("Eliminar rama local (global)")
-        hd = QHBoxLayout(); hd.addWidget(QLabel("Eliminar:")); hd.addWidget(self.cboDeleteBranch, 1); hd.addWidget(self.chkConfirmDelete); hd.addWidget(self.btnDeleteBranch)
-        opsl.addLayout(hd)
+        self.btnDeleteBranch = QPushButton("Eliminar local (global)")
+        grp_del = QGroupBox("Eliminar rama")
+        hd = QHBoxLayout(grp_del)
+        hd.addWidget(self.cboDeleteBranch, 1); hd.addWidget(self.chkConfirmDelete); hd.addWidget(self.btnDeleteBranch)
+        opsl.addWidget(grp_del)
 
+        # version
         self.txtVersion = QLineEdit(); self.txtVersion.setPlaceholderText("3.00.17")
-        self.chkQA = QCheckBox("Crear *_QA"); self.btnRunCreateVersion = QPushButton("Crear ramas de versión (local, global)")
-        hv = QHBoxLayout(); hv.addWidget(QLabel("Versión:")); hv.addWidget(self.txtVersion, 1); hv.addWidget(self.chkQA); hv.addWidget(self.btnRunCreateVersion)
-        opsl.addLayout(hv)
+        self.chkQA = QCheckBox("Crear *_QA")
+        self.btnRunCreateVersion = QPushButton("Crear ramas de versión (local, global)")
+        grp_ver = QGroupBox("Ramas de versión")
+        hv = QHBoxLayout(grp_ver)
+        hv.addWidget(self.txtVersion, 1); hv.addWidget(self.chkQA); hv.addWidget(self.btnRunCreateVersion)
+        opsl.addWidget(grp_ver)
 
-        self.btnRefresh = QPushButton("Refrescar vista"); self.btnReconcile = QPushButton("Reconciliar con Git (solo local)")
-        self.btnNasRecover = QPushButton("Recuperar NAS"); self.btnNasPublish = QPushButton("Publicar NAS")
-        hr = QHBoxLayout(); hr.addWidget(self.btnRefresh); hr.addWidget(self.btnNasRecover); hr.addWidget(self.btnNasPublish); hr.addStretch(); hr.addWidget(self.btnReconcile)
+        # misc buttons
+        self.btnRefresh = QPushButton("Refrescar vista")
+        self.btnReconcile = QPushButton("Reconciliar con Git (solo local)")
+        self.btnNasRecover = QPushButton("Recuperar NAS")
+        self.btnNasPublish = QPushButton("Publicar NAS")
+        hr = QHBoxLayout()
+        hr.addWidget(self.btnRefresh); hr.addWidget(self.btnNasRecover); hr.addWidget(self.btnNasPublish); hr.addStretch(); hr.addWidget(self.btnReconcile)
         opsl.addLayout(hr)
 
         top_wrap.addWidget(ops)
 
         gr = QGroupBox("Módulos y ramas actuales")
         grl = QVBoxLayout(gr)
-        self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Módulo", "Rama", "Estado", "Actual"])
+        self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Módulo", "Rama actual"])
         self.tree.setRootIsDecorated(False); self.tree.setAlternatingRowColors(True)
         grl.addWidget(self.tree, 1)
         top_wrap.addWidget(gr)
@@ -350,25 +368,16 @@ class GitView(QWidget):
             items = discover_status_fast(self.cfg, gkey, pkey) or []
             proj_current = None
             for name, br, path in items:
-                locals_, remotes_ = STATE.get_presence(gkey, pkey, name)
                 current = get_current_branch_fast(path) or br or "?"
                 STATE.set_current(gkey, pkey, name, current)
                 if proj_current is None:
                     proj_current = current
-                branches = sorted(set(locals_) | set(remotes_) | ({current} if current else set()))
-                if not branches:
-                    branches = [current]
-
-                for b in branches:
-                    estado = "origin" if b in remotes_ else ("local" if b in locals_ else "¿?")
-                    curflag = "Sí" if b == current else ""
-                    it = QtWidgets.QTreeWidgetItem([name, b, estado, curflag])
-                    self.tree.addTopLevelItem(it)
+                it = QtWidgets.QTreeWidgetItem([name, current])
+                self.tree.addTopLevelItem(it)
 
             self.lblCurrent.setText(f"Rama actual: {proj_current or '?'}")
             self.tree.resizeColumnToContents(0)
             self.tree.resizeColumnToContents(1)
-            self.tree.resizeColumnToContents(2)
             self._dbg(f"_refresh_summary: {self.tree.topLevelItemCount()} rows")
         except Exception as e:
             self._dbg(f"_refresh_summary: ERROR {e}")
