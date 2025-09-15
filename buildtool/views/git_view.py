@@ -138,7 +138,6 @@ class GitView(QWidget):
         row = 0
         proj.addWidget(QLabel("Proyecto:"), row, 0)
         self.cboProject = QComboBox(); proj.addWidget(self.cboProject, row, 1); row += 1
-
         self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual."); proj.addWidget(self.lblScope, row, 0, 1, 4); row += 1
         self.lblCurrent = QLabel("Rama actual: ?"); proj.addWidget(self.lblCurrent, row, 0, 1, 4); row += 1
         top_wrap.addLayout(proj)
@@ -149,6 +148,7 @@ class GitView(QWidget):
         opsl.setVerticalSpacing(6)
         opsl.setColumnStretch(0, 1)
         opsl.setColumnStretch(1, 1)
+
 
         # switch
         self.cboHistorySwitch = QComboBox(); self.cboHistorySwitch.setEditable(True)
@@ -512,7 +512,9 @@ class GitView(QWidget):
         if not branch:
             self._alert("Especifica una rama", error=True); return
         gkey, pkey = self._current_keys()
-        def _after():
+        def _after(ok: bool):
+            if not ok:
+                return
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.set_current(gkey, pkey, name, branch)
             STATE.add_history(gkey, pkey, branch)
@@ -551,7 +553,9 @@ class GitView(QWidget):
         if not nb:
             self._alert("Indica la rama a enviar", error=True); return
         gkey, pkey = self._current_keys()
-        def _after():
+        def _after(ok: bool):
+            if not ok:
+                return
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.add_remote(gkey, pkey, name, nb)
         self._start_task(
@@ -570,7 +574,9 @@ class GitView(QWidget):
         if not self.chkConfirmDelete.isChecked():
             self._alert("Confirma la eliminación", error=True); return
         gkey, pkey = self._current_keys()
-        def _after():
+        def _after(ok: bool):
+            if not ok:
+                return
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.remove_local(gkey, pkey, name, nb)
         self._start_task(
@@ -588,7 +594,9 @@ class GitView(QWidget):
             self._alert("Indica la versión", error=True); return
         create_qa = self.chkQA.isChecked()
         gkey, pkey = self._current_keys()
-        def _after():
+        def _after(ok: bool):
+            if not ok:
+                return
             for name, _, _ in discover_status_fast(self.cfg, gkey, pkey):
                 STATE.add_local(gkey, pkey, name, ver)
                 STATE.set_current(gkey, pkey, name, ver)
@@ -625,7 +633,6 @@ class GitView(QWidget):
             error="Error al reconciliar"
         )
 
-
     @safe_slot
     def _do_recover_nas(self):
         def task():
@@ -635,7 +642,6 @@ class GitView(QWidget):
             emit("[task] DONE")
             return True
         self._start_task("Recuperar NAS", task, success="Historial recuperado de NAS", error="Error al recuperar NAS")
-
 
     @safe_slot
     def _do_publish_nas(self):

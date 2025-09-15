@@ -410,7 +410,6 @@ class GroupEditor(QWidget):
         env_grid.addLayout(env_form, 0, 1, 4, 1)
         main.addWidget(env_box)
 
-
         # Top: selector de grupo
         top = QHBoxLayout()
         self.cboGroup = QComboBox()
@@ -798,7 +797,6 @@ class GroupEditor(QWidget):
             self.cboGroup.setCurrentIndex(0)
         self._load_group()
         self._refresh_env_list()
-
         save_config(self.cfg)
 
     def _export_cfg(self):
