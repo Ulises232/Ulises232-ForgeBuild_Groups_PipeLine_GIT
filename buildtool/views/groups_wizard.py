@@ -860,8 +860,8 @@ class GroupsWizard(QDialog):
 
         # interceptar guardar para refrescar cfg padre
         orig_save = self.editor._save
-        def _save_and_callback():
-            orig_save()
+        def _save_and_callback(*args, **kwargs):
+            orig_save(*args, **kwargs)
             if callable(self._on_saved):
                 self._on_saved()
         self.editor._save = _save_and_callback

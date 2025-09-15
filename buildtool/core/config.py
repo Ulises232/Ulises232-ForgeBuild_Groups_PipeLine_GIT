@@ -2,7 +2,7 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
-import yaml, pathlib
+import yaml, pathlib, os
 
 class Paths(BaseModel):
     workspaces: Dict[str, str] = Field(default_factory=dict)
@@ -60,21 +60,53 @@ class Config(BaseModel):
     deploy_targets: List[DeployTarget] = Field(default_factory=list)  # legacy
     groups: List[Group] = Field(default_factory=list)
 
-CFG_FILE = pathlib.Path(__file__).parent.parent / "data" / "config.yaml"
+_PACKAGE_CFG_FILE = pathlib.Path(__file__).parent.parent / "data" / "config.yaml"
+
+
+def _state_dir() -> pathlib.Path:
+    base = os.environ.get("APPDATA")
+    if base:
+        return pathlib.Path(base) / "ForgeBuild"
+    return pathlib.Path.home() / ".forgebuild"
+
+
+def _cfg_file() -> pathlib.Path:
+    return _state_dir() / "config.yaml"
+
+
+def _model_to_dict(model) -> Dict:
+    if hasattr(model, "dict"):
+        return model.dict()
+    return model.model_dump()
 
 def load_config() -> Config:
-    if CFG_FILE.exists():
-        with open(CFG_FILE, "r", encoding="utf-8") as f:
+    cfg_path = _cfg_file()
+    if cfg_path.exists():
+        with open(cfg_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return Config(**data)
+
+    if _PACKAGE_CFG_FILE.exists():
+        with open(_PACKAGE_CFG_FILE, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        cfg = Config(**data)
+        try:
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(_model_to_dict(cfg), f, sort_keys=False, allow_unicode=True)
+        except Exception:
+            pass
+        return cfg
+
     # default
     return Config(paths=Paths(workspaces={}, output_base="", nas_dir=""))
 
 def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()
-    data = cfg.dict() if hasattr(cfg, "dict") else cfg.model_dump()
-    CFG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CFG_FILE, "w", encoding="utf-8") as f:
+    data = _model_to_dict(cfg)
+    cfg_path = _cfg_file()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(cfg_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
-    return str(CFG_FILE)
+    return str(cfg_path)
 
