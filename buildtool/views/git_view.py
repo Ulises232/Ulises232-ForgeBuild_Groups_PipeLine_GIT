@@ -5,8 +5,21 @@ import os
 from pathlib import Path
 from functools import wraps
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QGridLayout, QLabel, QComboBox, QLineEdit,
-    QPushButton, QCheckBox, QTextEdit, QHBoxLayout, QGroupBox, QTreeWidget, QTreeWidgetItem, QApplication
+    QWidget,
+    QVBoxLayout,
+    QGridLayout,
+    QLabel,
+    QComboBox,
+    QLineEdit,
+    QPushButton,
+    QCheckBox,
+    QTextEdit,
+    QHBoxLayout,
+    QGroupBox,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QApplication,
+    QTabWidget,
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer
 from ..core.config import Config
@@ -22,6 +35,7 @@ from ..core.state import STATE
 from PySide6 import QtCore, QtWidgets
 import shiboken6
 from buildtool.core import errguard
+from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
 
 def safe_slot(fn: Callable):
     @wraps(fn)
@@ -69,7 +83,8 @@ class GitView(QWidget):
 
     def _set_busy(self, busy: bool, note: str = ""):
         for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
-                  self.btnRunCreateVersion, self.btnSwitch, self.btnRefresh, self.btnReconcile):
+                  self.btnRunCreateVersion, self.btnSwitch, self.btnRefresh,
+                  self.btnReconcile, self.btnNasRecover, self.btnNasPublish):
             try: w.setEnabled(not busy)
             except Exception: pass
         try:
@@ -84,8 +99,20 @@ class GitView(QWidget):
             self.logger.line.emit(note)
 
     def _setup_ui(self):
-        root = QVBoxLayout(self); root.setContentsMargins(8,8,8,8); root.setSpacing(8)
-        top = QGridLayout(); top.setHorizontalSpacing(8); top.setVerticalSpacing(6)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+
+        tabs = QTabWidget()
+        root.addWidget(tabs, 1)
+
+        main = QWidget()
+        tabs.addTab(main, "Repos Git")
+        top_wrap = QVBoxLayout(main)
+
+        top = QGridLayout()
+        top.setHorizontalSpacing(8)
+        top.setVerticalSpacing(6)
         row = 0
         top.addWidget(QLabel("Proyecto:"), row, 0)
         self.cboProject = QComboBox(); top.addWidget(self.cboProject, row, 1); row += 1
@@ -114,20 +141,44 @@ class GitView(QWidget):
         top.addLayout(hv, row, 0, 1, 4); row += 1
 
         self.btnRefresh = QPushButton("Refrescar vista"); self.btnReconcile = QPushButton("Reconciliar con Git (solo local)")
-        hr = QHBoxLayout(); hr.addWidget(self.btnRefresh); hr.addStretch(); hr.addWidget(self.btnReconcile)
+        self.btnNasRecover = QPushButton("Recuperar NAS"); self.btnNasPublish = QPushButton("Publicar NAS")
+        hr = QHBoxLayout(); hr.addWidget(self.btnRefresh); hr.addWidget(self.btnNasRecover); hr.addWidget(self.btnNasPublish); hr.addStretch(); hr.addWidget(self.btnReconcile)
         top.addLayout(hr, row, 0, 1, 4); row += 1
 
-        gr = QGroupBox("Resumen de ramas (cache/local)")
+        gr = QGroupBox("Módulos y ramas actuales")
         grl = QVBoxLayout(gr)
         self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Módulo", "Rama", "Estado", "Actual"])
         self.tree.setRootIsDecorated(False); self.tree.setAlternatingRowColors(True)
         grl.addWidget(self.tree, 1)
         top.addWidget(gr, row, 0, 1, 4); row += 1
 
-        root.addLayout(top)
-        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setLineWrapMode(QTextEdit.NoWrap)
-        root.addWidget(self.log, 1)
-        self.logger = Logger(); self.logger.line.connect(self.log.append)
+        grh = QGroupBox("Historial de ramas")
+        grhl = QVBoxLayout(grh)
+        self.treeHist = QTreeWidget()
+        self.treeHist.setHeaderLabels(["Rama", "Usuario", "Local", "Origin", "Merge"])
+        self.treeHist.setRootIsDecorated(False)
+        self.treeHist.setAlternatingRowColors(True)
+        grhl.addWidget(self.treeHist, 1)
+        top.addWidget(grh, row, 0, 1, 4)
+        row += 1
+
+        top_wrap.addLayout(top)
+
+        console = QWidget()
+        tabs.addTab(console, "Consola")
+        clog_layout = QVBoxLayout(console)
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setLineWrapMode(QTextEdit.NoWrap)
+        clog_layout.addWidget(self.log, 1)
+        self.btnClearLog = QPushButton("Limpiar")
+        hcl = QHBoxLayout()
+        hcl.addStretch()
+        hcl.addWidget(self.btnClearLog)
+        clog_layout.addLayout(hcl)
+
+        self.logger = Logger()
+        self.logger.line.connect(self.log.append)
 
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
@@ -138,7 +189,9 @@ class GitView(QWidget):
         self.btnPushBranch.clicked.connect(self._do_push_branch)
         self.btnDeleteBranch.clicked.connect(self._do_delete_branch)
         self.btnRunCreateVersion.clicked.connect(self._do_create_version)
-        self.btnRefresh.clicked.connect(self._post_project_change)
+        self.btnNasRecover.clicked.connect(self._do_recover_nas)
+        self.btnNasPublish.clicked.connect(self._do_publish_nas)
+        self.btnClearLog.clicked.connect(self.log.clear)
 
 
     def _load_projects_flat(self):
@@ -233,6 +286,7 @@ class GitView(QWidget):
                     self._dbg(f"post_project_change: HERR_REPO(groups.repos)={os.environ['HERR_REPO']}")
                     self._refresh_history()
                     self._refresh_summary()
+                    self._refresh_branch_index()
                     self._dbg("post_project_change: end")
                     return
             except Exception as e:
@@ -241,6 +295,7 @@ class GitView(QWidget):
             # Si llegaste aquí, no hay workspace para gkey; aún así refresca UI
             self._refresh_history()
             self._refresh_summary()
+            self._refresh_branch_index()
         except Exception as e:
             self._dbg(f"post_project_change: ERROR {e}")
         self._dbg("post_project_change: end")
@@ -257,10 +312,12 @@ class GitView(QWidget):
             b2 = QtCore.QSignalBlocker(self.cboDeleteBranch)
             self.cboHistorySwitch.clear(); self.cboDeleteBranch.clear()
             gkey, pkey = self._current_keys()
-            hist = STATE.get_history(gkey, pkey) or []
-            for br in hist[:50]:
-                self.cboHistorySwitch.addItem(br)
-                self.cboDeleteBranch.addItem(br)
+            idx = load_index()
+            records = [r for r in idx.values() if r.group == gkey and r.project == pkey]
+            records.sort(key=lambda r: r.last_updated_at, reverse=True)
+            for rec in records[:50]:
+                self.cboHistorySwitch.addItem(rec.branch)
+                self.cboDeleteBranch.addItem(rec.branch)
             self._dbg("_refresh_history: loaded")
         except Exception as e:
             self._dbg(f"_refresh_history: ERROR {e}")
@@ -297,6 +354,32 @@ class GitView(QWidget):
         finally:
             if _is_valid_qobj(self.tree):
                 self.tree.setUpdatesEnabled(True)
+
+    def _refresh_branch_index(self):
+        self._dbg("_refresh_branch_index: start")
+        if not _is_valid_qobj(self) or not _is_valid_qobj(getattr(self, "treeHist", None)):
+            return
+        try:
+            self.treeHist.setUpdatesEnabled(False)
+            self.treeHist.clear()
+            gkey, pkey = self._current_keys()
+            idx = load_index()
+            records = [r for r in idx.values() if r.group == gkey and r.project == pkey]
+            records.sort(key=lambda r: r.last_updated_at, reverse=True)
+            for rec in records:
+                loc = "Sí" if rec.exists_local else ""
+                orig = "Sí" if rec.exists_origin else ""
+                it = QtWidgets.QTreeWidgetItem(
+                    [rec.branch, rec.created_by, loc, orig, rec.merge_status]
+                )
+                self.treeHist.addTopLevelItem(it)
+            self.treeHist.resizeColumnToContents(0)
+            self.treeHist.resizeColumnToContents(1)
+        except Exception as e:
+            self._dbg(f"_refresh_branch_index: ERROR {e}")
+        finally:
+            if _is_valid_qobj(self.treeHist):
+                self.treeHist.setUpdatesEnabled(True)
 
     # en buildtool/views/git_view.py (dentro de GitView)
     def _init_thread_store(self):
@@ -348,6 +431,7 @@ class GitView(QWidget):
             # Toca UI sólo aquí (hilo principal):
             self._refresh_history()
             self._refresh_summary()
+            self._refresh_branch_index()
             # Si tu _start_task quiere permitir callbacks externos:
             cb = getattr(self, "_pending_done_cb", None)
             if cb:
@@ -458,3 +542,23 @@ class GitView(QWidget):
                     STATE.add_local(gk, pk, name, b)
             return True
         self._start_task("Reconciliar con Git (local)", reconcile_task, None, self.cfg, gkey, pkey)
+
+    @safe_slot
+    def _do_recover_nas(self):
+        def task():
+            emit = self.logger.line.emit
+            emit("[task] Recuperar NAS")
+            recover_from_nas()
+            emit("[task] DONE")
+            return True
+        self._start_task("Recuperar NAS", task)
+
+    @safe_slot
+    def _do_publish_nas(self):
+        def task():
+            emit = self.logger.line.emit
+            emit("[task] Publicar NAS")
+            publish_to_nas()
+            emit("[task] DONE")
+            return True
+        self._start_task("Publicar NAS", task)
