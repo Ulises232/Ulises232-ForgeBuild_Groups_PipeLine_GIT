@@ -138,7 +138,6 @@ class GitView(QWidget):
         row = 0
         proj.addWidget(QLabel("Proyecto:"), row, 0)
         self.cboProject = QComboBox(); proj.addWidget(self.cboProject, row, 1); row += 1
-
         self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual."); proj.addWidget(self.lblScope, row, 0, 1, 4); row += 1
         self.lblCurrent = QLabel("Rama actual: ?"); proj.addWidget(self.lblCurrent, row, 0, 1, 4); row += 1
         top_wrap.addLayout(proj)
@@ -149,6 +148,7 @@ class GitView(QWidget):
         opsl.setVerticalSpacing(6)
         opsl.setColumnStretch(0, 1)
         opsl.setColumnStretch(1, 1)
+
 
         # switch
         self.cboHistorySwitch = QComboBox(); self.cboHistorySwitch.setEditable(True)
@@ -230,7 +230,6 @@ class GitView(QWidget):
         hcl.addStretch()
         hcl.addWidget(self.btnClearLog)
         clog_layout.addLayout(hcl)
-
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
 
@@ -653,3 +652,4 @@ class GitView(QWidget):
             emit("[task] DONE")
             return True
         self._start_task("Publicar NAS", task, success="Historial publicado en NAS", error="Error al publicar NAS")
+

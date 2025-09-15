@@ -111,6 +111,7 @@ def apply_environment(cfg: Config) -> None:
     _APPLIED_ENV_KEYS = set(env_map.keys())
 
 
+
 def load_config() -> Config:
     cfg_path = _cfg_file()
     if cfg_path.exists():

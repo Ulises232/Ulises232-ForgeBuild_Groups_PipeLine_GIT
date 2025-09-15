@@ -569,6 +569,7 @@ class GroupEditor(QWidget):
 
         self._refresh_env_list()
 
+
         # init groups
         for g in (self.cfg.groups or []):
             self.cboGroup.addItem(g.key, g.key)
