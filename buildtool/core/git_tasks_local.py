@@ -334,7 +334,6 @@ def delete_local_branch_by_name(
     return True
 
 
-
 def push_branch(
     cfg, gkey, pkey, name: str, emit=None, only_modules=None
 ) -> bool:
