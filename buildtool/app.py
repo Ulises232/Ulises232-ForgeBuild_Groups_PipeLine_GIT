@@ -5,10 +5,35 @@ import sys, os, traceback, atexit
 from pathlib import Path
 
 # PyInstaller ejecuta este archivo como script suelto (sin paquete). Aseguramos que el
-# paquete `buildtool` sea importable agregando el directorio raíz al sys.path cuando
-# no hay paquete padre definido.
+# paquete `buildtool` sea importable agregando los directorios relevantes al sys.path
+# cuando no hay paquete padre definido.
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    here = Path(__file__).resolve().parent
+    candidates: list[Path] = []
+
+    # 1) Cuando la app está congelada (PyInstaller) los módulos viven en _MEIPASS
+    #    y debemos asegurarnos de que dicho directorio quede al frente.
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass))
+
+    # 2) Para la ejecución como script necesitamos el directorio raíz del repositorio
+    #    (padre de buildtool) para que el paquete completo sea importable.
+    candidates.append(here.parent)
+
+    for candidate in candidates:
+        try:
+            candidate = candidate.resolve()
+        except Exception:
+            continue
+
+        if not candidate.exists():
+            continue
+
+        path_str = str(candidate)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
 
 from buildtool.core.errguard import install_error_guard, on_about_to_quit_flush, log
 from buildtool.core.qt_silence import setup_qt_logging  # ← filtra niveles de Qt (no instala handler)
