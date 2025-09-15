@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, QListWidget, QListWidgetItem,
     QFileDialog, QMessageBox, QCheckBox, QSplitter, QTabWidget
 )
+import yaml
 from ..core.config import (
     Config, Group, Project, Module, DeployTarget, save_config
 )
@@ -279,6 +280,7 @@ class ProjectEditor(QWidget):
         self.btnDelMod.clicked.connect(self._del_module)
 
         self._modules: List[Module] = []
+        self._current_module_row = -1
 
     def set_from_project(self, p: Project):
         self.txtKey.setText(p.key or "")
@@ -301,13 +303,32 @@ class ProjectEditor(QWidget):
         )
 
     def _refresh_modules_list(self):
+        prev_row = self._current_module_row if 0 <= self._current_module_row < len(self._modules) else 0
+        self.lstModules.blockSignals(True)
         self.lstModules.clear()
         for m in self._modules:
-            self.lstModules.addItem(QListWidgetItem(m.name))
+            self.lstModules.addItem(QListWidgetItem(m.name or ""))
         if self._modules:
-            self.lstModules.setCurrentRow(0)
+            new_row = prev_row if prev_row < len(self._modules) else len(self._modules) - 1
+            self.lstModules.setCurrentRow(new_row)
+        else:
+            new_row = -1
+            self.lstModules.clearSelection()
+        self.lstModules.blockSignals(False)
+
+        if new_row >= 0:
+            self._current_module_row = new_row
+            self.moduleEditor.set_from_module(self._modules[new_row])
+        else:
+            self._current_module_row = -1
+            empty = Module(name="", path="", goals=["clean", "package"])
+            self.moduleEditor.set_from_module(empty)
 
     def _load_selected_module(self, row: int):
+        if 0 <= self._current_module_row < len(self._modules):
+            self._modules[self._current_module_row] = self.moduleEditor.to_module()
+            save_config(self._cfg)
+        self._current_module_row = row
         if row < 0 or row >= len(self._modules):
             return
         self.moduleEditor.set_from_module(self._modules[row])
@@ -327,9 +348,13 @@ class ProjectEditor(QWidget):
         self._refresh_modules_list()
 
     def apply_editor_to_current(self):
-        row = self.lstModules.currentRow()
+        row = self._current_module_row
         if 0 <= row < len(self._modules):
-            self._modules[row] = self.moduleEditor.to_module()
+            updated = self.moduleEditor.to_module()
+            self._modules[row] = updated
+            item = self.lstModules.item(row)
+            if item is not None:
+                item.setText(updated.name or "")
 
 # ----------------------------- GroupEditor -----------------------------
 
@@ -342,13 +367,27 @@ class GroupEditor(QWidget):
 
         main = QVBoxLayout(self); main.setContentsMargins(6,6,6,6); main.setSpacing(6)
 
+        # NAS path + import/export
+        nas_row = QHBoxLayout()
+        self.txtNasDir = QLineEdit(getattr(getattr(self.cfg, "paths", {}), "nas_dir", ""))
+        self.btnNasBrowse = QPushButton("...")
+        self.btnNasImport = QPushButton("Importar")
+        self.btnNasExport = QPushButton("Exportar")
+        nas_row.addWidget(QLabel("Carpeta NAS:"))
+        nas_row.addWidget(self.txtNasDir, 1)
+        nas_row.addWidget(self.btnNasBrowse)
+        nas_row.addWidget(self.btnNasImport)
+        nas_row.addWidget(self.btnNasExport)
+        main.addLayout(nas_row)
+
         # Top: selector de grupo
         top = QHBoxLayout()
         self.cboGroup = QComboBox()
         self.btnAddGroup = QPushButton("Nuevo grupo")
+        self.btnRenGroup = QPushButton("Renombrar")
         self.btnDelGroup = QPushButton("Eliminar grupo")
         top.addWidget(QLabel("Grupo:")); top.addWidget(self.cboGroup, 1)
-        top.addWidget(self.btnAddGroup); top.addWidget(self.btnDelGroup)
+        top.addWidget(self.btnAddGroup); top.addWidget(self.btnRenGroup); top.addWidget(self.btnDelGroup)
         main.addLayout(top)
 
         # Tabs
@@ -453,9 +492,14 @@ class GroupEditor(QWidget):
         bottom.addStretch(1); bottom.addWidget(self.btnSave); bottom.addWidget(self.btnClose)
         main.addLayout(bottom)
 
+        # state trackers
+        self._current_project_row = -1
+        self._current_target_row = -1
+
         # signals
-        self.cboGroup.currentIndexChanged.connect(self._load_group)
+        self.cboGroup.currentIndexChanged.connect(self._change_group)
         self.btnAddGroup.clicked.connect(self._add_group)
+        self.btnRenGroup.clicked.connect(self._ren_group)
         self.btnDelGroup.clicked.connect(self._del_group)
 
         self.lstRepos.currentRowChanged.connect(self._load_repo_row)
@@ -477,7 +521,14 @@ class GroupEditor(QWidget):
         self.btnDelTarget.clicked.connect(self._del_target)
 
         self.btnSave.clicked.connect(self._save)
-        self.btnClose.clicked.connect(self.window().close)
+        self.btnClose.clicked.connect(self._close)
+
+        self.btnNasBrowse.clicked.connect(self._browse_nas)
+        self.btnNasImport.clicked.connect(self._import_cfg)
+        self.btnNasExport.clicked.connect(self._export_cfg)
+        self.txtNasDir.editingFinished.connect(self._save_nas_dir)
+
+        self.tabs.currentChanged.connect(lambda _: self._save(silent=True))
 
         # init groups
         for g in (self.cfg.groups or []):
@@ -522,12 +573,120 @@ class GroupEditor(QWidget):
             self.lstProfiles.clear(); self.txtProfile.clear()
             self.lstProjects.clear()
             self.lstTargets.clear()
+    def _ren_group(self):
+        if not self.cfg.groups:
+            return
+        idx = self.cboGroup.currentIndex()
+        if idx < 0:
+            return
+        key = self.cboGroup.currentData()
+        from PySide6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(self, "Renombrar grupo", "Nuevo nombre:", text=key)
+        new_name = new_name.strip()
+        if not ok or not new_name:
+            return
+        if any(g.key == new_name for g in (self.cfg.groups or [])):
+            QMessageBox.warning(self, "Grupo", "Ya existe un grupo con ese nombre.")
+            return
+        g = self._find_group(key)
+        if g:
+            g.key = new_name
+            self.cboGroup.setItemText(idx, new_name)
+            self.cboGroup.setItemData(idx, new_name)
+
+    def _change_group(self, idx: int):
+        self._save(silent=True)
+        self._load_group()
+
+    def _browse_nas(self):
+        d = QFileDialog.getExistingDirectory(self, "Selecciona carpeta NAS")
+        if d:
+            self.txtNasDir.setText(d.replace("/", "\\"))
+            self._save_nas_dir()
+
+    def _save_nas_dir(self):
+        self.cfg.paths.nas_dir = self.txtNasDir.text().strip()
+        try:
+            save_config(self.cfg)
+        except Exception:
+            pass
+
+    def _import_cfg(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Importar configuración", self.txtNasDir.text().strip() or "", "YAML Files (*.yaml)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            new_cfg = Config(**data)
+        except Exception as e:
+            QMessageBox.critical(self, "Importar", f"No se pudo cargar:\n{e}")
+            return
+        self.cfg = new_cfg
+        if hasattr(self.window(), "_cfg"):
+            self.window()._cfg = self.cfg
+        self.txtNasDir.setText(getattr(getattr(self.cfg, "paths", {}), "nas_dir", ""))
+        self.cboGroup.clear()
+        for g in (self.cfg.groups or []):
+            self.cboGroup.addItem(g.key, g.key)
+        if self.cfg.groups:
+            self.cboGroup.setCurrentIndex(0)
+        self._load_group()
+        save_config(self.cfg)
+
+    def _export_cfg(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Exportar configuración", self.txtNasDir.text().strip() or "", "YAML Files (*.yaml)")
+        if not path:
+            return
+        try:
+            data = self.cfg.dict() if hasattr(self.cfg, "dict") else self.cfg.model_dump()
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+            QMessageBox.information(self, "Exportar", "Configuración exportada.")
+        except Exception as e:
+            QMessageBox.critical(self, "Exportar", f"No se pudo exportar:\n{e}")
+
+    def _close(self):
+        self._save(silent=True)
+        self.window().close()
 
     def _load_group(self):
         key = self.cboGroup.currentData()
         grp = self._find_group(key)
+        prev_group = getattr(self, "group", None)
+        prev_project_key: Optional[str] = None
+        prev_target_name: Optional[str] = None
+        if (
+            prev_group
+            and grp
+            and prev_group.key == grp.key
+            and 0 <= self._current_project_row < len(prev_group.projects or [])
+        ):
+            prev_project_key = prev_group.projects[self._current_project_row].key
+        if (
+            prev_group
+            and grp
+            and prev_group.key == grp.key
+            and 0 <= self._current_target_row < len(prev_group.deploy_targets or [])
+        ):
+            prev_target_name = prev_group.deploy_targets[self._current_target_row].name
+
         self.group = grp
+        self._current_project_row = -1
+        self._current_target_row = -1
+
         if not grp:
+            self.lstRepos.clear(); self.txtRepoKey.clear(); self.txtRepoPath.clear()
+            self.txtOutputBase.clear()
+            self.lstProfiles.clear(); self.txtProfile.clear()
+            self.lstProjects.clear()
+            self.projectEditor.set_from_project(Project(key="", repo="", execution_mode="integrated", modules=[]))
+            self.lstTargets.clear()
+            empty_editor = TargetRow(None, self.cfg)
+            self._deploy_layout.replaceWidget(self.targetEditor, empty_editor)
+            self.targetEditor.setParent(None)
+            self.targetEditor.deleteLater()
+            self.targetEditor = empty_editor
             return
 
         # General
@@ -542,35 +701,66 @@ class GroupEditor(QWidget):
             self.lstProfiles.addItem(QListWidgetItem(p))
         self.txtProfile.clear()
 
+        # actualizar combo de repo del projectEditor antes de cargar proyecto
+        self.projectEditor._group = grp
+        self.projectEditor.cboRepo.blockSignals(True)
+        self.projectEditor.cboRepo.clear()
+        for rk in (grp.repos or {}).keys():
+            self.projectEditor.cboRepo.addItem(rk, rk)
+        self.projectEditor.cboRepo.blockSignals(False)
+
         # Proyectos
+        desired_project_idx = 0
+        if prev_project_key:
+            for idx, proj in enumerate(grp.projects or []):
+                if proj.key == prev_project_key:
+                    desired_project_idx = idx
+                    break
+        self.lstProjects.blockSignals(True)
         self.lstProjects.clear()
         for p in (grp.projects or []):
             self.lstProjects.addItem(QListWidgetItem(p.key))
-        self.projectEditor._group = grp
         if grp.projects:
-            self.lstProjects.setCurrentRow(0)
-            self.projectEditor.set_from_project(grp.projects[0])
+            self.lstProjects.setCurrentRow(desired_project_idx)
         else:
+            self.lstProjects.clearSelection()
+        self.lstProjects.blockSignals(False)
+
+        if grp.projects:
+            self._current_project_row = desired_project_idx
+            self.projectEditor.set_from_project(grp.projects[desired_project_idx])
+        else:
+            self._current_project_row = -1
             self.projectEditor.set_from_project(Project(key="", repo="", execution_mode="integrated", modules=[]))
 
         # Deploy
+        desired_target_idx = 0
+        if prev_target_name:
+            for idx, target in enumerate(grp.deploy_targets or []):
+                if target.name == prev_target_name:
+                    desired_target_idx = idx
+                    break
+        self.lstTargets.blockSignals(True)
         self.lstTargets.clear()
         for t in (grp.deploy_targets or []):
             self.lstTargets.addItem(QListWidgetItem(t.name))
-        # Asegurar que el editor corresponde al grupo actual
+        if grp.deploy_targets:
+            self.lstTargets.setCurrentRow(desired_target_idx)
+        else:
+            self.lstTargets.clearSelection()
+        self.lstTargets.blockSignals(False)
+
         new_editor = TargetRow(grp, self.cfg)
         self._deploy_layout.replaceWidget(self.targetEditor, new_editor)
         self.targetEditor.setParent(None)
         self.targetEditor.deleteLater()
         self.targetEditor = new_editor
-        if grp.deploy_targets:
-            self.lstTargets.setCurrentRow(0)
-            self.targetEditor.set_from_target(grp.deploy_targets[0])
 
-        # actualizar combo de repo del projectEditor
-        self.projectEditor.cboRepo.clear()
-        for rk in (grp.repos or {}).keys():
-            self.projectEditor.cboRepo.addItem(rk, rk)
+        if grp.deploy_targets:
+            self._current_target_row = desired_target_idx
+            self.targetEditor.set_from_target(grp.deploy_targets[desired_target_idx])
+        else:
+            self._current_target_row = -1
 
     # --------------- Repos ---------------
 
@@ -637,6 +827,11 @@ class GroupEditor(QWidget):
     # --------------- Proyectos ---------------
 
     def _load_project_row(self, row: int):
+        if self.group and 0 <= self._current_project_row < len(self.group.projects or []):
+            self.projectEditor.apply_editor_to_current()
+            self.group.projects[self._current_project_row] = self.projectEditor.to_project()
+            save_config(self.cfg)
+        self._current_project_row = row
         if not self.group or row < 0 or row >= len(self.group.projects or []):
             self.projectEditor.set_from_project(Project(key="", repo="", execution_mode="integrated", modules=[]))
             return
@@ -663,6 +858,10 @@ class GroupEditor(QWidget):
     # --------------- Targets ---------------
 
     def _load_target_row(self, row: int):
+        if self.group and 0 <= self._current_target_row < len(self.group.deploy_targets or []):
+            self.group.deploy_targets[self._current_target_row] = self.targetEditor.to_target()
+            save_config(self.cfg)
+        self._current_target_row = row
         if not self.group:
             return
         new_editor = TargetRow(self.group, self.cfg)
@@ -698,27 +897,26 @@ class GroupEditor(QWidget):
 
     # --------------- Guardar ---------------
 
-    def _save(self):
-        if not self.group:
-            return
+    def _save(self, silent: bool = False):
+        self.cfg.paths.nas_dir = self.txtNasDir.text().strip()
+        if self.group:
+            self.group.output_base = self.txtOutputBase.text().strip()
 
-        # General
-        self.group.output_base = self.txtOutputBase.text().strip()
+            # Proyecto seleccionado: aplicar cambios del editor
+            prow = self.lstProjects.currentRow()
+            if 0 <= prow < len(self.group.projects or []):
+                self.projectEditor.apply_editor_to_current()
+                self.group.projects[prow] = self.projectEditor.to_project()
 
-        # Proyecto seleccionado: aplicar cambios del editor
-        prow = self.lstProjects.currentRow()
-        if 0 <= prow < len(self.group.projects or []):
-            self.projectEditor.apply_editor_to_current()
-            self.group.projects[prow] = self.projectEditor.to_project()
-
-        # Target seleccionado: aplicar cambios
-        trow = self.lstTargets.currentRow()
-        if 0 <= trow < len(self.group.deploy_targets or []):
-            self.group.deploy_targets[trow] = self.targetEditor.to_target()
+            # Target seleccionado: aplicar cambios
+            trow = self.lstTargets.currentRow()
+            if 0 <= trow < len(self.group.deploy_targets or []):
+                self.group.deploy_targets[trow] = self.targetEditor.to_target()
 
         try:
             save_config(self.cfg)
-            QMessageBox.information(self, "Guardar", "Configuración guardada.")
+            if not silent:
+                QMessageBox.information(self, "Guardar", "Configuración guardada.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{e}")
 
@@ -739,8 +937,8 @@ class GroupsWizard(QDialog):
 
         # interceptar guardar para refrescar cfg padre
         orig_save = self.editor._save
-        def _save_and_callback():
-            orig_save()
+        def _save_and_callback(*args, **kwargs):
+            orig_save(*args, **kwargs)
             if callable(self._on_saved):
                 self._on_saved()
         self.editor._save = _save_and_callback
