@@ -37,7 +37,6 @@ from PySide6 import QtCore, QtWidgets
 from datetime import datetime
 from ..core.git_fast import get_current_branch_fast
 import shiboken6
-from buildtool.core import errguard
 from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
 
 def safe_slot(fn: Callable):
