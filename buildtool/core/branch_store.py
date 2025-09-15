@@ -1,7 +1,7 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 import json
 import os
 import time
@@ -72,6 +72,59 @@ class BranchRecord:
 Index = Dict[str, BranchRecord]
 
 
+_BRANCH_RECORD_FIELDS = {f.name for f in fields(BranchRecord)}
+_LEGACY_FIELD_ALIASES = {
+    "last_update": "last_updated_at",
+    "last_update_by": "last_updated_by",
+}
+_BOOL_FIELDS = {"exists_local", "exists_origin"}
+_INT_FIELDS = {"created_at", "last_updated_at"}
+
+
+def _normalize_record_payload(raw: Any) -> Optional[BranchRecord]:
+    if not isinstance(raw, dict):
+        return None
+
+    data: Dict[str, Any] = {}
+
+    for key, value in raw.items():
+        if key in _BRANCH_RECORD_FIELDS:
+            data[key] = value
+
+    for legacy, new in _LEGACY_FIELD_ALIASES.items():
+        if new not in data and legacy in raw:
+            data[new] = raw[legacy]
+
+    if not data.get("branch"):
+        return None
+
+    for key in _INT_FIELDS:
+        if key in data:
+            try:
+                data[key] = int(data[key])
+            except (TypeError, ValueError):
+                data[key] = 0
+
+    for key in _BOOL_FIELDS:
+        if key in data:
+            value = data[key]
+            if isinstance(value, str):
+                lowered = value.strip().lower()
+                if lowered in {"", "false", "0", "no"}:
+                    data[key] = False
+                elif lowered in {"true", "1", "yes"}:
+                    data[key] = True
+                else:
+                    data[key] = bool(value)
+            else:
+                data[key] = bool(value)
+
+    try:
+        return BranchRecord(**data)
+    except Exception:
+        return None
+
+
 # ---------------- index persistence -----------------
 
 def load_index(path: Optional[Path] = None) -> Index:
@@ -84,11 +137,10 @@ def load_index(path: Optional[Path] = None) -> Index:
         return {}
     items = {}
     for rec in raw.get("items", []):
-        try:
-            br = BranchRecord(**rec)
-            items[br.key()] = br
-        except Exception:
+        br = _normalize_record_payload(rec)
+        if not br:
             continue
+        items[br.key()] = br
     return items
 
 
