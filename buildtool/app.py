@@ -1,9 +1,87 @@
 # buildtool/app.py
 from __future__ import annotations
-import sys, os, traceback, atexit
 
-from .core.errguard import install_error_guard, on_about_to_quit_flush, log
-from .core.qt_silence import setup_qt_logging  # ← filtra niveles de Qt (no instala handler)
+import sys, os, traceback, atexit
+from importlib import util as _importlib_util
+from pathlib import Path
+
+# PyInstaller ejecuta este archivo como script suelto (sin paquete). Aseguramos que el
+# paquete `buildtool` sea importable agregando los directorios relevantes al sys.path
+# cuando no hay paquete padre definido.
+if __package__ in (None, ""):
+    here = Path(__file__).resolve()
+
+    def _has_buildtool() -> bool:
+        try:
+            return _importlib_util.find_spec("buildtool.core") is not None
+        except Exception:
+            return False
+
+    def _candidate_paths() -> list[Path]:
+        """Yield candidate sys.path entries in priority order.
+
+        Cubrimos distintos escenarios:
+          * ejecución congelada (uno o varios directorios en _MEIPASS)
+          * distribución onedir donde el script vive junto al paquete
+          * ejecución desde el árbol de fuentes (hay que subir al repositorio)
+        """
+
+        roots: list[Path] = []
+
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                mp = Path(meipass)
+                roots.append(mp)
+
+                # Algunas variantes de PyInstaller guardan los módulos Python
+                # en subcarpetas/zip dentro de _MEIPASS (Lib, library.zip, etc.).
+                for extra in ("Lib", "library.zip"):
+                    maybe = mp / extra
+                    roots.append(maybe)
+
+        # Directorio que contiene el script (congelado o no).
+        roots.append(here)
+
+        # Padre directo del repositorio/paquete cuando `app.py` vive dentro de buildtool/.
+        roots.append(here.parent)
+
+        # Padre del paquete cuando `app.py` vive dentro de buildtool/.
+        for parent in here.parents:
+            roots.append(parent)
+            # No necesitamos recorrer toda la raíz del disco.
+            if parent == parent.parent:
+                break
+
+        # Evitar duplicados preservando orden.
+        deduped: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            try:
+                resolved = root.resolve()
+            except Exception:
+                continue
+            path_str = str(resolved)
+            if path_str in seen:
+                continue
+            seen.add(path_str)
+            deduped.append(resolved)
+        return deduped
+
+    if not _has_buildtool():
+        for candidate in _candidate_paths():
+            if not candidate.exists():
+                continue
+
+            path_str = str(candidate)
+            if path_str not in sys.path:
+                sys.path.insert(0, path_str)
+
+            if _has_buildtool():
+                break
+
+from buildtool.core.errguard import install_error_guard, on_about_to_quit_flush, log
+from buildtool.core.qt_silence import setup_qt_logging  # ← filtra niveles de Qt (no instala handler)
 
 # Bitácora adicional (opcional) en el HOME del usuario
 CRASH_LOG = os.path.join(os.path.expanduser("~"), "forgebuild_crash.log")
@@ -89,7 +167,7 @@ def main():
         sys.unraisablehook = _unraisable_hook
 
     # 6) Crear y mostrar la ventana principal
-    from .main_window import MainWindow
+    from buildtool.main_window import MainWindow
     log("== app.main: importing MainWindow ok ==")
     w = MainWindow()
     log("== app.main: MainWindow() constructed ==")
@@ -109,7 +187,7 @@ def main():
         rc = app.exec()
     finally:
         try:
-            from .core.thread_tracker import TRACKER
+            from buildtool.core.thread_tracker import TRACKER
             TRACKER.stop_all(timeout_ms=7000)
         except Exception:
             pass
