@@ -224,6 +224,7 @@ class GitView(QWidget):
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
 
+
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
         self.btnRefresh.clicked.connect(self._post_project_change)
@@ -419,6 +420,7 @@ class GitView(QWidget):
             self.treeHist.resizeColumnToContents(0)
             self.treeHist.resizeColumnToContents(1)
             self.treeHist.resizeColumnToContents(2)
+
         except Exception as e:
             self._dbg(f"_refresh_branch_index: ERROR {e}")
         finally:
@@ -476,6 +478,7 @@ class GitView(QWidget):
             self._refresh_history()
             self._refresh_summary()
             self._refresh_branch_index()
+
             cb = getattr(self, "_pending_done_cb", None)
             if cb:
                 try:
@@ -616,6 +619,7 @@ class GitView(QWidget):
             error="Error al reconciliar"
         )
 
+
     @safe_slot
     def _do_recover_nas(self):
         def task():
@@ -626,6 +630,7 @@ class GitView(QWidget):
             return True
         self._start_task("Recuperar NAS", task, success="Historial recuperado de NAS", error="Error al recuperar NAS")
 
+
     @safe_slot
     def _do_publish_nas(self):
         def task():
@@ -635,3 +640,4 @@ class GitView(QWidget):
             emit("[task] DONE")
             return True
         self._start_task("Publicar NAS", task, success="Historial publicado en NAS", error="Error al publicar NAS")
+
