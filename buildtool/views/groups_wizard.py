@@ -303,14 +303,26 @@ class ProjectEditor(QWidget):
         )
 
     def _refresh_modules_list(self):
+        prev_row = self._current_module_row if 0 <= self._current_module_row < len(self._modules) else 0
+        self.lstModules.blockSignals(True)
         self.lstModules.clear()
         for m in self._modules:
-            self.lstModules.addItem(QListWidgetItem(m.name))
+            self.lstModules.addItem(QListWidgetItem(m.name or ""))
         if self._modules:
-            self.lstModules.setCurrentRow(0)
-            self._current_module_row = 0
+            new_row = prev_row if prev_row < len(self._modules) else len(self._modules) - 1
+            self.lstModules.setCurrentRow(new_row)
+        else:
+            new_row = -1
+            self.lstModules.clearSelection()
+        self.lstModules.blockSignals(False)
+
+        if new_row >= 0:
+            self._current_module_row = new_row
+            self.moduleEditor.set_from_module(self._modules[new_row])
         else:
             self._current_module_row = -1
+            empty = Module(name="", path="", goals=["clean", "package"])
+            self.moduleEditor.set_from_module(empty)
 
     def _load_selected_module(self, row: int):
         if 0 <= self._current_module_row < len(self._modules):
@@ -336,9 +348,13 @@ class ProjectEditor(QWidget):
         self._refresh_modules_list()
 
     def apply_editor_to_current(self):
-        row = self.lstModules.currentRow()
+        row = self._current_module_row
         if 0 <= row < len(self._modules):
-            self._modules[row] = self.moduleEditor.to_module()
+            updated = self.moduleEditor.to_module()
+            self._modules[row] = updated
+            item = self.lstModules.item(row)
+            if item is not None:
+                item.setText(updated.name or "")
 
 # ----------------------------- GroupEditor -----------------------------
 
