@@ -105,14 +105,14 @@ groups:
     project_key: PDF
     profiles:
     - qa
-    path_template: \\192.168.8.236\repositorio\PDF\Versiones QA\{version}\
-    hotfix_path_template: \\192.168.8.236\repositorio\PDF\hotfix\{version}\
+    path_template: \\NAS\repositorio\PDF\Versiones QA\{version}\
+    hotfix_path_template: \\NAS\repositorio\PDF\hotfix\{version}\
   - name: Auto-produccion
     project_key: PDF
     profiles:
     - produccion
-    path_template: \\192.168.8.236\repositorio\PDF\versiones\{version}\
-    hotfix_path_template: \\192.168.8.236\repositorio\PDF\hotfix
+    path_template: \\NAS\repositorio\PDF\versiones\{version}\
+    hotfix_path_template: \\NAS\repositorio\PDF\hotfix
   - name: Auto-desarrollo
     project_key: PDF
     profiles:
@@ -238,49 +238,49 @@ groups:
     project_key: ELLIS
     profiles:
     - ProduccionAExpansion
-    path_template: \\192.168.8.236\repositorio\ELLiS\AExpansion\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\AExpansion\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionImpulso
     project_key: ELLIS
     profiles:
     - ProduccionImpulso
-    path_template: \\192.168.8.236\repositorio\ELLiS\Impulso\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\Impulso\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionFN2
     project_key: ELLIS
     profiles:
     - ProduccionFN2
-    path_template: \\192.168.8.236\repositorio\ELLiS\FN2\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\FN2\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionProfinancia
     project_key: ELLIS
     profiles:
     - ProduccionProfinancia
-    path_template: \\192.168.8.236\repositorio\ELLiS\Profinancia\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\Profinancia\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionAsset
     project_key: ELLIS
     profiles:
     - ProduccionAsset
-    path_template: \\192.168.8.236\repositorio\ELLiS\Asset\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\Asset\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionActiva
     project_key: ELLIS
     profiles:
     - ProduccionActiva
-    path_template: \\192.168.8.236\repositorio\ELLiS\Activa\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\Activa\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionTaiyari
     project_key: ELLIS
     profiles:
     - ProduccionTaiyari
-    path_template: \\192.168.8.236\repositorio\ELLiS\Taiyari\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\Taiyari\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-ProduccionSmart
     project_key: ELLIS
     profiles:
     - ProduccionSmart
-    path_template: \\192.168.8.236\repositorio\ELLiS\Smart\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\Smart\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-Desarrollo
     project_key: ELLIS
@@ -292,22 +292,22 @@ groups:
     project_key: ELLIS
     profiles:
     - ProduccionCentral
-    path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\versiones\{version}\Clear
+    path_template: \\NAS\repositorio\ELLiS\Central_Leasing\versiones\{version}\Clear
       Leasing
-    hotfix_path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Clear
+    hotfix_path_template: \\NAS\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Clear
       Leasing
   - name: ProduccionTactical
     project_key: ELLIS
     profiles:
     - ProduccionTactical
-    path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\versiones\{version}\Tactical
-    hotfix_path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Tactical
+    path_template: \\NAS\repositorio\ELLiS\Central_Leasing\versiones\{version}\Tactical
+    hotfix_path_template: \\NAS\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Tactical
   - name: ProduccionCapital
     project_key: ELLIS
     profiles:
     - ProduccionCapital
-    path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\versiones\{version}\Capital
-    hotfix_path_template: \\192.168.8.236\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Capital
+    path_template: \\NAS\repositorio\ELLiS\Central_Leasing\versiones\{version}\Capital
+    hotfix_path_template: \\NAS\repositorio\ELLiS\Central_Leasing\hotfix\{version}\Capital
 - key: GSA
   repos:
     GSA: C:/Proyectos/GSA
@@ -435,7 +435,7 @@ groups:
     project_key: GSA
     profiles:
     - ProduccionGSA
-    path_template: \\192.168.8.236\repositorio\ELLiS\GSA_Leasing\versiones\{version}\
+    path_template: \\NAS\repositorio\ELLiS\GSA_Leasing\versiones\{version}\
     hotfix_path_template: null
   - name: Auto-Desarrollo
     project_key: GSA
@@ -481,5 +481,5 @@ groups:
     profiles:
     - desarrollo
     - produccion
-    path_template: \\192.168.8.236\repositorio\PDF\FPCorreos\versiones\{version}\
-    hotfix_path_template: \\192.168.8.236\repositorio\PDF\FPCorreos\versiones\{version}\
+    path_template: \\NAS\repositorio\PDF\FPCorreos\versiones\{version}\
+    hotfix_path_template: \\NAS\repositorio\PDF\FPCorreos\versiones\{version}\
