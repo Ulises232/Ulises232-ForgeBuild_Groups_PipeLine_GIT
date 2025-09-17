@@ -1,11 +1,13 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget
 from PySide6.QtCore import Qt
+from typing import Optional
+
+from buildtool import __version__
+from buildtool.core.thread_tracker import TRACKER
 from .core.config import load_config, Config
 from .views.pipeline_view import PipelineView
 from .views.git_view import GitView
 from .views.groups_wizard import GroupsWizard
-from typing import Optional
-from buildtool.core.thread_tracker import TRACKER
 
 
 TAB_PIPELINE = "Pipeline"
@@ -14,7 +16,7 @@ TAB_GIT = "Repos (Git)"
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ForgeBuild (Grupos)")
+        self.setWindowTitle(f"ForgeBuild (Grupos) v{__version__}")
         self.resize(1200, 760)
         self.cfg: Config = load_config()
         self._groups_win: Optional[GroupsWizard] = None
