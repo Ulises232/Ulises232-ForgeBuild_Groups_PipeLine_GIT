@@ -1,6 +1,17 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTabWidget
-from PySide6.QtCore import Qt
+from pathlib import Path
 from typing import Optional
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QSplitter,
+    QTabWidget,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from buildtool import __version__
 from buildtool.core.thread_tracker import TRACKER
@@ -8,6 +19,7 @@ from .core.config import load_config, Config
 from .views.pipeline_view import PipelineView
 from .views.git_view import GitView
 from .views.groups_wizard import GroupsWizard
+from .ui.icons import get_icon
 
 
 TAB_PIPELINE = "Pipeline"
@@ -16,16 +28,73 @@ TAB_GIT = "Repos (Git)"
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
+        self.setObjectName("MainWindow")
         self.setWindowTitle(f"ForgeBuild (Grupos) v{__version__}")
-        self.resize(1200, 760)
+        self.resize(1280, 780)
         self.cfg: Config = load_config()
         self._groups_win: Optional[GroupsWizard] = None
-        root = QVBoxLayout(self); root.setContentsMargins(8,8,8,8); root.setSpacing(8)
-        header = QHBoxLayout(); header.setSpacing(8)
-        self.btnGroups = QPushButton("Config/Wizard"); header.addWidget(self.btnGroups); header.addStretch(); root.addLayout(header)
-        self.tabs = QTabWidget(); self.tabs.setTabPosition(QTabWidget.North); self.tabs.setMovable(False); root.addWidget(self.tabs, 1)
-        self.pipeline = PipelineView(self.cfg, self.reload_config); self.tabs.addTab(self.pipeline, TAB_PIPELINE)
-        self.git = GitView(self.cfg, self); self.tabs.addTab(self.git, TAB_GIT)
+        self._ensure_theme()
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
+
+        splitter = QSplitter(Qt.Vertical)
+        splitter.setObjectName("mainSplitter")
+        splitter.setHandleWidth(2)
+        root.addWidget(splitter)
+
+        header_widget = QWidget()
+        header_widget.setObjectName("headerPanel")
+        header_widget.setMaximumHeight(96)
+        header_widget.setMinimumHeight(80)
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(16, 16, 16, 16)
+        header_layout.setSpacing(12)
+
+        icon_label = QLabel()
+        icon_label.setPixmap(get_icon("app").pixmap(48, 48))
+        header_layout.addWidget(icon_label)
+
+        title_block = QVBoxLayout()
+        title_block.setContentsMargins(0, 0, 0, 0)
+        title_block.setSpacing(4)
+        title = QLabel("ForgeBuild")
+        title.setProperty("role", "title")
+        subtitle = QLabel(f"Grupos — v{__version__}")
+        subtitle.setProperty("role", "subtitle")
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+        header_layout.addLayout(title_block, 1)
+
+        self.btnGroups = QToolButton()
+        self.btnGroups.setText("Config/Wizard")
+        self.btnGroups.setIcon(get_icon("config"))
+        self.btnGroups.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.btnGroups.setAutoRaise(True)
+        header_layout.addWidget(self.btnGroups)
+
+        splitter.addWidget(header_widget)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+
+        self.tabs = QTabWidget()
+        self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setMovable(False)
+        content_layout.addWidget(self.tabs)
+
+        self.pipeline = PipelineView(self.cfg, self.reload_config)
+        self.git = GitView(self.cfg, self)
+        self.tabs.addTab(self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
+        self.tabs.addTab(self.git, get_icon("git"), TAB_GIT)
+
+        splitter.addWidget(content)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([header_widget.sizeHint().height(), 640])
         self.btnGroups.clicked.connect(self.open_groups)
 
     def reload_config(self):
@@ -33,7 +102,8 @@ class MainWindow(QWidget):
         self.tabs.removeTab(1); self.git.deleteLater()
         self.tabs.removeTab(0); self.pipeline.deleteLater()
         self.pipeline = PipelineView(self.cfg, self.reload_config); self.git = GitView(self.cfg, self)
-        self.tabs.insertTab(0, self.pipeline, TAB_PIPELINE); self.tabs.insertTab(1, self.git, TAB_GIT)
+        self.tabs.insertTab(0, self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
+        self.tabs.insertTab(1, self.git, get_icon("git"), TAB_GIT)
         self.tabs.setCurrentIndex(idx if idx < self.tabs.count() else 0)
 
     def open_groups(self):
@@ -55,3 +125,17 @@ class MainWindow(QWidget):
         except Exception:
             pass
         super().closeEvent(event)
+
+    def _ensure_theme(self) -> None:
+        app = QApplication.instance()
+        if not app:
+            return
+        if getattr(app, "_forgebuild_theme_loaded", False):
+            return
+        theme_path = Path(__file__).resolve().parent / "ui" / "theme.qss"
+        try:
+            data = theme_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        app.setStyleSheet(data)
+        setattr(app, "_forgebuild_theme_loaded", True)
