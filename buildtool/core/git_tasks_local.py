@@ -4,7 +4,7 @@
 # - Ejecuta por cada repo detectado y muestra comandos + cwd + rc.
 from __future__ import annotations
 from pathlib import Path
-from typing import Optional, Iterable, Tuple, List, Iterator, Dict, Any
+from typing import Optional, Iterable, Tuple, List, Iterator, Dict, Any, Set
 import os
 import subprocess
 import getpass
@@ -18,6 +18,7 @@ from buildtool.core.branch_store import (
     record_activity,
 )
 from buildtool.core.git_console_trace import clog
+from buildtool.core.git_tasks import _iter_modules as _iter_modules_cfg
 
 # --------------------- helpers de salida y ejecución ---------------------
 
@@ -178,48 +179,61 @@ def _get_herr_repo() -> Path | None:
     except Exception:
         return None
 
+def _resolve_module_path(raw: Path) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path.resolve(strict=False)
+    base = _get_herr_repo()
+    if base:
+        return (base / path).resolve(strict=False)
+    return (Path.cwd() / path).resolve(strict=False)
+
+
 def _iter_cfg_modules(
     cfg, gkey: Optional[str], pkey: Optional[str], only_modules: Optional[Iterable[str]]
 ) -> Iterator[Tuple[str, Path]]:
     """
-    Itera módulos/roots definidos en cfg, devolviendo (nombre_modulo, path).
-    Soporta:
-      - cfg.groups[*].projects[*].modules[*]
-      - cfg.groups[*].projects[*].root (cuando no hay modules)
-      - cfg.groups[*].repos (dict nombre->path)
-      - cfg.projects[*].modules[*] / cfg.projects[*].root
+    Itera módulos/repos declarados en la configuración y devuelve (nombre, path).
+    Respeta la resolución de rutas del wizard (_resolve_repo_path) y aplica un
+    fallback contra HERR_REPO o el cwd para rutas relativas.
     """
-    filt = set(only_modules or [])
-    base = _get_herr_repo()
-    # -------- 1) Estructura con groups ----------
-    if getattr(cfg, "groups", None):
-        for g in cfg.groups:
-            if gkey and getattr(g, "key", None) != gkey:
+
+    filt: Set[str] = set(only_modules or [])
+    iter_only = filt or None
+
+    for _g, _p, module, module_path in _iter_modules_cfg(cfg, gkey, pkey, iter_only):
+        name = (
+            getattr(module, "name", None)
+            or getattr(module, "key", None)
+            or str(getattr(module, "path", "") or "")
+        ) or "mod"
+        yield name, _resolve_module_path(Path(module_path))
+
+    groups = getattr(cfg, "groups", None) or []
+    for g in groups:
+        if gkey and getattr(g, "key", None) != gkey:
+            continue
+        repos = getattr(g, "repos", None) or {}
+        for name, raw in repos.items():
+            if filt and name not in filt:
                 continue
-            projects = getattr(g, "projects", None) or []
-            for p in projects:
-                if pkey and getattr(p, "key", None) != pkey:
-                    continue
-                modules = getattr(p, "modules", None) or []
-                if modules:
-                    for m in modules:
-                        name = (
-                            getattr(m, "name", None)
-                            or getattr(m, "key", None)
-                            or str(getattr(m, "path", "") or "")
-                        )
-                        if filt and name not in filt:
-                            continue
-                        rel = getattr(m, "path", ".") or "."
-                        relp = Path(os.path.expanduser(os.path.expandvars(rel)))
-                        # si rel es absoluto, úsalo tal cual; si no, cuélgalo de HERR_REPO
-                        mod_path = (relp if relp.is_absolute() else (base / relp)).resolve(strict=False)
-                        yield (name or "mod", mod_path)
-                else:
-                    # Sin módulos: si quieres que el proyecto viva en HERR_REPO directamente:
-                    name = getattr(p, "key", None) or "root"
-                    yield (name, base.resolve(strict=False))
-        return
+            p = Path(os.path.expanduser(os.path.expandvars(str(raw))))
+            yield name, (p if p.is_absolute() else _resolve_module_path(p))
+
+    if not groups:
+        projects = getattr(cfg, "projects", None) or []
+        for proj in projects:
+            if pkey and getattr(proj, "key", None) != pkey:
+                continue
+            modules = getattr(proj, "modules", None) or []
+            if modules:
+                continue
+            name = getattr(proj, "key", None) or "root"
+            if filt and name not in filt:
+                continue
+            rel = getattr(proj, "root", ".") or "."
+            relp = Path(os.path.expanduser(os.path.expandvars(str(rel))))
+            yield name, (relp if relp.is_absolute() else _resolve_module_path(relp))
 
 def _discover_repos(cfg, gkey, pkey, only_modules, emit=None) -> List[Tuple[str, Path]]:
     """
@@ -276,23 +290,14 @@ def _module_index(
     cfg, gkey: Optional[str], pkey: Optional[str]
 ) -> Dict[str, Any]:
     index: Dict[str, Any] = {}
-    groups = getattr(cfg, "groups", None) or []
-    for g in groups:
-        if gkey and getattr(g, "key", None) != gkey:
-            continue
-        projects = getattr(g, "projects", None) or []
-        for p in projects:
-            if pkey and getattr(p, "key", None) != pkey:
-                continue
-            modules = getattr(p, "modules", None) or []
-            for m in modules:
-                name = (
-                    getattr(m, "name", None)
-                    or getattr(m, "key", None)
-                    or str(getattr(m, "path", "") or "")
-                )
-                if name and name not in index:
-                    index[name] = m
+    for _g, _p, module, _path in _iter_modules_cfg(cfg, gkey, pkey, None):
+        name = (
+            getattr(module, "name", None)
+            or getattr(module, "key", None)
+            or str(getattr(module, "path", "") or "")
+        )
+        if name and name not in index:
+            index[name] = module
     return index
 
 
