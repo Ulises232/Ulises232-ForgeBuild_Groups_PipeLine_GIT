@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Iterable
 import json
 import os
 import time
@@ -169,7 +169,13 @@ def _append_log(lines: List[str], path: Path) -> None:
             fh.write(ln + "\n")
 
 
-def record_activity(action: str, rec: BranchRecord, result: str = "ok", message: str = "") -> None:
+def record_activity(
+    action: str,
+    rec: BranchRecord,
+    result: str = "ok",
+    message: str = "",
+    targets: Iterable[str] = ("local",),
+) -> None:
     entry = {
         "ts": int(time.time()),
         "user": rec.last_updated_by or rec.created_by,
@@ -180,8 +186,16 @@ def record_activity(action: str, rec: BranchRecord, result: str = "ok", message:
         "result": result,
         "message": message,
     }
-    p = _log_path(_state_dir())
-    _append_log([json.dumps(entry, ensure_ascii=False)], p)
+    seen: set[str] = set()
+    for target in targets:
+        if target in seen:
+            continue
+        seen.add(target)
+        if target == "nas":
+            path = _log_path(_nas_dir())
+        else:
+            path = _log_path(_state_dir())
+        _append_log([json.dumps(entry, ensure_ascii=False)], path)
 
 
 # ---------------- basic mutations -----------------
@@ -309,3 +323,32 @@ def merge_indexes(a: Index, b: Index) -> Index:
         if rec.last_updated_at >= existing.last_updated_at:
             out[key] = rec
     return out
+
+
+def load_nas_index() -> Index:
+    """Load the branches index stored in the NAS directory."""
+    return load_index(_index_path(_nas_dir()))
+
+
+def save_nas_index(index: Index) -> None:
+    """Persist the NAS index to disk."""
+    save_index(index, _index_path(_nas_dir()))
+
+
+def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
+    """Return parsed activity log entries from *path* (defaults to local log)."""
+    lines = _load_log(path or _log_path(_state_dir()))
+    entries: List[dict[str, Any]] = []
+    for ln in lines:
+        try:
+            entry = json.loads(ln)
+        except Exception:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return entries
+
+
+def load_nas_activity_log() -> List[dict[str, Any]]:
+    """Return parsed activity log entries stored in the NAS directory."""
+    return load_activity_log(_log_path(_nas_dir()))
