@@ -38,6 +38,8 @@ from datetime import datetime
 from ..core.git_fast import get_current_branch_fast
 import shiboken6
 from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
+from .nas_activity_log_view import NasActivityLogView
+from .nas_branches_view import NasBranchesView
 
 def safe_slot(fn: Callable):
     @wraps(fn)
@@ -125,11 +127,11 @@ class GitView(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        tabs = QTabWidget()
-        root.addWidget(tabs, 1)
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs, 1)
 
         main = QWidget()
-        tabs.addTab(main, "Repos Git")
+        self.tabs.addTab(main, "Repos Git")
         top_wrap = QVBoxLayout(main)
 
         proj = QGridLayout()
@@ -228,7 +230,7 @@ class GitView(QWidget):
         top_wrap.addWidget(grh)
 
         console = QWidget()
-        tabs.addTab(console, "Consola")
+        self.tabs.addTab(console, "Consola")
         clog_layout = QVBoxLayout(console)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
@@ -241,6 +243,11 @@ class GitView(QWidget):
         clog_layout.addLayout(hcl)
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
+
+        self.nasBranchesView = NasBranchesView(self)
+        self.tabs.addTab(self.nasBranchesView, "Historial NAS")
+        self.nasActivityView = NasActivityLogView(self)
+        self.tabs.addTab(self.nasActivityView, "Activity NAS")
 
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
