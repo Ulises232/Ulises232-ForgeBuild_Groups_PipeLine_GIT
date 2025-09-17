@@ -38,6 +38,7 @@ def _resolve_module_path(raw: Optional[str], base: Optional[Path], env_base: Opt
 
 def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tuple[str, Path]]:
     entries: List[Tuple[str, Path]] = []
+    module_paths: set[Path] = set()
     env_base = None
     herr_raw = (os.environ.get("HERR_REPO", "") or "").strip()
     if herr_raw:
@@ -58,6 +59,8 @@ def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tup
                 if pkey and getattr(p, "key", None) != pkey:
                     continue
                 base = _resolve_base_path(getattr(p, "root", None), env_base)
+                if base:
+                    module_paths.add(base)
                 modules = getattr(p, "modules", None) or []
                 if modules:
                     for m in modules:
@@ -67,6 +70,7 @@ def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tup
                             or str(getattr(m, "path", "") or "")
                         )
                         path = _resolve_module_path(getattr(m, "path", None), base, env_base)
+                        module_paths.add(path)
                         _push(name, path)
                 elif base:
                     proj_name = getattr(p, "key", None) or "root"
@@ -75,6 +79,8 @@ def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tup
             if isinstance(repos, dict):
                 for name, raw in repos.items():
                     path = _resolve_module_path(raw, None, env_base)
+                    if any(path == mp or path in mp.parents for mp in module_paths):
+                        continue
                     _push(str(name), path)
     else:
         projects = getattr(cfg, "projects", None) or []
@@ -82,6 +88,8 @@ def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tup
             if pkey and getattr(p, "key", None) != pkey:
                 continue
             base = _resolve_base_path(getattr(p, "root", None), env_base)
+            if base:
+                module_paths.add(base)
             modules = getattr(p, "modules", None) or []
             if modules:
                 for m in modules:
@@ -91,6 +99,7 @@ def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tup
                         or str(getattr(m, "path", "") or "")
                     )
                     path = _resolve_module_path(getattr(m, "path", None), base, env_base)
+                    module_paths.add(path)
                     _push(name, path)
             elif base:
                 proj_name = getattr(p, "key", None) or "root"
