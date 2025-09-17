@@ -92,11 +92,20 @@ if not "%SKIP_DEPS%"=="1" (
   echo Dependencias existentes listas.
 )
 
+echo Preparando icono...
+python -m buildtool.icon_factory
+if errorlevel 1 (
+  echo No se pudo generar el icono requerido para el ejecutable.
+  exit /b 1
+)
+
 echo Construyendo ejecutable...
 pyinstaller --noconfirm ^
   --name ForgeBuild ^
   --windowed ^
+  --icon "assets\\forgebuild.ico" ^
   --collect-all PySide6 ^
+  --add-data "VERSION;." ^
   --add-data "buildtool/data;buildtool/data" ^
   buildtool/app.py
 

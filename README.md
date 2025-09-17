@@ -88,6 +88,11 @@ build_exe.bat --deploy \\servidor\ruta\compartida
 
 > Nota: si detecta cambios en `requirements.txt` o ausencia de PyInstaller dentro del entorno virtual, el script reinstalará dependencias aunque se haya especificado `--skip-deps`.
 
+### 3.5 Versionado y registro de cambios
+- La versión oficial de la aplicación se declara en el archivo de texto `VERSION` (en la raíz del repositorio). Ese mismo número se muestra en la ventana principal y puede ser reutilizado por otros procesos (CI, empaquetado, etc.).
+- El historial detallado de funcionalidades, mejoras y correcciones se mantiene en `CHANGELOG.md`, siguiendo el estilo de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
+- Al liberar una nueva iteración, actualiza `VERSION` y añade una sección correspondiente en el changelog con la fecha y los cambios relevantes.
+
 ## 4. Configuración
 ### 4.1 Ubicación y ciclo de vida del archivo
 - Al iniciar por primera vez, la aplicación copia `buildtool/data/config.yaml` a `%APPDATA%\ForgeBuild\config.yaml` (Windows) o `~/.forgebuild/config.yaml` (otros sistemas).
