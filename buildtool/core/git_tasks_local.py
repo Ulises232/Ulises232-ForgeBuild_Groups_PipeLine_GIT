@@ -144,12 +144,44 @@ def _get_record(index, gkey, pkey, branch) -> BranchRecord:
 
 
 def _is_git_repo(path: Path, emit=None) -> bool:
-    """Devuelve True si path está dentro de un repo git. Loguea de forma segura."""
+    """Devuelve True si path está dentro de un repo git sin ejecutar comandos."""
+
     try:
-        res = _run_quiet(["git", "rev-parse", "--is-inside-work-tree"], path)
+        current = Path(path).resolve(strict=False)
     except Exception:
         return False
-    return res.returncode == 0
+
+    # Camina hacia arriba buscando indicadores de repositorio.
+    visited: Set[Path] = set()
+    while True:
+        if current in visited:
+            break
+        visited.add(current)
+
+        dot_git = current / ".git"
+        if dot_git.is_dir():
+            return True
+        if dot_git.is_file():
+            try:
+                content = dot_git.read_text(encoding="utf-8", errors="ignore").strip()
+            except Exception:
+                content = ""
+            if content.lower().startswith("gitdir:"):
+                target = content.split(":", 1)[1].strip()
+                gitdir = (current / target).resolve(strict=False)
+                if gitdir.exists():
+                    return True
+
+        # Repos bare (sin carpeta .git) tienen HEAD + objects en la raíz.
+        if (current / "HEAD").is_file() and (current / "objects").is_dir():
+            return True
+
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+
+    return False
 
 
 # --------------------- descubrimiento de módulos/repos ---------------------
