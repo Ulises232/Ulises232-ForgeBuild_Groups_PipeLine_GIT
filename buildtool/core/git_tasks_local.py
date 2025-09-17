@@ -146,11 +146,10 @@ def _get_record(index, gkey, pkey, branch) -> BranchRecord:
 def _is_git_repo(path: Path, emit=None) -> bool:
     """Devuelve True si path está dentro de un repo git. Loguea de forma segura."""
     try:
-        rc, _ = _run(["git", "rev-parse", "--is-inside-work-tree"], path, emit=emit)
-        return rc == 0
-    except Exception as e:
-        _out(emit, f"[is_git_repo] EXCEPTION {e}")
+        res = _run_quiet(["git", "rev-parse", "--is-inside-work-tree"], path)
+    except Exception:
         return False
+    return res.returncode == 0
 
 
 # --------------------- descubrimiento de módulos/repos ---------------------
