@@ -1,28 +1,13 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QComboBox
-from PySide6.QtCore import QThread
+from PySide6.QtCore import Qt, QThread
+
+from ..core.bg import run_in_thread
 from ..core.config import Config
 from ..core.tasks import build_project_scheduled
+from ..core.thread_tracker import TRACKER
+from ..core.workers import PipelineWorker, build_worker
 
-from ..ui.multi_select import Logger, MultiSelectComboBox
-
-def _run_build_scheduled(
-    cfg: Config,
-    group_key: str,
-    project_key: str,
-    profiles: list[str],
-    modules: list[str],
-    logger: Logger,
-) -> None:
-    def emit(s: str): logger.line.emit(s)
-    try:
-        build_project_scheduled(
-            cfg, project_key, profiles,
-            modules_filter=set(modules) if modules else None,
-            log_cb=emit, group_key=group_key
-        )
-        emit(">> Listo.")
-    except Exception as e:
-        emit(f"<< ERROR: {e}")
+from ..ui.multi_select import MultiSelectComboBox
 
 
 class BuildView(QWidget):
@@ -62,7 +47,7 @@ class BuildView(QWidget):
         self.cboGroup.currentIndexChanged.connect(self.refresh_group)
         self.cboProject.currentIndexChanged.connect(self.refresh_project_data)
 
-        self._worker = None
+        self._live_workers: list[tuple[QThread, PipelineWorker]] = []
         self.refresh_group()
 
     def _current_group(self):
@@ -131,10 +116,25 @@ class BuildView(QWidget):
             self.log.append("<< No hay proyecto configurado en este grupo."); return
         selected_modules = self.cboModules.checked_items() or self.cboModules.all_items()
 
-        logger = Logger(); logger.line.connect(lambda s: self.log.append(s))
-        self._worker = QThread(self)
-        self._worker.run = lambda: _run_build_scheduled(self.cfg, gkey, proj.key, profiles, selected_modules, logger)
-        self._worker.start()
+        self.btnBuildSel.setEnabled(False)
+        self.btnBuildAll.setEnabled(False)
+
+        modules_filter = set(selected_modules) if selected_modules else None
+        worker = build_worker(
+            build_project_scheduled,
+            success_message=">> Listo.",
+            cfg=self.cfg,
+            project_key=proj.key,
+            profiles=profiles,
+            modules_filter=modules_filter,
+            group_key=gkey,
+        )
+        thread, worker = run_in_thread(worker)
+        worker.progress.connect(self.log.append, Qt.QueuedConnection)
+        worker.finished.connect(lambda ok, th=thread, wk=worker: self._on_build_finished(th, wk), Qt.QueuedConnection)
+
+        self._live_workers.append((thread, worker))
+        thread.start()
 
     def start_build_selected(self):
         profiles = self.cboProfiles.checked_items()
@@ -145,3 +145,33 @@ class BuildView(QWidget):
         profiles = self.cboProfiles.all_items()
         if not profiles: self.log.append("<< No hay perfiles configurados."); return
         self._start_schedule(profiles)
+
+    def _on_build_finished(self, thread: QThread, worker) -> None:
+        self.btnBuildSel.setEnabled(True)
+        self.btnBuildAll.setEnabled(True)
+        self._cleanup_worker(thread, worker)
+
+    def _cleanup_worker(self, thread: QThread, worker) -> None:
+        if (thread, worker) not in self._live_workers:
+            return
+        self._live_workers.remove((thread, worker))
+        try:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(5000)
+        except Exception:
+            pass
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+        try:
+            thread.deleteLater()
+        except Exception:
+            pass
+        TRACKER.remove(thread)
+
+    def closeEvent(self, event):
+        for thread, worker in list(self._live_workers):
+            self._cleanup_worker(thread, worker)
+        super().closeEvent(event)
