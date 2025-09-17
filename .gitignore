@@ -6,3 +6,4 @@ build
 *.spec
 dist
 build_ruta_exe.bat
+assets/forgebuild.ico
