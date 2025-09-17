@@ -1,62 +1,13 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QLineEdit, QTextEdit, QAbstractItemView,
+    QComboBox, QLineEdit, QTextEdit,
     QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QObject, QThread
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtCore import QThread
 from ..core.config import Config
 from ..core.tasks import deploy_version
 
-# ---------- utilidades UI compartidas ----------
-
-class Logger(QObject):
-    line = Signal(str)
-
-class MultiSelectComboBox(QComboBox):
-    def __init__(self, placeholder="Selecciona…", show_max=2, parent=None):
-        super().__init__(parent)
-        self.setEditable(True)
-        self.lineEdit().setReadOnly(True)
-        self.lineEdit().setPlaceholderText(placeholder)
-        self.setInsertPolicy(QComboBox.NoInsert)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self._show_max = show_max
-        model = QStandardItemModel(self); self.setModel(model)
-        view = self.view(); view.setSelectionMode(QAbstractItemView.SingleSelection)
-        view.pressed.connect(self._on_item_pressed)
-        self.setStyleSheet("QComboBox{min-width:220px;padding:6px 10px;}")
-
-    def set_items(self, items, checked_all=False):
-        model: QStandardItemModel = self.model(); model.clear()
-        for text in items:
-            it = QStandardItem(text)
-            it.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            it.setData(Qt.Checked if checked_all else Qt.Unchecked, Qt.CheckStateRole)
-            model.appendRow(it)
-        self._refresh_display()
-
-    def all_items(self):
-        model: QStandardItemModel = self.model()
-        return [model.item(i).text() for i in range(model.rowCount())]
-
-    def checked_items(self):
-        out=[]; model: QStandardItemModel = self.model()
-        for i in range(model.rowCount()):
-            it: QStandardItem = model.item(i)
-            if it.checkState()==Qt.Checked: out.append(it.text())
-        return out
-
-    def _on_item_pressed(self, index):
-        model: QStandardItemModel = self.model()
-        it: QStandardItem = model.itemFromIndex(index)
-        it.setCheckState(Qt.Unchecked if it.checkState()==Qt.Checked else Qt.Checked)
-        self._refresh_display()
-
-    def _refresh_display(self):
-        sel=self.checked_items()
-        if not sel: self.lineEdit().setText(""); return
-        self.lineEdit().setText(", ".join(sel[:self._show_max]) + (f" +{len(sel)-self._show_max}" if len(sel)>self._show_max else ""))
+from ..ui.multi_select import Logger, MultiSelectComboBox
 
 # ---------- worker ----------
 
