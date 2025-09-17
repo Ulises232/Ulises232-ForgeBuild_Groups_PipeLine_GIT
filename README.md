@@ -72,7 +72,21 @@ Para crear un ejecutable independiente (Windows), ejecuta:
 ```bat
 build_exe.bat
 ```
-Esto crea/actualiza `.venv`, instala dependencias y construye `dist\ForgeBuild\ForgeBuild.exe` con todos los recursos (`PySide6`, datos YAML, etc.).
+El script ahora detecta si las dependencias ya fueron instaladas previamente dentro de `.venv` y reutiliza el entorno cuando `requirements.txt` no cambió. Esto evita reinstalaciones completas de `pip`/`PyInstaller` en cada corrida y reduce el tiempo de build.
+
+Opcionalmente puedes utilizar los nuevos parámetros:
+
+```bat
+build_exe.bat --skip-deps            & rem omite la verificación/instalación de dependencias
+build_exe.bat --force-deps           & rem reinstala dependencias aunque no haya cambios
+build_exe.bat --deploy \\servidor\ruta\compartida
+```
+
+- `--skip-deps` es útil cuando ya verificaste manualmente el entorno y solo quieres regenerar el `.exe`.
+- `--force-deps` fuerza la reinstalación si sospechas de un entorno corrupto.
+- `--deploy` copia automáticamente `dist\ForgeBuild\ForgeBuild.exe` a la ruta indicada (por ejemplo, una carpeta compartida o NAS), eliminando el paso manual de copiar el archivo.
+
+> Nota: si detecta cambios en `requirements.txt` o ausencia de PyInstaller dentro del entorno virtual, el script reinstalará dependencias aunque se haya especificado `--skip-deps`.
 
 ## 4. Configuración
 ### 4.1 Ubicación y ciclo de vida del archivo
