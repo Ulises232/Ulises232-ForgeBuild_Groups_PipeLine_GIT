@@ -456,20 +456,6 @@ def push_branch(
         raise RuntimeError("Nombre de rama vacío en push.")
 
     repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
-    if repos:
-        first = repos[0][1]
-        if _is_git_repo(first):
-            rc, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], first)
-            if rc == 0:
-                _out(emit, f"La rama ya existe en origin: {bname}")
-                idx = load_index()
-                rec = _get_record(idx, gkey, pkey, bname)
-                rec.exists_local = True
-                rec.exists_origin = True
-                rec.last_action = "push_skip"
-                rec.last_updated_by = _current_user()
-                upsert(rec, idx, action="push_skip")
-                return False
     ok_all = True
     for mname, mpath in repos:
         if not _is_git_repo(mpath, emit=emit):
