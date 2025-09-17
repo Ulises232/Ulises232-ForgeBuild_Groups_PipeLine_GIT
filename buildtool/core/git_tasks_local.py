@@ -35,9 +35,24 @@ def _out(emit, msg: str):
             pass
 
 
+if os.name == "nt":
+    def _popen_kwargs():
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+        return {
+            "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            "startupinfo": startup,
+        }
+else:
+    def _popen_kwargs():
+        return {}
+
+
 def _run(cmd: List[str], cwd: Path, emit=None) -> Tuple[int, str]:
     """Ejecuta un comando y transmite stdout/stderr línea por línea al logger."""
     _out(emit, f"$ {' '.join(cmd)}  (cwd={cwd})")
+    popen_kwargs = _popen_kwargs()
     p = subprocess.Popen(
         cmd,
         cwd=str(cwd),
@@ -45,6 +60,7 @@ def _run(cmd: List[str], cwd: Path, emit=None) -> Tuple[int, str]:
         stderr=subprocess.STDOUT,
         text=True,
         shell=False,
+        **popen_kwargs,
     )
     out = p.communicate()[0]
     for ln in out.splitlines():
@@ -52,6 +68,64 @@ def _run(cmd: List[str], cwd: Path, emit=None) -> Tuple[int, str]:
     rc = p.wait()
     _out(emit, f"[rc={rc}] {' '.join(cmd)}")
     return rc, out
+
+
+def _run_quiet(cmd: List[str], cwd: Path) -> subprocess.CompletedProcess:
+    popen_kwargs = _popen_kwargs()
+    return subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        shell=False,
+        **popen_kwargs,
+    )
+
+
+def _last_nonempty(text: str) -> str:
+    for line in reversed((text or "").splitlines()):
+        line = line.strip()
+        if line:
+            return line
+    return ""
+
+
+def _current_branch_name(path: Path) -> Optional[str]:
+    try:
+        res = _run_quiet(["git", "rev-parse", "--abbrev-ref", "HEAD"], path)
+    except Exception:
+        return None
+    if res.returncode != 0:
+        return None
+    return _last_nonempty(res.stdout)
+
+
+def _branch_exists_local(path: Path, branch: str) -> bool:
+    try:
+        res = _run_quiet(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"], path)
+    except Exception:
+        return False
+    return res.returncode == 0
+
+
+def _branch_exists_remote(path: Path, branch: str) -> bool:
+    try:
+        res = _run_quiet(["git", "ls-remote", "--exit-code", "--heads", "origin", branch], path)
+    except Exception:
+        return False
+    return res.returncode == 0
+
+
+def _switch_branch_with_fallback(path: Path, branch: str, emit=None) -> Tuple[bool, str]:
+    rc, out = _run(["git", "switch", branch], path, emit=emit)
+    if rc == 0:
+        return True, "switch"
+    rc2, out2 = _run(["git", "checkout", branch], path, emit=emit)
+    if rc2 == 0:
+        return True, "checkout"
+    reason = _last_nonempty(out2) or _last_nonempty(out) or "Error desconocido"
+    return False, reason
 
 
 def _current_user() -> str:
@@ -249,22 +323,54 @@ def switch_branch(
 
     repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
     ok_all = True
+    abort_remaining = False
+    switched: List[Tuple[str, Path, str]] = []
+    failures: List[Tuple[str, str]] = []
     for mname, mpath in repos:
+        if abort_remaining:
+            _out(emit, f"[{mname}] ⏭️ Omitido por error previo")
+            continue
+        if not mpath.exists():
+            _out(emit, f"[{mname}] ⚠️ Ruta no existe: {mpath}")
+            ok_all = False
+            failures.append((mname, "ruta inexistente"))
+            continue
         if not _is_git_repo(mpath, emit=emit):
             _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
             ok_all = False
+            failures.append((mname, "no es un repositorio Git"))
             continue
 
-        rc, _ = _run(["git", "switch", bname], mpath, emit=emit)
-        if rc != 0:
-            rc2, _ = _run(["git", "checkout", bname], mpath, emit=emit)
-            if rc2 != 0:
-                _out(emit, f"[{mname}] ❌ No se pudo hacer switch a '{bname}'")
-                ok_all = False
-            else:
-                _out(emit, f"[{mname}] ✅ switch con checkout: {bname}")
+        current = _current_branch_name(mpath)
+        if not current:
+            _out(emit, f"[{mname}] ❌ No se pudo determinar la rama actual.")
+            ok_all = False
+            failures.append((mname, "rama actual desconocida"))
+            abort_remaining = True
+            continue
+
+        ok, detail = _switch_branch_with_fallback(mpath, bname, emit=emit)
+        if ok:
+            verb = "switch" if detail == "switch" else "switch con checkout"
+            _out(emit, f"[{mname}] ✅ {verb}: {bname}")
+            switched.append((mname, mpath, current))
         else:
-            _out(emit, f"[{mname}] ✅ switch: {bname}")
+            _out(emit, f"[{mname}] ❌ No se pudo hacer switch a '{bname}': {detail}")
+            ok_all = False
+            failures.append((mname, detail))
+            abort_remaining = True
+
+    if not ok_all and switched:
+        _out(emit, "⚠️ Revirtiendo módulos al estado previo por errores en switch.")
+        for mname, mpath, prev in reversed(switched):
+            _out(emit, f"[{mname}] ↩ regresar a {prev}")
+            ok_back, detail = _switch_branch_with_fallback(mpath, prev, emit=emit)
+            if ok_back:
+                verb = "switch" if detail == "switch" else "switch con checkout"
+                _out(emit, f"[{mname}] ✅ {verb}: {prev}")
+            else:
+                _out(emit, f"[{mname}] ❌ No se pudo regresar a '{prev}': {detail}")
+
     if ok_all:
         idx = load_index()
         rec = _get_record(idx, gkey, pkey, bname)
@@ -272,7 +378,13 @@ def switch_branch(
         rec.last_action = "switch"
         rec.last_updated_by = _current_user()
         upsert(rec, idx, action="switch")
-    return ok_all
+        return True
+
+    if failures:
+        _out(emit, "❌ Switch global incompleto. Detalles:")
+        for mname, reason in failures:
+            _out(emit, f"   - {mname}: {reason}")
+    return False
 
 
 def delete_local_branch_by_name(
@@ -344,20 +456,6 @@ def push_branch(
         raise RuntimeError("Nombre de rama vacío en push.")
 
     repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
-    if repos:
-        first = repos[0][1]
-        if _is_git_repo(first):
-            rc, _ = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", bname], first)
-            if rc == 0:
-                _out(emit, f"La rama ya existe en origin: {bname}")
-                idx = load_index()
-                rec = _get_record(idx, gkey, pkey, bname)
-                rec.exists_local = True
-                rec.exists_origin = True
-                rec.last_action = "push_skip"
-                rec.last_updated_by = _current_user()
-                upsert(rec, idx, action="push_skip")
-                return False
     ok_all = True
     for mname, mpath in repos:
         if not _is_git_repo(mpath, emit=emit):
@@ -388,3 +486,78 @@ def push_branch(
     rec.last_updated_by = _current_user()
     upsert(rec, idx, action=rec.last_action)
     return ok_all
+
+
+def merge_into_current_branch(
+    cfg,
+    gkey,
+    pkey,
+    source: str,
+    push: bool,
+    emit=None,
+    only_modules: Optional[Iterable[str]] = None,
+) -> bool:
+    branch = (source or "").strip()
+    if not branch:
+        _out(emit, "❌ Nombre de rama de origen vacío en merge.")
+        raise RuntimeError("Nombre de rama de origen vacío en merge.")
+
+    repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
+    ok_all = True
+    issues: List[Tuple[str, str]] = []
+    for mname, mpath in repos:
+        if not mpath.exists():
+            _out(emit, f"[{mname}] ⚠️ Ruta no existe: {mpath}")
+            ok_all = False
+            issues.append((mname, "ruta inexistente"))
+            continue
+        if not _is_git_repo(mpath, emit=emit):
+            _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
+            ok_all = False
+            issues.append((mname, "no es un repositorio Git"))
+            continue
+
+        current = _current_branch_name(mpath) or "?"
+        _out(emit, f"[{mname}] ▶ merge '{branch}' sobre '{current}'")
+
+        exists_local = _branch_exists_local(mpath, branch)
+        exists_remote = _branch_exists_remote(mpath, branch)
+        if not exists_local and not exists_remote:
+            _out(emit, f"[{mname}] ❌ La rama '{branch}' no existe (local ni origin)")
+            ok_all = False
+            issues.append((mname, "rama inexistente"))
+            continue
+
+        merge_target = branch
+        if exists_remote:
+            _run(["git", "fetch", "origin", branch], mpath, emit=emit)
+            if not exists_local:
+                merge_target = f"origin/{branch}"
+
+        rc, out = _run(["git", "merge", "--no-edit", merge_target], mpath, emit=emit)
+        if rc != 0:
+            reason = _last_nonempty(out) or "conflictos durante el merge"
+            _out(emit, f"[{mname}] ❌ Merge con conflictos: {reason}")
+            ok_all = False
+            issues.append((mname, reason))
+            continue
+
+        _out(emit, f"[{mname}] ✅ Merge completado")
+        if push:
+            rc_push, out_push = _run(["git", "push"], mpath, emit=emit)
+            if rc_push != 0:
+                reason = _last_nonempty(out_push) or "push falló"
+                _out(emit, f"[{mname}] ⚠️ Push falló después del merge: {reason}")
+                ok_all = False
+                issues.append((mname, f"push falló: {reason}"))
+            else:
+                _out(emit, f"[{mname}] ☁️ Push origin")
+
+    if ok_all:
+        return True
+
+    if issues:
+        _out(emit, "❌ Merge global incompleto. Detalles:")
+        for mname, reason in issues:
+            _out(emit, f"   - {mname}: {reason}")
+    return False

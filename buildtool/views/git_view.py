@@ -27,7 +27,7 @@ from ..core.config import Config
 # Import our local-only shim
 from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
-    push_branch, delete_local_branch_by_name
+    push_branch, delete_local_branch_by_name, merge_into_current_branch
 )
 from ..core import errguard
 from ..core.bg import run_in_thread
@@ -96,7 +96,7 @@ class GitView(QWidget):
 
     def _set_busy(self, busy: bool, note: str = ""):
         for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
-                  self.btnRunCreateVersion, self.btnSwitch, self.btnRefresh,
+                  self.btnRunCreateVersion, self.btnSwitch, self.btnMerge, self.btnRefresh,
                   self.btnReconcile, self.btnNasRecover, self.btnNasPublish):
             try: w.setEnabled(not busy)
             except Exception: pass
@@ -181,11 +181,20 @@ class GitView(QWidget):
         hv = QHBoxLayout(grp_ver)
         hv.addWidget(self.txtVersion, 1); hv.addWidget(self.chkQA); hv.addWidget(self.btnRunCreateVersion)
 
+        # merge
+        self.cboHistoryMerge = QComboBox(); self.cboHistoryMerge.setEditable(True)
+        self.chkMergePush = QCheckBox("Push al terminar")
+        self.btnMerge = QPushButton("Merge a rama actual (global)")
+        grp_merge = QGroupBox("Merge a la rama actual")
+        hm = QHBoxLayout(grp_merge)
+        hm.addWidget(self.cboHistoryMerge, 1); hm.addWidget(self.chkMergePush); hm.addWidget(self.btnMerge)
+
         # arrange groups in a grid to reduce vertical space
         opsl.addWidget(grp_switch, 0, 0)
         opsl.addWidget(grp_new, 0, 1)
         opsl.addWidget(grp_del, 1, 0)
         opsl.addWidget(grp_ver, 1, 1)
+        opsl.addWidget(grp_merge, 2, 0, 1, 2)
 
         # misc buttons
         self.btnRefresh = QPushButton("Refrescar vista")
@@ -198,7 +207,7 @@ class GitView(QWidget):
         hr.addWidget(self.btnNasPublish)
         hr.addStretch()
         hr.addWidget(self.btnReconcile)
-        opsl.addLayout(hr, 2, 0, 1, 2)
+        opsl.addLayout(hr, 3, 0, 1, 2)
 
         top_wrap.addWidget(ops)
 
@@ -242,6 +251,7 @@ class GitView(QWidget):
         self.btnPushBranch.clicked.connect(self._do_push_branch)
         self.btnDeleteBranch.clicked.connect(self._do_delete_branch)
         self.btnRunCreateVersion.clicked.connect(self._do_create_version)
+        self.btnMerge.clicked.connect(self._do_merge)
         self.btnNasRecover.clicked.connect(self._do_recover_nas)
         self.btnNasPublish.clicked.connect(self._do_publish_nas)
         self.btnClearLog.clicked.connect(self.log.clear)
@@ -363,7 +373,8 @@ class GitView(QWidget):
             # Usa QSignalBlocker para no olvidar desbloquear si hay excepciones
             b1 = QtCore.QSignalBlocker(self.cboHistorySwitch)
             b2 = QtCore.QSignalBlocker(self.cboDeleteBranch)
-            self.cboHistorySwitch.clear(); self.cboDeleteBranch.clear()
+            b3 = QtCore.QSignalBlocker(self.cboHistoryMerge)
+            self.cboHistorySwitch.clear(); self.cboDeleteBranch.clear(); self.cboHistoryMerge.clear()
             gkey, pkey = self._current_keys()
             idx = load_index()
             records = [r for r in idx.values() if r.group == gkey and r.project == pkey]
@@ -371,6 +382,7 @@ class GitView(QWidget):
             for rec in records[:50]:
                 self.cboHistorySwitch.addItem(rec.branch)
                 self.cboDeleteBranch.addItem(rec.branch)
+                self.cboHistoryMerge.addItem(rec.branch)
             self._dbg("_refresh_history: loaded")
         except Exception as e:
             self._dbg(f"_refresh_history: ERROR {e}")
@@ -501,9 +513,9 @@ class GitView(QWidget):
             self._pending_error = None
 
     def _set_task_buttons_enabled(self, enabled: bool):
-        for btn in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch, self.btnSwitch):
+        for btn in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch, self.btnSwitch, self.btnMerge):
             try: btn.setEnabled(enabled)
-            except Exception: pass          
+            except Exception: pass
 
 
     @safe_slot
@@ -564,6 +576,26 @@ class GitView(QWidget):
             _after, self.cfg, gkey, pkey, nb,
             success=f"Rama {nb} enviada a origin",
             error=f"No se pudo enviar {nb}"
+        )
+
+    @safe_slot
+    def _do_merge(self):
+        source = self.cboHistoryMerge.currentText().strip()
+        if not source:
+            self._alert("Indica la rama a hacer merge", error=True); return
+        push = self.chkMergePush.isChecked()
+        gkey, pkey = self._current_keys()
+
+        def _after(ok: bool):
+            if ok:
+                STATE.add_history(gkey, pkey, source)
+
+        self._start_task(
+            f"Merge {source} -> rama actual (global)",
+            lambda cfg, gk, pk, br, do_push, emit=self.logger.line.emit: merge_into_current_branch(cfg, gk, pk, br, do_push, emit, only_modules=None),
+            _after, self.cfg, gkey, pkey, source, push,
+            success=f"Merge de {source} completado",
+            error=f"Merge de {source} tuvo errores"
         )
 
     @safe_slot
