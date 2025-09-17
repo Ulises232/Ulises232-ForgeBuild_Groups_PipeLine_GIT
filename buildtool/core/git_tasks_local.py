@@ -4,10 +4,11 @@
 # - Ejecuta por cada repo detectado y muestra comandos + cwd + rc.
 from __future__ import annotations
 from pathlib import Path
-from typing import Optional, Iterable, Tuple, List, Iterator
+from typing import Optional, Iterable, Tuple, List, Iterator, Dict, Any
 import os
 import subprocess
 import getpass
+import re
 
 from buildtool.core.branch_store import (
     BranchRecord,
@@ -226,7 +227,9 @@ def _discover_repos(cfg, gkey, pkey, only_modules, emit=None) -> List[Tuple[str,
     primero por CFG, luego por FS (a partir de HERR_REPO/cwd).
     """
     repos: List[Tuple[str, Path]] = []
-    _out(emit, f"== DESCUBRIR MÓDULOS/REPOS =={os.environ['HERR_REPO']}")
+    herr = os.environ.get("HERR_REPO", "")
+    suffix = f" {herr}" if herr else ""
+    _out(emit, f"== DESCUBRIR MÓDULOS/REPOS =={suffix}")
     # 1) Por cfg
     for name, path in _iter_cfg_modules(cfg, gkey, pkey, only_modules):
         _out(emit, f"[cfg] posible módulo: {name} -> {path}")
@@ -251,13 +254,90 @@ def _discover_repos(cfg, gkey, pkey, only_modules, emit=None) -> List[Tuple[str,
 # --------------------- operaciones por cada repo ---------------------
 
 
-def _create_or_switch(branch: str, path: Path, emit=None) -> bool:
+def _create_or_switch(branch: str, path: Path, emit=None) -> Tuple[bool, str]:
     """Crea o activa una rama en el repo especificado."""
-    rc, _ = _run(["git", "switch", "-c", branch], path, emit=emit)
-    if rc != 0:
-        rc2, _ = _run(["git", "checkout", "-b", branch], path, emit=emit)
-        if rc2 != 0:
-            return False
+
+    attempts = [
+        (["git", "switch", "-c", branch], "create_switch"),
+        (["git", "checkout", "-b", branch], "checkout_create"),
+        (["git", "switch", branch], "switch"),
+        (["git", "checkout", branch], "checkout"),
+    ]
+    last_reason = ""
+    for cmd, label in attempts:
+        rc, out = _run(cmd, path, emit=emit)
+        if rc == 0:
+            return True, label
+        last_reason = _last_nonempty(out) or label
+    return False, last_reason or "Error al crear/switch"
+
+
+def _module_index(
+    cfg, gkey: Optional[str], pkey: Optional[str]
+) -> Dict[str, Any]:
+    index: Dict[str, Any] = {}
+    groups = getattr(cfg, "groups", None) or []
+    for g in groups:
+        if gkey and getattr(g, "key", None) != gkey:
+            continue
+        projects = getattr(g, "projects", None) or []
+        for p in projects:
+            if pkey and getattr(p, "key", None) != pkey:
+                continue
+            modules = getattr(p, "modules", None) or []
+            for m in modules:
+                name = (
+                    getattr(m, "name", None)
+                    or getattr(m, "key", None)
+                    or str(getattr(m, "path", "") or "")
+                )
+                if name and name not in index:
+                    index[name] = m
+    return index
+
+
+def _apply_version_to_file(
+    file_path: Path, version: str, emit=None
+) -> bool:
+    try:
+        original = file_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception as exc:
+        _out(emit, f"    ! No se pudo leer {file_path.name}: {exc}")
+        return False
+
+    updated = original
+    total_replacements = 0
+
+    # web.xml style param-value entries
+    updated, n = re.subn(
+        r"(<param-value>\s*Versi[oó]n:\s*)(.*?)(</param-value>)",
+        r"\g<1>" + version + r"\g<3>",
+        updated,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    total_replacements += n
+
+    # application.properties style key
+    updated, n = re.subn(
+        r"(?im)^(app\.version\s*=\s*)(.*)$",
+        r"\g<1>" + version,
+        updated,
+    )
+    total_replacements += n
+
+    if total_replacements == 0:
+        return False
+
+    try:
+        file_path.write_text(updated, encoding="utf-8")
+    except Exception as exc:
+        _out(emit, f"    ! No se pudo escribir {file_path.name}: {exc}")
+        return False
+
+    _out(
+        emit,
+        f"    * Versión {version} aplicada en {file_path.name} ({total_replacements} reemplazos)",
+    )
     return True
 
 
@@ -290,11 +370,13 @@ def create_branches_local(
             continue
 
         _out(emit, f"[{mname}] ▶ crear/switch rama: {bname}")
-        if not _create_or_switch(bname, mpath, emit=emit):
-            _out(emit, f"[{mname}] ❌ No se pudo crear/switch a '{bname}'")
+        ok, detail = _create_or_switch(bname, mpath, emit=emit)
+        if not ok:
+            _out(emit, f"[{mname}] ❌ No se pudo crear/switch a '{bname}': {detail}")
             ok_all = False
         else:
-            _out(emit, f"[{mname}] ✅ rama lista: {bname}")
+            verb = "creada" if detail in {"create_switch", "checkout_create"} else "activada"
+            _out(emit, f"[{mname}] ✅ rama {verb}: {bname}")
     if ok_all:
         idx = load_index()
         rec = _get_record(idx, gkey, pkey, bname)
@@ -316,35 +398,117 @@ def create_version_branches(
     emit=None,
     only_modules=None,
 ) -> bool:
-    """Shim que replica la firma de ``git_tasks.create_version_branches``.
-
-    La versión "local" no soporta sobrescritura de archivos ni commits
-    automáticos, pero sí respeta la convención de prefijar con ``v`` la
-    rama base y, opcionalmente, crear la rama ``*_QA``.
-    """
-
-    _ = version_files_override, repos_no_change  # compatibilidad de firma
+    """Crea ramas de versión locales y actualiza archivos declarados."""
 
     ver = (version or "").strip()
     if not ver:
         _out(emit, "❌ Versión vacía.")
         raise RuntimeError("Versión vacía.")
 
+    repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
+    module_map = _module_index(cfg, gkey, pkey)
+    overrides = dict(version_files_override or {})
+    repos_no_change = set(repos_no_change or [])
+
     branch_base = f"v{ver}"
-    ok_base = create_branches_local(
-        cfg, gkey, pkey, branch_base, emit=emit, only_modules=only_modules
-    )
+    branch_qa = f"{branch_base}_QA"
+
+    ok_base = True
     ok_qa = True
-    if ok_base and create_qa:
-        ok_qa = create_branches_local(
-            cfg,
-            gkey,
-            pkey,
-            f"{branch_base}_QA",
-            emit=emit,
-            only_modules=only_modules,
-        )
-    return ok_base and ok_qa
+
+    for mname, mpath in repos:
+        if not mpath.exists():
+            _out(emit, f"[{mname}] ⚠️ Ruta no existe: {mpath}")
+            ok_base = False
+            if create_qa:
+                ok_qa = False
+            continue
+        if not _is_git_repo(mpath, emit=emit):
+            _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
+            ok_base = False
+            if create_qa:
+                ok_qa = False
+            continue
+
+        _out(emit, f"[{mname}] ▶ preparar rama base {branch_base}")
+        ok, detail = _create_or_switch(branch_base, mpath, emit=emit)
+        if not ok:
+            _out(emit, f"[{mname}] ❌ No se pudo preparar '{branch_base}': {detail}")
+            ok_base = False
+            if create_qa:
+                ok_qa = False
+            continue
+        verb = "creada" if detail in {"create_switch", "checkout_create"} else "activada"
+        _out(emit, f"[{mname}] ✅ rama base {verb}: {branch_base}")
+
+        if mname in repos_no_change:
+            _out(emit, f"[{mname}] ⏭️ Cambio de versión omitido (repos_no_change)")
+        else:
+            rel_files = list(overrides.get(mname) or [])
+            if not rel_files:
+                module = module_map.get(mname)
+                rel_files = list(getattr(module, "version_files", []) or []) if module else []
+
+            if rel_files:
+                changed_any = False
+                for rel in rel_files:
+                    target = (mpath / rel).resolve(strict=False)
+                    if not target.exists():
+                        _out(emit, f"    ! No existe: {rel}")
+                        continue
+                    if _apply_version_to_file(target, ver, emit=emit):
+                        changed_any = True
+                if changed_any:
+                    rc_add, out_add = _run(["git", "add", "--all"], mpath, emit=emit)
+                    if rc_add != 0:
+                        _out(emit, f"[{mname}] ❌ git add falló: {_last_nonempty(out_add)}")
+                        ok_base = False
+                        if create_qa:
+                            ok_qa = False
+                        continue
+                    rc_commit, out_commit = _run(
+                        ["git", "commit", "-m", f"cambio de versión a {ver}"],
+                        mpath,
+                        emit=emit,
+                    )
+                    if rc_commit != 0:
+                        reason = _last_nonempty(out_commit) or "commit falló"
+                        _out(emit, f"[{mname}] ❌ git commit falló: {reason}")
+                        ok_base = False
+                        if create_qa:
+                            ok_qa = False
+                        continue
+                else:
+                    _out(emit, f"[{mname}] (Sin cambios de versión que commitear)")
+            else:
+                _out(emit, f"[{mname}] (Sin archivos de versión configurados)")
+
+        if create_qa:
+            _out(emit, f"[{mname}] ▶ preparar rama QA {branch_qa}")
+            ok_qa_repo, detail_qa = _create_or_switch(branch_qa, mpath, emit=emit)
+            if not ok_qa_repo:
+                _out(emit, f"[{mname}] ❌ No se pudo preparar '{branch_qa}': {detail_qa}")
+                ok_qa = False
+            else:
+                verb = "creada" if detail_qa in {"create_switch", "checkout_create"} else "activada"
+                _out(emit, f"[{mname}] ✅ rama QA {verb}: {branch_qa}")
+
+    if ok_base:
+        idx = load_index()
+        rec = _get_record(idx, gkey, pkey, branch_base)
+        rec.exists_local = True
+        rec.last_action = "create_local"
+        rec.last_updated_by = _current_user()
+        upsert(rec, idx, action="create_local")
+    if create_qa and ok_base and ok_qa:
+        idx = load_index()
+        rec = _get_record(idx, gkey, pkey, branch_qa)
+        rec.exists_local = True
+        rec.last_action = "create_local"
+        rec.last_updated_by = _current_user()
+        upsert(rec, idx, action="create_local")
+
+    return ok_base and (ok_qa if create_qa else True)
 
 
 def switch_branch(
