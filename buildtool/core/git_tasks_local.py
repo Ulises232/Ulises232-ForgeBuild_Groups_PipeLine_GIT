@@ -293,7 +293,19 @@ def _discover_repos(cfg, gkey, pkey, only_modules, emit=None) -> List[Tuple[str,
 
     if not unique:
         _out(emit, "⚠️ No se encontraron módulos ni repos.")
-    return unique
+        return unique
+
+    filtered: List[Tuple[str, Path]] = []
+    for name, path in unique:
+        if _is_git_repo(path):
+            filtered.append((name, path))
+        else:
+            _out(emit, f"[cfg] ignorado, no es repo Git: {name} -> {path}")
+
+    if not filtered:
+        _out(emit, "⚠️ No hay repos Git válidos tras filtrar la configuración.")
+
+    return filtered
 
 
 # --------------------- operaciones por cada repo ---------------------
