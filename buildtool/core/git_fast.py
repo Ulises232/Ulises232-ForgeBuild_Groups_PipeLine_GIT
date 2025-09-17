@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional, List
+import os
 import subprocess
 
 def _resolve_gitdir(repo: Path) -> Optional[Path]:
@@ -20,21 +21,7 @@ def _resolve_gitdir(repo: Path) -> Optional[Path]:
             return None
     return None
 
-def get_current_branch_fast(repo: Path) -> Optional[str]:
-    # Prefer invoking git directly to ensure the branch matches the working tree
-    try:
-        out = subprocess.check_output(
-            ["git", "branch", "--show-current"],
-            cwd=str(repo),
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        br = out.strip()
-        if br:
-            return br
-    except Exception:
-        pass
-    # Fallback to reading HEAD manually
+def _read_head_branch(repo: Path) -> Optional[str]:
     g = _resolve_gitdir(repo)
     if not g:
         return None
@@ -49,6 +36,41 @@ def get_current_branch_fast(repo: Path) -> Optional[str]:
         return "(detached)"
     except Exception:
         return None
+
+
+def _popen_kwargs():
+    if os.name != "nt":
+        return {}
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+    return {
+        "startupinfo": startup,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+
+
+def get_current_branch_fast(repo: Path) -> Optional[str]:
+    # Intentamos primero leer HEAD directamente para evitar invocar git.exe.
+    br = _read_head_branch(repo)
+    if br:
+        return br
+    # Si falló, intentamos ejecutar git ocultando la ventana en Windows.
+    popen_kwargs = _popen_kwargs()
+    try:
+        out = subprocess.check_output(
+            ["git", "branch", "--show-current"],
+            cwd=str(repo),
+            stderr=subprocess.DEVNULL,
+            text=True,
+            **popen_kwargs,
+        )
+        br = out.strip()
+        if br:
+            return br
+    except Exception:
+        pass
+    return None
 
 def list_local_branches_fast(repo: Path) -> List[str]:
     g = _resolve_gitdir(repo)
