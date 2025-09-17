@@ -306,11 +306,45 @@ def create_branches_local(
 
 
 def create_version_branches(
-    cfg, gkey, pkey, version: str, emit=None, only_modules=None
+    cfg,
+    gkey,
+    pkey,
+    version: str,
+    create_qa: bool = False,
+    version_files_override=None,
+    repos_no_change=None,
+    emit=None,
+    only_modules=None,
 ) -> bool:
-    return create_branches_local(
-        cfg, gkey, pkey, version, emit=emit, only_modules=only_modules
+    """Shim que replica la firma de ``git_tasks.create_version_branches``.
+
+    La versión "local" no soporta sobrescritura de archivos ni commits
+    automáticos, pero sí respeta la convención de prefijar con ``v`` la
+    rama base y, opcionalmente, crear la rama ``*_QA``.
+    """
+
+    _ = version_files_override, repos_no_change  # compatibilidad de firma
+
+    ver = (version or "").strip()
+    if not ver:
+        _out(emit, "❌ Versión vacía.")
+        raise RuntimeError("Versión vacía.")
+
+    branch_base = f"v{ver}"
+    ok_base = create_branches_local(
+        cfg, gkey, pkey, branch_base, emit=emit, only_modules=only_modules
     )
+    ok_qa = True
+    if ok_base and create_qa:
+        ok_qa = create_branches_local(
+            cfg,
+            gkey,
+            pkey,
+            f"{branch_base}_QA",
+            emit=emit,
+            only_modules=only_modules,
+        )
+    return ok_base and ok_qa
 
 
 def switch_branch(
