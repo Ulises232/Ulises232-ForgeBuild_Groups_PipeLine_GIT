@@ -23,18 +23,24 @@ class BuildView(QWidget):
         self.cboGroup = QComboBox()
         groups = [g.key for g in (cfg.groups or [])] or ["GLOBAL"]
         for g in groups: self.cboGroup.addItem(g, g)
-        row.addWidget(combo_with_arrow(self.cboGroup))
+        self.cboGroupContainer = combo_with_arrow(self.cboGroup)
+        row.addWidget(self.cboGroupContainer)
 
         self.lblProject = QLabel("Proyecto:")
         self.cboProject = QComboBox()
         row.addWidget(self.lblProject)
-        row.addWidget(combo_with_arrow(self.cboProject))
+        self.cboProjectContainer = combo_with_arrow(self.cboProject)
+        row.addWidget(self.cboProjectContainer)
 
         row.addWidget(QLabel("Perfiles:"))
-        self.cboProfiles = MultiSelectComboBox("Perfiles…", show_max=2); row.addWidget(self.cboProfiles)
+        self.cboProfiles = MultiSelectComboBox("Perfiles…", show_max=2)
+        self.cboProfilesContainer = combo_with_arrow(self.cboProfiles, arrow_tooltip="Seleccionar perfiles")
+        row.addWidget(self.cboProfilesContainer)
 
         row.addWidget(QLabel("Módulos:"))
-        self.cboModules = MultiSelectComboBox("Módulos…", show_max=2); row.addWidget(self.cboModules)
+        self.cboModules = MultiSelectComboBox("Módulos…", show_max=2)
+        self.cboModulesContainer = combo_with_arrow(self.cboModules, arrow_tooltip="Seleccionar módulos")
+        row.addWidget(self.cboModulesContainer)
 
         self.btnBuildSel = QPushButton("Compilar seleccionados"); row.addWidget(self.btnBuildSel)
         self.btnBuildAll = QPushButton("Compilar TODOS"); row.addWidget(self.btnBuildAll)
@@ -78,11 +84,13 @@ class BuildView(QWidget):
             for k in projects: self.cboProject.addItem(k, k)
             show_proj = len(projects) > 1
             self.lblProject.setVisible(show_proj)
+            self.cboProjectContainer.setVisible(show_proj)
             self.cboProject.setVisible(show_proj)
         else:
             projects = [p.key for p in self.cfg.projects]
             for k in projects: self.cboProject.addItem(k, k)
             self.lblProject.setVisible(True)
+            self.cboProjectContainer.setVisible(True)
             self.cboProject.setVisible(True)
 
         self.refresh_project_data()
