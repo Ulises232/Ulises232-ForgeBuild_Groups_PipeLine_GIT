@@ -12,8 +12,11 @@ def run_maven(module_path: str, goals, profile: str|None=None, env: dict|None=No
     log_cb("$ " + " ".join(shlex.quote(x) for x in mvn_cmd))
 
     creationflags = 0
-    if separate_window and os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    if os.name == "nt":
+        if separate_window:
+            creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        else:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
     proc = subprocess.Popen(
         mvn_cmd,

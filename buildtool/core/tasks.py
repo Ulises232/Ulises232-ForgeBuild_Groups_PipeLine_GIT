@@ -192,30 +192,42 @@ def build_project_scheduled(
     mod_locks = defaultdict(threading.Lock)
     serial_mods = {m.name for m in all_mods if getattr(m, "serial_across_profiles", False)}
 
-    # perfiles en serie
+    # tareas por perfil/módulo (excluye commons)
+    tasks = []
     for prof in profiles:
         log_cb(f"== Perfil: {prof} ==")
-        prof_mods = [m for m in all_mods if m.name not in commons]
-        if not prof_mods:
-            continue
+        for mod in all_mods:
+            if mod.name in commons:
+                continue
+            tasks.append((prof, mod.name))
 
-        workers = max_workers or max(2, min(4, len(prof_mods)))
+    if not tasks:
+        return
 
-        def _run_one(mod_name: str):
-            if mod_name in serial_mods:
-                with mod_locks[mod_name]:
-                    build_project_for_profile(cfg, project_key, prof, True,
-                                              log_cb=log_cb, group_key=group_key, modules_filter={mod_name})
-            else:
-                build_project_for_profile(cfg, project_key, prof, True,
-                                          log_cb=log_cb, group_key=group_key, modules_filter={mod_name})
+    workers = max_workers or max(2, min(4, len(tasks)))
 
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futs = [pool.submit(_run_one, m.name) for m in prof_mods]
-            for f in as_completed(futs):
-                err = f.exception()
-                if err:
-                    log_cb(f"[{prof}] << ERROR: {err}")
+    def _run_one(profile: str, mod_name: str):
+        if mod_name in serial_mods:
+            with mod_locks[mod_name]:
+                build_project_for_profile(
+                    cfg, project_key, profile, True,
+                    log_cb=log_cb, group_key=group_key,
+                    modules_filter={mod_name}
+                )
+        else:
+            build_project_for_profile(
+                cfg, project_key, profile, True,
+                log_cb=log_cb, group_key=group_key,
+                modules_filter={mod_name}
+            )
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_map = {pool.submit(_run_one, prof, mod): (prof, mod) for prof, mod in tasks}
+        for f in as_completed(future_map):
+            err = f.exception()
+            if err:
+                prof, mod = future_map[f]
+                log_cb(f"[{prof}] << ERROR en {mod}: {err}")
 
 
 # ------------------ Deploy (sin cambios) ------------------
