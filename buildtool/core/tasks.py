@@ -154,14 +154,35 @@ def build_project_for_profile(
             dest = output_base if getattr(mod, "copy_to_root", False) else (_ensure(output_base / "war") if out_war is None else out_war)
             # refresca out_war si no era raíz
             if dest != output_base: out_war = dest
-            copy_artifacts(target_dir, ["*.war"], dest, log_cb=lambda s: log_cb(f"[{profile}] {s}"), recursive=False)
+            copy_artifacts(
+                target_dir,
+                ["*.war"],
+                dest,
+                log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+                recursive=False,
+                cancel_event=cancel_event,
+            )
         if getattr(mod, "copy_to_profile_ui", False):
             dest = output_base if getattr(mod, "copy_to_root", False) else (_ensure(output_base / "ui-ellis") if out_ui is None else out_ui)
             if dest != output_base: out_ui = dest
-            copy_artifacts(target_dir, ["*.jar"], dest, log_cb=lambda s: log_cb(f"[{profile}] {s}"), recursive=False)
+            copy_artifacts(
+                target_dir,
+                ["*.jar"],
+                dest,
+                log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+                recursive=False,
+                cancel_event=cancel_event,
+            )
         if getattr(mod, "copy_to_subfolder", None):
             dest = _ensure(output_base / mod.copy_to_subfolder)
-            copy_artifacts(target_dir, ["*.jar","*.war"], dest, log_cb=lambda s: log_cb(f"[{profile}] {s}"), recursive=False)
+            copy_artifacts(
+                target_dir,
+                ["*.jar","*.war"],
+                dest,
+                log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+                recursive=False,
+                cancel_event=cancel_event,
+            )
 
         if getattr(mod, "rename_jar_to", None):
             src = _pick_artifact(target_dir, ["*-jar-with-dependencies.jar", "*.jar", "*.war"])
@@ -334,7 +355,84 @@ def build_project_scheduled(
     return success and not cancel_event.is_set()
 
 
-# ------------------ Deploy (sin cambios) ------------------
+# ------------------ Deploy ------------------
+
+def deploy_profiles_scheduled(
+    cfg: Config,
+    project_key: str,
+    profiles: list[str],
+    profile_targets: dict[str, str],
+    version: str,
+    *,
+    log_cb=print,
+    group_key: str | None = None,
+    hotfix: bool = False,
+    cancel_event: Event | None = None,
+) -> bool:
+    cancel_event = cancel_event or Event()
+    success = True
+    error_reported = False
+
+    for prof in profiles:
+        if cancel_event.is_set():
+            success = False
+            break
+
+        log_cb(f"== Perfil: {prof} ==")
+
+        target_name = profile_targets.get(prof)
+        if not target_name:
+            success = False
+            if not error_reported:
+                log_cb(f"[{prof}] << ERROR: No hay destino configurado.")
+                log_cb("<< ERROR: Pipeline detenido por fallas.")
+                error_reported = True
+            if not cancel_event.is_set():
+                cancel_event.set()
+            break
+
+        try:
+            ok = deploy_version(
+                cfg,
+                project_key,
+                prof,
+                version,
+                target_name,
+                log_cb=log_cb,
+                group_key=group_key,
+                hotfix=hotfix,
+                cancel_event=cancel_event,
+            )
+        except Exception as err:
+            success = False
+            if not cancel_event.is_set():
+                cancel_event.set()
+            if not error_reported:
+                log_cb(f"[{prof}] << ERROR: {err}")
+                log_cb("<< ERROR: Pipeline detenido por fallas.")
+                error_reported = True
+            continue
+
+        if cancel_event.is_set():
+            success = False
+            break
+
+        if ok:
+            log_cb(f"[{prof}] >> Perfil completado.")
+            continue
+
+        success = False
+        if not cancel_event.is_set():
+            cancel_event.set()
+        if not error_reported:
+            log_cb("<< ERROR: Pipeline detenido por fallas.")
+            error_reported = True
+        break
+
+    if cancel_event.is_set() and not error_reported and not success:
+        log_cb("<< Pipeline cancelado por el usuario.")
+
+    return success and not cancel_event.is_set()
 
 def build_project(
     cfg: Config,
@@ -350,9 +448,17 @@ def build_project(
         group_key=group_key, modules_filter=modules_filter
     )
 
-def deploy_version(cfg: Config, project_key: str, profile: str, version: str,
-                   target_name: str, log_cb=print, group_key: str | None=None,
-                   hotfix: bool = False) -> None:
+def deploy_version(
+    cfg: Config,
+    project_key: str,
+    profile: str,
+    version: str,
+    target_name: str,
+    log_cb=print,
+    group_key: str | None=None,
+    hotfix: bool = False,
+    cancel_event: Event | None = None,
+) -> bool:
     """Copia los artefactos del build al target (normal u hotfix)."""
     # --- resolver target ---
     tgt = None
@@ -391,12 +497,40 @@ def deploy_version(cfg: Config, project_key: str, profile: str, version: str,
 
     # --- crear destino y copiar ---
     dst.mkdir(parents=True, exist_ok=True)
+    if cancel_event and cancel_event.is_set():
+        log_cb(f"[{profile}] Cancelado por el usuario antes de iniciar el deploy.")
+        return False
+
     log_cb(f"[{profile}] Deploy -> {dst}")
 
-    copy_artifacts(src_base, ["*"], dst, log_cb=lambda s: log_cb(f"[{profile}] {s}"))
+    copy_artifacts(
+        src_base,
+        ["*"],
+        dst,
+        log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+        cancel_event=cancel_event,
+    )
+    if cancel_event and cancel_event.is_set():
+        log_cb(f"[{profile}] Deploy cancelado durante la copia de artefactos.")
+        return False
+
     for sub in src_base.iterdir():
+        if cancel_event and cancel_event.is_set():
+            log_cb(f"[{profile}] Deploy cancelado por el usuario.")
+            return False
         if sub.is_dir():
             sub_dst = dst / sub.name
             sub_dst.mkdir(parents=True, exist_ok=True)
-            copy_artifacts(sub, ["*"], sub_dst, log_cb=lambda s: log_cb(f"[{profile}] {s}"))
+            copy_artifacts(
+                sub,
+                ["*"],
+                sub_dst,
+                log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+                cancel_event=cancel_event,
+            )
+            if cancel_event and cancel_event.is_set():
+                log_cb(f"[{profile}] Deploy cancelado durante la copia de {sub.name}.")
+                return False
+
+    return True
 

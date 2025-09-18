@@ -1,3 +1,5 @@
+import threading
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit, QTextEdit,
@@ -7,9 +9,9 @@ from PySide6.QtCore import Qt, QThread
 
 from ..core.bg import run_in_thread
 from ..core.config import Config
-from ..core.tasks import deploy_version
+from ..core.tasks import deploy_profiles_scheduled
 from ..core.thread_tracker import TRACKER
-from ..core.workers import PipelineWorker, deploy_worker
+from ..core.workers import PipelineWorker
 
 from ..ui.multi_select import MultiSelectComboBox
 from ..ui.widgets import combo_with_arrow
@@ -70,13 +72,24 @@ class DeployView(QWidget):
         self.log.setMinimumHeight(280)
         lay.addWidget(self.log)
 
+        footer = QHBoxLayout(); footer.setContentsMargins(0, 0, 0, 0); footer.setSpacing(12)
+        footer.addStretch(1)
+        self.btnClearLog = QPushButton("Limpiar consola")
+        footer.addWidget(self.btnClearLog)
+        self.btnCancel = QPushButton("Cancelar pipeline")
+        self.btnCancel.setEnabled(False)
+        footer.addWidget(self.btnCancel)
+        lay.addLayout(footer)
+
         # señales
         self.cboGroup.currentIndexChanged.connect(self.refresh_group)
         self.cboProject.currentIndexChanged.connect(self.refresh_project)
         self.btnDeploySel.clicked.connect(self.start_deploy_selected)
         self.btnDeployAll.clicked.connect(self.start_deploy_all)
+        self.btnCancel.clicked.connect(self.cancel_active_deploys)
+        self.btnClearLog.clicked.connect(self.log.clear)
 
-        self._live_workers: list[tuple[QThread, PipelineWorker]] = []
+        self._worker_record: dict | None = None
         self.refresh_group()
 
     # ---- helpers de datos ----
@@ -166,40 +179,50 @@ class DeployView(QWidget):
         if not version:
             self.log.append("<< Escribe la versión (ej. 2025-09-08_001)."); return
 
-        self.btnDeploySel.setEnabled(False)
-        self.btnDeployAll.setEnabled(False)
-
-        started = 0
-        hotfix = self.chkHotfix.isChecked()
-
+        selected = []
+        targets: dict[str, str] = {}
         for prof in profiles:
             tgt = self._profile_to_target.get(prof)
             if not tgt:
                 self.log.append(f"<< No hay destino configurado para el perfil '{prof}'.")
                 continue
+            selected.append(prof)
+            targets[prof] = tgt
 
-            worker = deploy_worker(
-                deploy_version,
-                profile=prof,
-                success_message=">> Copia completada.",
-                cfg=self.cfg,
-                project_key=pkey,
-                version=version,
-                target_name=tgt,
-                group_key=gkey,
-                hotfix=hotfix,
-            )
-            thread, worker = run_in_thread(worker)
-            worker.progress.connect(self.log.append, Qt.QueuedConnection)
-            worker.finished.connect(lambda ok, th=thread, wk=worker: self._on_deploy_finished(th, wk), Qt.QueuedConnection)
-
-            self._live_workers.append((thread, worker))
-            thread.start()
-            started += 1
-
-        if started == 0:
+        if not selected:
             self.btnDeploySel.setEnabled(True)
             self.btnDeployAll.setEnabled(True)
+            return
+
+        self.btnDeploySel.setEnabled(False)
+        self.btnDeployAll.setEnabled(False)
+        self.btnCancel.setEnabled(True)
+
+        hotfix = self.chkHotfix.isChecked()
+        cancel_event = threading.Event()
+        worker = PipelineWorker(
+            deploy_profiles_scheduled,
+            success_message=">> Copia completada.",
+            cfg=self.cfg,
+            project_key=pkey,
+            profiles=selected,
+            profile_targets=targets,
+            version=version,
+            group_key=gkey,
+            hotfix=hotfix,
+            cancel_event=cancel_event,
+        )
+        thread, worker = run_in_thread(worker)
+        worker.progress.connect(self.log.append, Qt.QueuedConnection)
+        worker.finished.connect(lambda ok, wk=worker: self._on_deploy_finished(ok, wk), Qt.QueuedConnection)
+
+        self._worker_record = {
+            "thread": thread,
+            "event": cancel_event,
+            "user_cancelled": False,
+            "worker": worker,
+        }
+        thread.start()
 
     def start_deploy_selected(self):
         profiles = self.cboProfiles.checked_items()
@@ -213,33 +236,68 @@ class DeployView(QWidget):
             self.log.append("<< No hay perfiles configurados."); return
         self._deploy_profiles(profiles)
 
-    def _on_deploy_finished(self, thread: QThread, worker) -> None:
-        self._cleanup_worker(thread, worker)
-        if not self._live_workers:
-            self.btnDeploySel.setEnabled(True)
-            self.btnDeployAll.setEnabled(True)
-
-    def _cleanup_worker(self, thread: QThread, worker) -> None:
-        if (thread, worker) not in self._live_workers:
+    def _on_deploy_finished(self, ok: bool, worker: PipelineWorker) -> None:
+        record = self._worker_record
+        if not record or record.get("worker") is not worker:
             return
-        self._live_workers.remove((thread, worker))
+
+        user_cancelled = record.get("user_cancelled")
+        self._cleanup_worker()
+
+        self.btnDeploySel.setEnabled(True)
+        self.btnDeployAll.setEnabled(True)
+        self.btnCancel.setEnabled(False)
+
+        if not ok and user_cancelled:
+            self.log.append("<< Ejecución cancelada por el usuario.")
+
+    def _cleanup_worker(self) -> None:
+        record = self._worker_record
+        if not record:
+            return
+        thread: QThread = record.get("thread")
+        worker: PipelineWorker = record.get("worker")
+        self._worker_record = None
         try:
-            if thread.isRunning():
+            if thread and thread.isRunning():
                 thread.quit()
                 thread.wait(5000)
         except Exception:
             pass
         try:
-            worker.deleteLater()
+            if worker:
+                worker.deleteLater()
         except Exception:
             pass
         try:
-            thread.deleteLater()
+            if thread:
+                thread.deleteLater()
         except Exception:
             pass
-        TRACKER.remove(thread)
+        if thread:
+            TRACKER.remove(thread)
+
+    def cancel_active_deploys(self) -> None:
+        record = self._worker_record
+        if not record:
+            self.log.append("<< No hay ejecuciones en curso.")
+            return
+
+        self.log.append("<< Cancelando ejecuciones en curso…")
+        record["user_cancelled"] = True
+        event: threading.Event | None = record.get("event")
+        if event:
+            event.set()
+        thread: QThread = record.get("thread")
+        try:
+            if thread:
+                thread.requestInterruption()
+        except Exception:
+            pass
+        self.btnCancel.setEnabled(False)
 
     def closeEvent(self, event):
-        for thread, worker in list(self._live_workers):
-            self._cleanup_worker(thread, worker)
+        if self._worker_record:
+            self.cancel_active_deploys()
+        self._cleanup_worker()
         super().closeEvent(event)
