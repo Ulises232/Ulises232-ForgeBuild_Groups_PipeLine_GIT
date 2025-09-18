@@ -64,8 +64,9 @@ class PipelineWorker(QObject):
             self.progress.emit(f"{self._log_prefix}{line}")
 
         try:
-            self._task(log_cb=emit, **self._task_kwargs)
-            if self._success_message:
+            result = self._task(log_cb=emit, **self._task_kwargs)
+            ok = True if result is None else bool(result)
+            if ok and self._success_message:
                 emit(self._success_message)
         except Exception as exc:  # pragma: no cover - propagación controlada
             ok = False

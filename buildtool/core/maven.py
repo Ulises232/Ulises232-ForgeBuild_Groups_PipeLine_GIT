@@ -1,8 +1,13 @@
 
 from __future__ import annotations
-import subprocess, os, shlex
+import subprocess, os, shlex, time
 
-def run_maven(module_path: str, goals, profile: str|None=None, env: dict|None=None, log_cb=print, separate_window: bool=False) -> int:
+from threading import Event
+
+def run_maven(module_path: str, goals, profile: str | None = None,
+              env: dict | None = None, log_cb=print,
+              separate_window: bool = False,
+              cancel_event: Event | None = None) -> int:
     mvn_exe = "mvn.cmd" if os.name == "nt" else "mvn"
     mvn_cmd = [mvn_exe, *goals]
     if profile:
@@ -12,8 +17,11 @@ def run_maven(module_path: str, goals, profile: str|None=None, env: dict|None=No
     log_cb("$ " + " ".join(shlex.quote(x) for x in mvn_cmd))
 
     creationflags = 0
-    if separate_window and os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    if os.name == "nt":
+        if separate_window:
+            creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        else:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
     proc = subprocess.Popen(
         mvn_cmd,
@@ -29,7 +37,29 @@ def run_maven(module_path: str, goals, profile: str|None=None, env: dict|None=No
         assert proc.stdout is not None
         for line in proc.stdout:
             log_cb(line.rstrip())
+            if cancel_event and cancel_event.is_set():
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                proc.stdout.close()
+                break
     else:
         log_cb("[Ventana separada lanzada]")
+        if cancel_event:
+            while proc.poll() is None and not cancel_event.is_set():
+                time.sleep(0.2)
+            if cancel_event.is_set() and proc.poll() is None:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
 
-    return proc.wait()
+    try:
+        return proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return proc.wait()

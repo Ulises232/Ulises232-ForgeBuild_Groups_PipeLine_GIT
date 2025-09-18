@@ -1,3 +1,5 @@
+import threading
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QComboBox
 from PySide6.QtCore import Qt, QThread
 
@@ -50,12 +52,23 @@ class BuildView(QWidget):
         self.log.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
         self.log.setMinimumHeight(320); lay.addWidget(self.log)
 
+        footer = QHBoxLayout(); footer.setContentsMargins(0, 0, 0, 0); footer.setSpacing(12)
+        footer.addStretch(1)
+        self.btnClearLog = QPushButton("Limpiar consola")
+        footer.addWidget(self.btnClearLog)
+        self.btnCancel = QPushButton("Cancelar pipeline")
+        self.btnCancel.setEnabled(False)
+        footer.addWidget(self.btnCancel)
+        lay.addLayout(footer)
+
         self.btnBuildSel.clicked.connect(self.start_build_selected)
         self.btnBuildAll.clicked.connect(self.start_build_all)
+        self.btnCancel.clicked.connect(self.cancel_active_builds)
+        self.btnClearLog.clicked.connect(self.log.clear)
         self.cboGroup.currentIndexChanged.connect(self.refresh_group)
         self.cboProject.currentIndexChanged.connect(self.refresh_project_data)
 
-        self._live_workers: list[tuple[QThread, PipelineWorker]] = []
+        self._worker_records: dict[PipelineWorker, dict] = {}
         self.refresh_group()
 
     def _current_group(self):
@@ -128,8 +141,10 @@ class BuildView(QWidget):
 
         self.btnBuildSel.setEnabled(False)
         self.btnBuildAll.setEnabled(False)
+        self.btnCancel.setEnabled(True)
 
         modules_filter = set(selected_modules) if selected_modules else None
+        cancel_event = threading.Event()
         worker = build_worker(
             build_project_scheduled,
             success_message=">> Listo.",
@@ -138,12 +153,17 @@ class BuildView(QWidget):
             profiles=profiles,
             modules_filter=modules_filter,
             group_key=gkey,
+            cancel_event=cancel_event,
         )
         thread, worker = run_in_thread(worker)
         worker.progress.connect(self.log.append, Qt.QueuedConnection)
-        worker.finished.connect(lambda ok, th=thread, wk=worker: self._on_build_finished(th, wk), Qt.QueuedConnection)
+        worker.finished.connect(lambda ok, wk=worker: self._on_build_finished(ok, wk), Qt.QueuedConnection)
 
-        self._live_workers.append((thread, worker))
+        self._worker_records[worker] = {
+            "thread": thread,
+            "event": cancel_event,
+            "user_cancelled": False,
+        }
         thread.start()
 
     def start_build_selected(self):
@@ -156,15 +176,26 @@ class BuildView(QWidget):
         if not profiles: self.log.append("<< No hay perfiles configurados."); return
         self._start_schedule(profiles)
 
-    def _on_build_finished(self, thread: QThread, worker) -> None:
-        self.btnBuildSel.setEnabled(True)
-        self.btnBuildAll.setEnabled(True)
-        self._cleanup_worker(thread, worker)
-
-    def _cleanup_worker(self, thread: QThread, worker) -> None:
-        if (thread, worker) not in self._live_workers:
+    def _on_build_finished(self, ok: bool, worker: PipelineWorker) -> None:
+        record = self._worker_records.get(worker)
+        if not record:
             return
-        self._live_workers.remove((thread, worker))
+
+        self._cleanup_worker(worker)
+
+        if not self._worker_records:
+            self.btnBuildSel.setEnabled(True)
+            self.btnBuildAll.setEnabled(True)
+            self.btnCancel.setEnabled(False)
+
+        if not ok and record.get("user_cancelled"):
+            self.log.append("<< Ejecución cancelada por el usuario.")
+
+    def _cleanup_worker(self, worker: PipelineWorker) -> None:
+        record = self._worker_records.pop(worker, None)
+        if not record:
+            return
+        thread: QThread = record["thread"]
         try:
             if thread.isRunning():
                 thread.quit()
@@ -181,7 +212,25 @@ class BuildView(QWidget):
             pass
         TRACKER.remove(thread)
 
+    def cancel_active_builds(self) -> None:
+        if not self._worker_records:
+            self.log.append("<< No hay ejecuciones en curso.")
+            return
+
+        self.log.append("<< Cancelando ejecuciones en curso…")
+        for record in self._worker_records.values():
+            record["user_cancelled"] = True
+            event = record.get("event")
+            if event:
+                event.set()
+            thread: QThread = record["thread"]
+            try:
+                thread.requestInterruption()
+            except Exception:
+                pass
+        self.btnCancel.setEnabled(False)
+
     def closeEvent(self, event):
-        for thread, worker in list(self._live_workers):
-            self._cleanup_worker(thread, worker)
+        for worker in list(self._worker_records):
+            self._cleanup_worker(worker)
         super().closeEvent(event)
