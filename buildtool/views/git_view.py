@@ -5,24 +5,28 @@ import os
 from pathlib import Path
 from functools import wraps
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QGridLayout,
-    QLabel,
-    QComboBox,
-    QLineEdit,
-    QPushButton,
+    QApplication,
     QCheckBox,
-    QTextEdit,
-    QHBoxLayout,
+    QComboBox,
+    QFrame,
+    QGridLayout,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QScrollArea,
+    QSplitter,
+    QTabWidget,
+    QTextEdit,
+    QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
-    QApplication,
-    QTabWidget,
-    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+    QSizePolicy,
 )
-from PySide6.QtCore import Qt, Signal, QObject, QTimer
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize
 from ..core.config import Config
 # Import our local-only shim
 from ..core.git_tasks_local import (
@@ -40,6 +44,8 @@ import shiboken6
 from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
 from .nas_activity_log_view import NasActivityLogView
 from .nas_branches_view import NasBranchesView
+from ..ui.icons import get_icon
+from ..ui.widgets import combo_with_arrow, set_combo_enabled
 
 def safe_slot(fn: Callable):
     @wraps(fn)
@@ -96,16 +102,23 @@ class GitView(QWidget):
         except Exception:
             pass
 
+    def _make_tool_button(self, text: str, icon_name: str) -> QToolButton:
+        btn = QToolButton()
+        btn.setText(text)
+        btn.setIcon(get_icon(icon_name))
+        btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        btn.setAutoRaise(True)
+        btn.setIconSize(QSize(18, 18))
+        return btn
+
     def _set_busy(self, busy: bool, note: str = ""):
         for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
                   self.btnRunCreateVersion, self.btnSwitch, self.btnMerge, self.btnRefresh,
                   self.btnReconcile, self.btnNasRecover, self.btnNasPublish):
             try: w.setEnabled(not busy)
             except Exception: pass
-        try:
-            self.cboProject.setEnabled(not busy)
-        except Exception:
-            pass
+        for combo in (self.cboProject, self.cboHistorySwitch, self.cboDeleteBranch, self.cboHistoryMerge):
+            set_combo_enabled(combo, not busy)
         try:
             QApplication.setOverrideCursor(Qt.WaitCursor) if busy else QApplication.restoreOverrideCursor()
         except Exception:
@@ -124,130 +137,213 @@ class GitView(QWidget):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(12)
+        icon = QLabel()
+        icon.setPixmap(get_icon("git").pixmap(32, 32))
+        header.addWidget(icon)
+        title = QLabel("Repositorios Git")
+        title.setProperty("role", "title")
+        header.addWidget(title)
+        header.addStretch(1)
+        self.btnRefresh = self._make_tool_button("Refrescar vista", "refresh")
+        header.addWidget(self.btnRefresh)
+        root.addLayout(header)
 
         self.tabs = QTabWidget()
+        self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setMovable(False)
         root.addWidget(self.tabs, 1)
 
-        main = QWidget()
-        self.tabs.addTab(main, "Repos Git")
-        top_wrap = QVBoxLayout(main)
+        main_panel = QWidget()
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        proj = QGridLayout()
-        proj.setHorizontalSpacing(8)
-        proj.setVerticalSpacing(6)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(12)
+        scroll.setWidget(top_container)
+        main_layout.addWidget(scroll)
+        self.tabs.addTab(main_panel, get_icon("git"), "Gestión")
+
+        project_box = QGroupBox("Proyecto activo")
+        proj = QGridLayout(project_box)
+        proj.setHorizontalSpacing(10)
+        proj.setVerticalSpacing(8)
         row = 0
         proj.addWidget(QLabel("Proyecto:"), row, 0)
-        self.cboProject = QComboBox(); proj.addWidget(self.cboProject, row, 1); row += 1
-        self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual."); proj.addWidget(self.lblScope, row, 0, 1, 4); row += 1
-        self.lblCurrent = QLabel("Rama actual: ?"); proj.addWidget(self.lblCurrent, row, 0, 1, 4); row += 1
-        top_wrap.addLayout(proj)
+        self.cboProject = QComboBox()
+        proj.addWidget(combo_with_arrow(self.cboProject), row, 1)
+        row += 1
+        self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual.")
+        proj.addWidget(self.lblScope, row, 0, 1, 2)
+        row += 1
+        self.lblCurrent = QLabel("Rama actual: ?")
+        proj.addWidget(self.lblCurrent, row, 0, 1, 2)
+        top_layout.addWidget(project_box)
 
         ops = QGroupBox("Acciones de ramas")
         opsl = QGridLayout(ops)
-        opsl.setHorizontalSpacing(8)
-        opsl.setVerticalSpacing(6)
+        opsl.setHorizontalSpacing(10)
+        opsl.setVerticalSpacing(12)
         opsl.setColumnStretch(0, 1)
         opsl.setColumnStretch(1, 1)
 
-
-        # switch
-        self.cboHistorySwitch = QComboBox(); self.cboHistorySwitch.setEditable(True)
-        self.btnSwitch = QPushButton("Switch (global)")
+        self.cboHistorySwitch = QComboBox()
+        self.cboHistorySwitch.setEditable(True)
+        self.btnSwitch = self._make_tool_button("Switch (global)", "branch")
         grp_switch = QGroupBox("Cambiar a otra rama")
         hs = QHBoxLayout(grp_switch)
-        hs.addWidget(self.cboHistorySwitch, 1); hs.addWidget(self.btnSwitch)
+        hs.setContentsMargins(10, 10, 10, 10)
+        hs.setSpacing(10)
+        hs.addWidget(combo_with_arrow(self.cboHistorySwitch), 1)
+        hs.addWidget(self.btnSwitch)
 
-        # create / push
-        self.txtNewBranch = QLineEdit(); self.txtNewBranch.setPlaceholderText("Nombre de la nueva rama")
-        self.btnCreateLocal = QPushButton("Crear (local, global)")
-        self.btnPushBranch = QPushButton("Push (global)")
+        self.txtNewBranch = QLineEdit()
+        self.txtNewBranch.setPlaceholderText("Nombre de la nueva rama")
+        self.btnCreateLocal = self._make_tool_button("Crear (local, global)", "branch")
+        self.btnPushBranch = self._make_tool_button("Push (global)", "push")
         grp_new = QGroupBox("Nueva rama")
         hnew = QHBoxLayout(grp_new)
-        hnew.addWidget(self.txtNewBranch, 1); hnew.addWidget(self.btnCreateLocal); hnew.addWidget(self.btnPushBranch)
+        hnew.setContentsMargins(10, 10, 10, 10)
+        hnew.setSpacing(10)
+        hnew.addWidget(self.txtNewBranch, 1)
+        hnew.addWidget(self.btnCreateLocal)
+        hnew.addWidget(self.btnPushBranch)
 
-        # delete
-        self.cboDeleteBranch = QComboBox(); self.cboDeleteBranch.setEditable(True)
+        self.cboDeleteBranch = QComboBox()
+        self.cboDeleteBranch.setEditable(True)
         self.chkConfirmDelete = QCheckBox("Confirmar")
-        self.btnDeleteBranch = QPushButton("Eliminar local (global)")
+        self.btnDeleteBranch = self._make_tool_button("Eliminar local (global)", "delete")
         grp_del = QGroupBox("Eliminar rama")
         hd = QHBoxLayout(grp_del)
-        hd.addWidget(self.cboDeleteBranch, 1); hd.addWidget(self.chkConfirmDelete); hd.addWidget(self.btnDeleteBranch)
+        hd.setContentsMargins(10, 10, 10, 10)
+        hd.setSpacing(10)
+        hd.addWidget(combo_with_arrow(self.cboDeleteBranch), 1)
+        hd.addWidget(self.chkConfirmDelete)
+        hd.addWidget(self.btnDeleteBranch)
 
-        # version
-        self.txtVersion = QLineEdit(); self.txtVersion.setPlaceholderText("3.00.17")
+        self.txtVersion = QLineEdit()
+        self.txtVersion.setPlaceholderText("3.00.17")
         self.chkQA = QCheckBox("Crear *_QA")
-        self.btnRunCreateVersion = QPushButton("Crear ramas de versión (local, global)")
+        self.btnRunCreateVersion = self._make_tool_button("Crear ramas de versión (local, global)", "version")
         grp_ver = QGroupBox("Ramas de versión")
         hv = QHBoxLayout(grp_ver)
-        hv.addWidget(self.txtVersion, 1); hv.addWidget(self.chkQA); hv.addWidget(self.btnRunCreateVersion)
+        hv.setContentsMargins(10, 10, 10, 10)
+        hv.setSpacing(10)
+        hv.addWidget(self.txtVersion, 1)
+        hv.addWidget(self.chkQA)
+        hv.addWidget(self.btnRunCreateVersion)
 
-        # merge
-        self.cboHistoryMerge = QComboBox(); self.cboHistoryMerge.setEditable(True)
+        self.cboHistoryMerge = QComboBox()
+        self.cboHistoryMerge.setEditable(True)
         self.chkMergePush = QCheckBox("Push al terminar")
-        self.btnMerge = QPushButton("Merge a rama actual (global)")
+        self.btnMerge = self._make_tool_button("Merge a rama actual (global)", "merge")
         grp_merge = QGroupBox("Merge a la rama actual")
         hm = QHBoxLayout(grp_merge)
-        hm.addWidget(self.cboHistoryMerge, 1); hm.addWidget(self.chkMergePush); hm.addWidget(self.btnMerge)
+        hm.setContentsMargins(10, 10, 10, 10)
+        hm.setSpacing(10)
+        hm.addWidget(combo_with_arrow(self.cboHistoryMerge), 1)
+        hm.addWidget(self.chkMergePush)
+        hm.addWidget(self.btnMerge)
 
-        # arrange groups in a grid to reduce vertical space
         opsl.addWidget(grp_switch, 0, 0)
         opsl.addWidget(grp_new, 0, 1)
         opsl.addWidget(grp_del, 1, 0)
         opsl.addWidget(grp_ver, 1, 1)
         opsl.addWidget(grp_merge, 2, 0, 1, 2)
 
-        # misc buttons
-        self.btnRefresh = QPushButton("Refrescar vista")
-        self.btnReconcile = QPushButton("Reconciliar con Git (solo local)")
-        self.btnNasRecover = QPushButton("Recuperar NAS")
-        self.btnNasPublish = QPushButton("Publicar NAS")
-        hr = QHBoxLayout()
-        hr.addWidget(self.btnRefresh)
-        hr.addWidget(self.btnNasRecover)
-        hr.addWidget(self.btnNasPublish)
-        hr.addStretch()
-        hr.addWidget(self.btnReconcile)
-        opsl.addLayout(hr, 3, 0, 1, 2)
+        misc = QHBoxLayout()
+        misc.setSpacing(10)
+        self.btnNasRecover = self._make_tool_button("Recuperar NAS", "cloud-download")
+        self.btnNasPublish = self._make_tool_button("Publicar NAS", "cloud-upload")
+        self.btnReconcile = self._make_tool_button("Reconciliar con Git (solo local)", "sync")
+        misc.addWidget(self.btnNasRecover)
+        misc.addWidget(self.btnNasPublish)
+        misc.addStretch(1)
+        misc.addWidget(self.btnReconcile)
+        opsl.addLayout(misc, 3, 0, 1, 2)
 
-        top_wrap.addWidget(ops)
+        top_layout.addWidget(ops)
 
-        gr = QGroupBox("Módulos y ramas actuales")
-        grl = QVBoxLayout(gr)
-        self.tree = QTreeWidget(); self.tree.setHeaderLabels(["Módulo", "Rama actual"])
-        self.tree.setRootIsDecorated(False); self.tree.setAlternatingRowColors(True)
-        grl.addWidget(self.tree, 1)
-        top_wrap.addWidget(gr)
+        modules_box = QGroupBox("Módulos y ramas actuales")
+        modules_layout = QVBoxLayout(modules_box)
+        modules_layout.setContentsMargins(10, 10, 10, 10)
+        modules_layout.setSpacing(10)
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Módulo", "Rama actual"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setMinimumHeight(260)
+        modules_layout.addWidget(self.tree)
 
-        grh = QGroupBox("Historial de ramas")
-        grhl = QVBoxLayout(grh)
+        history_box = QGroupBox("Historial de ramas")
+        history_layout = QVBoxLayout(history_box)
+        history_layout.setContentsMargins(10, 10, 10, 10)
+        history_layout.setSpacing(10)
         self.treeHist = QTreeWidget()
         self.treeHist.setHeaderLabels(["Rama", "Usuario", "Creación", "Local", "Origin", "Merge"])
         self.treeHist.setRootIsDecorated(False)
         self.treeHist.setAlternatingRowColors(True)
-        grhl.addWidget(self.treeHist, 1)
-        top_wrap.addWidget(grh)
+        self.treeHist.setMinimumHeight(260)
+        history_layout.addWidget(self.treeHist)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(modules_box)
+        splitter.addWidget(history_box)
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizes([420, 420])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setMinimumHeight(320)
+        modules_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        history_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        top_layout.addWidget(splitter, 1)
+
+        detail_panel = QWidget()
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
+
+        bottom_tabs = QTabWidget()
+        bottom_tabs.setTabPosition(QTabWidget.North)
+        bottom_tabs.setMovable(False)
+        detail_layout.addWidget(bottom_tabs)
+        self.tabs.addTab(detail_panel, get_icon("log"), "Registros")
 
         console = QWidget()
-        self.tabs.addTab(console, "Consola")
         clog_layout = QVBoxLayout(console)
+        clog_layout.setContentsMargins(12, 12, 12, 12)
+        clog_layout.setSpacing(8)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setLineWrapMode(QTextEdit.NoWrap)
         clog_layout.addWidget(self.log, 1)
-        self.btnClearLog = QPushButton("Limpiar")
+        self.btnClearLog = self._make_tool_button("Limpiar", "broom")
         hcl = QHBoxLayout()
-        hcl.addStretch()
+        hcl.addStretch(1)
         hcl.addWidget(self.btnClearLog)
         clog_layout.addLayout(hcl)
+        bottom_tabs.addTab(console, get_icon("log"), "Consola")
+
+        self.nasBranchesView = NasBranchesView(self)
+        bottom_tabs.addTab(self.nasBranchesView, get_icon("branch"), "Historial NAS")
+        self.nasActivityView = NasActivityLogView(self)
+        bottom_tabs.addTab(self.nasActivityView, get_icon("history"), "Activity NAS")
+
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
 
-        self.nasBranchesView = NasBranchesView(self)
-        self.tabs.addTab(self.nasBranchesView, "Historial NAS")
-        self.nasActivityView = NasActivityLogView(self)
-        self.tabs.addTab(self.nasActivityView, "Activity NAS")
+        self.tabs.setCurrentIndex(0)
 
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)

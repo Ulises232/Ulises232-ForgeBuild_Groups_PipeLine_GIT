@@ -1,5 +1,7 @@
 from PySide6.QtCore import QObject, Signal, Slot, QThread
+
 from .thread_tracker import TRACKER
+
 
 class TaskWorker(QObject):
     progress = Signal(str)
@@ -21,10 +23,22 @@ class TaskWorker(QObject):
             ok = False
         self.finished.emit(ok)
 
-def run_in_thread(fn, *args, **kwargs):
+
+def run_in_thread(fn_or_worker, *args, **kwargs):
+    """Ejecuta ``fn_or_worker`` en un ``QThread`` registrado en ``TRACKER``."""
+
     th = QThread()
-    worker = TaskWorker(fn, *args, **kwargs)
-    worker.moveToThread(th)
-    th.started.connect(worker.run)
+
+    if isinstance(fn_or_worker, QObject):
+        worker = fn_or_worker
+        worker.moveToThread(th)
+        if not hasattr(worker, "run") or not callable(getattr(worker, "run")):
+            raise AttributeError("El worker debe exponer un método 'run' invocable")
+        th.started.connect(worker.run)
+    else:
+        worker = TaskWorker(fn_or_worker, *args, **kwargs)
+        worker.moveToThread(th)
+        th.started.connect(worker.run)
+
     TRACKER.add(th)  # <--- IMPORTANTE
     return th, worker
