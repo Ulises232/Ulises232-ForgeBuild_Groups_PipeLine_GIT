@@ -177,7 +177,6 @@ class DeployView(QWidget):
                 success_message=">> Copia completada.",
                 cfg=self.cfg,
                 project_key=pkey,
-                profile=prof,
                 version=version,
                 target_name=tgt,
                 group_key=gkey,

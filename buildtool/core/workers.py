@@ -102,7 +102,16 @@ def deploy_worker(
     success_message: str,
     **task_kwargs: Any,
 ) -> PipelineWorker:
-    """Crea un :class:`PipelineWorker` configurado para despliegues."""
+    """Crea un :class:`PipelineWorker` configurado para despliegues.
+
+    Parameters
+    ----------
+    profile:
+        Nombre del perfil que se está desplegando. También se utiliza como
+        prefijo para los mensajes de log emitidos por el worker.
+    """
+
+    task_kwargs.setdefault("profile", profile)
 
     return PipelineWorker(
         task,
