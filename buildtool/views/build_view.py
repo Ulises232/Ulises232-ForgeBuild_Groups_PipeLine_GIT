@@ -8,6 +8,7 @@ from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker, build_worker
 
 from ..ui.multi_select import MultiSelectComboBox
+from ..ui.widgets import combo_with_arrow
 
 
 class BuildView(QWidget):
@@ -22,11 +23,12 @@ class BuildView(QWidget):
         self.cboGroup = QComboBox()
         groups = [g.key for g in (cfg.groups or [])] or ["GLOBAL"]
         for g in groups: self.cboGroup.addItem(g, g)
-        row.addWidget(self.cboGroup)
+        row.addWidget(combo_with_arrow(self.cboGroup))
 
         self.lblProject = QLabel("Proyecto:")
         self.cboProject = QComboBox()
-        row.addWidget(self.lblProject); row.addWidget(self.cboProject)
+        row.addWidget(self.lblProject)
+        row.addWidget(combo_with_arrow(self.cboProject))
 
         row.addWidget(QLabel("Perfiles:"))
         self.cboProfiles = MultiSelectComboBox("Perfiles…", show_max=2); row.addWidget(self.cboProfiles)

@@ -45,6 +45,7 @@ from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
 from .nas_activity_log_view import NasActivityLogView
 from .nas_branches_view import NasBranchesView
 from ..ui.icons import get_icon
+from ..ui.widgets import combo_with_arrow, set_combo_enabled
 
 def safe_slot(fn: Callable):
     @wraps(fn)
@@ -110,39 +111,6 @@ class GitView(QWidget):
         btn.setIconSize(QSize(18, 18))
         return btn
 
-    def _combo_with_arrow(self, combo: QComboBox) -> QWidget:
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        layout.addWidget(combo, 1)
-
-        arrow = QToolButton()
-        arrow.setIcon(get_icon("chevron-down"))
-        arrow.setAutoRaise(True)
-        arrow.setCursor(Qt.PointingHandCursor)
-        arrow.setFixedSize(26, 24)
-        arrow.setIconSize(QSize(16, 16))
-        arrow.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        arrow.clicked.connect(combo.showPopup)
-        layout.addWidget(arrow)
-
-        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        combo._arrow_button = arrow  # type: ignore[attr-defined]
-        return container
-
-    def _set_combo_enabled(self, combo: QComboBox, enabled: bool):
-        try:
-            combo.setEnabled(enabled)
-        except Exception:
-            pass
-        arrow = getattr(combo, "_arrow_button", None)
-        if arrow is not None:
-            try:
-                arrow.setEnabled(enabled)
-            except Exception:
-                pass
-
     def _set_busy(self, busy: bool, note: str = ""):
         for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
                   self.btnRunCreateVersion, self.btnSwitch, self.btnMerge, self.btnRefresh,
@@ -150,7 +118,7 @@ class GitView(QWidget):
             try: w.setEnabled(not busy)
             except Exception: pass
         for combo in (self.cboProject, self.cboHistorySwitch, self.cboDeleteBranch, self.cboHistoryMerge):
-            self._set_combo_enabled(combo, not busy)
+            set_combo_enabled(combo, not busy)
         try:
             QApplication.setOverrideCursor(Qt.WaitCursor) if busy else QApplication.restoreOverrideCursor()
         except Exception:
@@ -214,7 +182,7 @@ class GitView(QWidget):
         row = 0
         proj.addWidget(QLabel("Proyecto:"), row, 0)
         self.cboProject = QComboBox()
-        proj.addWidget(self._combo_with_arrow(self.cboProject), row, 1)
+        proj.addWidget(combo_with_arrow(self.cboProject), row, 1)
         row += 1
         self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual.")
         proj.addWidget(self.lblScope, row, 0, 1, 2)
@@ -237,7 +205,7 @@ class GitView(QWidget):
         hs = QHBoxLayout(grp_switch)
         hs.setContentsMargins(10, 10, 10, 10)
         hs.setSpacing(10)
-        hs.addWidget(self._combo_with_arrow(self.cboHistorySwitch), 1)
+        hs.addWidget(combo_with_arrow(self.cboHistorySwitch), 1)
         hs.addWidget(self.btnSwitch)
 
         self.txtNewBranch = QLineEdit()
@@ -260,7 +228,7 @@ class GitView(QWidget):
         hd = QHBoxLayout(grp_del)
         hd.setContentsMargins(10, 10, 10, 10)
         hd.setSpacing(10)
-        hd.addWidget(self._combo_with_arrow(self.cboDeleteBranch), 1)
+        hd.addWidget(combo_with_arrow(self.cboDeleteBranch), 1)
         hd.addWidget(self.chkConfirmDelete)
         hd.addWidget(self.btnDeleteBranch)
 
@@ -284,7 +252,7 @@ class GitView(QWidget):
         hm = QHBoxLayout(grp_merge)
         hm.setContentsMargins(10, 10, 10, 10)
         hm.setSpacing(10)
-        hm.addWidget(self._combo_with_arrow(self.cboHistoryMerge), 1)
+        hm.addWidget(combo_with_arrow(self.cboHistoryMerge), 1)
         hm.addWidget(self.chkMergePush)
         hm.addWidget(self.btnMerge)
 

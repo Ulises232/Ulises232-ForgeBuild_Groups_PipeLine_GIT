@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt
@@ -20,6 +19,7 @@ from .views.pipeline_view import PipelineView
 from .views.git_view import GitView
 from .views.groups_wizard import GroupsWizard
 from .ui.icons import get_icon
+from .ui.theme import apply_theme, ThemeMode
 
 
 TAB_PIPELINE = "Pipeline"
@@ -126,16 +126,10 @@ class MainWindow(QWidget):
             pass
         super().closeEvent(event)
 
-    def _ensure_theme(self) -> None:
-        app = QApplication.instance()
-        if not app:
-            return
-        if getattr(app, "_forgebuild_theme_loaded", False):
-            return
-        theme_path = Path(__file__).resolve().parent / "ui" / "theme.qss"
-        try:
-            data = theme_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return
-        app.setStyleSheet(data)
-        setattr(app, "_forgebuild_theme_loaded", True)
+    def _ensure_theme(self, mode: ThemeMode = "auto") -> None:
+        apply_theme(mode)
+
+    def set_theme_mode(self, mode: ThemeMode) -> str:
+        """Expose theme switching for future UI toggles."""
+
+        return apply_theme(mode)
