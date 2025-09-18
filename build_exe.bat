@@ -106,6 +106,9 @@ pyinstaller --noconfirm ^
   --icon "assets\\forgebuild.ico" ^
   --collect-all PySide6 ^
   --add-data "VERSION;." ^
+  --add-data "buildtool\\ui\\icons;buildtool\\ui\\icons" ^
+  --add-data "buildtool\\ui\\theme.qss;buildtool\\ui" ^
+  --add-data "buildtool\\ui\\theme_light.qss;buildtool\\ui" ^
   --add-data "buildtool/data;buildtool/data" ^
   buildtool/app.py
 
