@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QScrollArea,
-    QSplitter,
     QTabWidget,
     QTextEdit,
     QToolButton,
@@ -154,9 +153,15 @@ class GitView(QWidget):
         header.addWidget(self.btnRefresh)
         root.addLayout(header)
 
-        self.splitter = QSplitter(Qt.Vertical)
-        self.splitter.setHandleWidth(3)
-        root.addWidget(self.splitter, 1)
+        self.tabs = QTabWidget()
+        self.tabs.setTabPosition(QTabWidget.North)
+        self.tabs.setMovable(False)
+        root.addWidget(self.tabs, 1)
+
+        main_panel = QWidget()
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -166,7 +171,8 @@ class GitView(QWidget):
         top_layout.setContentsMargins(0, 0, 0, 0)
         top_layout.setSpacing(12)
         scroll.setWidget(top_container)
-        self.splitter.addWidget(scroll)
+        main_layout.addWidget(scroll)
+        self.tabs.addTab(main_panel, get_icon("git"), "Gestión")
 
         project_box = QGroupBox("Proyecto activo")
         proj = QGridLayout(project_box)
@@ -290,10 +296,16 @@ class GitView(QWidget):
         history_layout.addWidget(self.treeHist)
         top_layout.addWidget(history_box)
 
+        detail_panel = QWidget()
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
+
         bottom_tabs = QTabWidget()
         bottom_tabs.setTabPosition(QTabWidget.North)
         bottom_tabs.setMovable(False)
-        self.splitter.addWidget(bottom_tabs)
+        detail_layout.addWidget(bottom_tabs)
+        self.tabs.addTab(detail_panel, get_icon("log"), "Registros")
 
         console = QWidget()
         clog_layout = QVBoxLayout(console)
@@ -318,9 +330,7 @@ class GitView(QWidget):
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
 
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 2)
-        self.splitter.setSizes([540, 260])
+        self.tabs.setCurrentIndex(0)
 
     def _wire_events(self):
         self.cboProject.currentTextChanged.connect(self._on_project_changed)
