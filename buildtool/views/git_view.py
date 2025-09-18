@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QScrollArea,
+    QSplitter,
     QTabWidget,
     QTextEdit,
     QToolButton,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QSizePolicy,
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize
 from ..core.config import Config
@@ -108,16 +110,47 @@ class GitView(QWidget):
         btn.setIconSize(QSize(18, 18))
         return btn
 
+    def _combo_with_arrow(self, combo: QComboBox) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        layout.addWidget(combo, 1)
+
+        arrow = QToolButton()
+        arrow.setIcon(get_icon("chevron-down"))
+        arrow.setAutoRaise(True)
+        arrow.setCursor(Qt.PointingHandCursor)
+        arrow.setFixedSize(26, 24)
+        arrow.setIconSize(QSize(16, 16))
+        arrow.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        arrow.clicked.connect(combo.showPopup)
+        layout.addWidget(arrow)
+
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        combo._arrow_button = arrow  # type: ignore[attr-defined]
+        return container
+
+    def _set_combo_enabled(self, combo: QComboBox, enabled: bool):
+        try:
+            combo.setEnabled(enabled)
+        except Exception:
+            pass
+        arrow = getattr(combo, "_arrow_button", None)
+        if arrow is not None:
+            try:
+                arrow.setEnabled(enabled)
+            except Exception:
+                pass
+
     def _set_busy(self, busy: bool, note: str = ""):
         for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
                   self.btnRunCreateVersion, self.btnSwitch, self.btnMerge, self.btnRefresh,
                   self.btnReconcile, self.btnNasRecover, self.btnNasPublish):
             try: w.setEnabled(not busy)
             except Exception: pass
-        try:
-            self.cboProject.setEnabled(not busy)
-        except Exception:
-            pass
+        for combo in (self.cboProject, self.cboHistorySwitch, self.cboDeleteBranch, self.cboHistoryMerge):
+            self._set_combo_enabled(combo, not busy)
         try:
             QApplication.setOverrideCursor(Qt.WaitCursor) if busy else QApplication.restoreOverrideCursor()
         except Exception:
@@ -181,7 +214,7 @@ class GitView(QWidget):
         row = 0
         proj.addWidget(QLabel("Proyecto:"), row, 0)
         self.cboProject = QComboBox()
-        proj.addWidget(self.cboProject, row, 1)
+        proj.addWidget(self._combo_with_arrow(self.cboProject), row, 1)
         row += 1
         self.lblScope = QLabel("Acciones aplican a TODOS los módulos del proyecto actual.")
         proj.addWidget(self.lblScope, row, 0, 1, 2)
@@ -204,7 +237,7 @@ class GitView(QWidget):
         hs = QHBoxLayout(grp_switch)
         hs.setContentsMargins(10, 10, 10, 10)
         hs.setSpacing(10)
-        hs.addWidget(self.cboHistorySwitch, 1)
+        hs.addWidget(self._combo_with_arrow(self.cboHistorySwitch), 1)
         hs.addWidget(self.btnSwitch)
 
         self.txtNewBranch = QLineEdit()
@@ -227,7 +260,7 @@ class GitView(QWidget):
         hd = QHBoxLayout(grp_del)
         hd.setContentsMargins(10, 10, 10, 10)
         hd.setSpacing(10)
-        hd.addWidget(self.cboDeleteBranch, 1)
+        hd.addWidget(self._combo_with_arrow(self.cboDeleteBranch), 1)
         hd.addWidget(self.chkConfirmDelete)
         hd.addWidget(self.btnDeleteBranch)
 
@@ -251,7 +284,7 @@ class GitView(QWidget):
         hm = QHBoxLayout(grp_merge)
         hm.setContentsMargins(10, 10, 10, 10)
         hm.setSpacing(10)
-        hm.addWidget(self.cboHistoryMerge, 1)
+        hm.addWidget(self._combo_with_arrow(self.cboHistoryMerge), 1)
         hm.addWidget(self.chkMergePush)
         hm.addWidget(self.btnMerge)
 
@@ -282,8 +315,8 @@ class GitView(QWidget):
         self.tree.setHeaderLabels(["Módulo", "Rama actual"])
         self.tree.setRootIsDecorated(False)
         self.tree.setAlternatingRowColors(True)
+        self.tree.setMinimumHeight(260)
         modules_layout.addWidget(self.tree)
-        top_layout.addWidget(modules_box)
 
         history_box = QGroupBox("Historial de ramas")
         history_layout = QVBoxLayout(history_box)
@@ -293,8 +326,20 @@ class GitView(QWidget):
         self.treeHist.setHeaderLabels(["Rama", "Usuario", "Creación", "Local", "Origin", "Merge"])
         self.treeHist.setRootIsDecorated(False)
         self.treeHist.setAlternatingRowColors(True)
+        self.treeHist.setMinimumHeight(260)
         history_layout.addWidget(self.treeHist)
-        top_layout.addWidget(history_box)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(modules_box)
+        splitter.addWidget(history_box)
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizes([420, 420])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setMinimumHeight(320)
+        modules_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        history_box.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        top_layout.addWidget(splitter, 1)
 
         detail_panel = QWidget()
         detail_layout = QVBoxLayout(detail_panel)
