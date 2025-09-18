@@ -6,6 +6,7 @@ from .copier import copy_artifacts
 import pathlib, shutil, tempfile, os, threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Event
 
 # Carpeta de locks por proceso para módulos con run_once
 _RUNONCE_DIR = pathlib.Path(tempfile.gettempdir()) / f"forgebuild_runonce_{os.getpid()}"
@@ -49,7 +50,8 @@ def build_project_for_profile(
     log_cb=print,
     group_key: str | None=None,
     modules_filter: set[str] | None = None,
-) -> None:
+    cancel_event: Event | None = None,
+) -> bool:
     # localizar proyecto
     project = None
     if group_key:
@@ -77,6 +79,10 @@ def build_project_for_profile(
         if modules_filter and mod.name not in modules_filter:
             continue
 
+        if cancel_event and cancel_event.is_set():
+            log_cb(f"[{profile}] Cancelado por el usuario antes de ejecutar {mod.name}.")
+            return False
+
         if getattr(mod, "optional", False) and not include_optional:
             log_cb(f"[{profile}] Saltando módulo opcional: {mod.name}")
             continue
@@ -98,12 +104,20 @@ def build_project_for_profile(
         if getattr(mod, "run_once", False) and lock_file.exists():
             log_cb(f"[{profile}] {mod.name}: run_once, reutilizando artefactos de esta sesión.")
         else:
-            ret = run_maven(str(module_path), mod.goals, profile=profile_to_pass,
-                            log_cb=lambda s: log_cb(f"[{profile}] {s}"),
-                            separate_window=separate)
+            ret = run_maven(
+                str(module_path),
+                mod.goals,
+                profile=profile_to_pass,
+                log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+                separate_window=separate,
+                cancel_event=cancel_event,
+            )
+            if cancel_event and cancel_event.is_set():
+                log_cb(f"[{profile}] {mod.name}: cancelado por el usuario.")
+                return False
             if ret != 0:
                 log_cb(f"[{profile}] ERROR: Maven falló en {mod.name} (código {ret}). Abortando perfil.")
-                return
+                return False
             if getattr(mod, "run_once", False):
                 try:
                     lock_file.write_text("ok", encoding="utf-8")
@@ -157,6 +171,8 @@ def build_project_for_profile(
                 shutil.copy2(src, dest_dir / mod.rename_jar_to)
                 log_cb(f"[{profile}] Renombrado {src.name} -> {mod.rename_jar_to} en {dest_dir}")
 
+    return True
+
 # ------------------ NUEVO: Scheduler perfiles en serie, módulos en paralelo ------------------
 
 def build_project_scheduled(
@@ -167,7 +183,8 @@ def build_project_scheduled(
     log_cb=print,
     group_key: str | None=None,
     max_workers: int | None = None,
-) -> None:
+    cancel_event: Event | None = None,
+) -> bool:
     # localizar proyecto
     project = None
     if group_key:
@@ -181,9 +198,31 @@ def build_project_scheduled(
 
     # commons (run_once + no_profile) una sola vez
     commons = [m.name for m in all_mods if getattr(m, "run_once", False) and getattr(m, "no_profile", False)]
+    cancel_event = cancel_event or Event()
+
+    success = True
+    error_reported = False
+
     if commons:
         first = profiles[0]
-        build_project_for_profile(cfg, project_key, first, True, log_cb=log_cb, group_key=group_key, modules_filter=set(commons))
+        commons_ok = build_project_for_profile(
+            cfg,
+            project_key,
+            first,
+            True,
+            log_cb=log_cb,
+            group_key=group_key,
+            modules_filter=set(commons),
+            cancel_event=cancel_event,
+        )
+        if not commons_ok:
+            success = False
+            if not cancel_event.is_set():
+                cancel_event.set()
+            if not error_reported:
+                log_cb("<< ERROR: Falló la fase común. Deteniendo el pipeline.")
+                error_reported = True
+            return False
 
     # módulos que se bloquean entre perfiles
     import threading
@@ -194,40 +233,105 @@ def build_project_scheduled(
 
     # tareas por perfil/módulo (excluye commons)
     tasks = []
+    profile_pending: dict[str, set[str]] = {}
+
     for prof in profiles:
         log_cb(f"== Perfil: {prof} ==")
+        pending: set[str] = set()
         for mod in all_mods:
             if mod.name in commons:
                 continue
             tasks.append((prof, mod.name))
+            pending.add(mod.name)
+        if pending:
+            profile_pending[prof] = pending
 
     if not tasks:
-        return
+        return True
 
     workers = max_workers or max(2, min(4, len(tasks)))
 
-    def _run_one(profile: str, mod_name: str):
+    def _run_one(profile: str, mod_name: str) -> str:
+        if cancel_event.is_set():
+            return "cancelled"
+
         if mod_name in serial_mods:
             with mod_locks[mod_name]:
-                build_project_for_profile(
-                    cfg, project_key, profile, True,
-                    log_cb=log_cb, group_key=group_key,
-                    modules_filter={mod_name}
+                ok = build_project_for_profile(
+                    cfg,
+                    project_key,
+                    profile,
+                    True,
+                    log_cb=log_cb,
+                    group_key=group_key,
+                    modules_filter={mod_name},
+                    cancel_event=cancel_event,
                 )
         else:
-            build_project_for_profile(
-                cfg, project_key, profile, True,
-                log_cb=log_cb, group_key=group_key,
-                modules_filter={mod_name}
+            ok = build_project_for_profile(
+                cfg,
+                project_key,
+                profile,
+                True,
+                log_cb=log_cb,
+                group_key=group_key,
+                modules_filter={mod_name},
+                cancel_event=cancel_event,
             )
+
+        if ok:
+            return "ok"
+
+        if not cancel_event.is_set():
+            cancel_event.set()
+        return "error"
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         future_map = {pool.submit(_run_one, prof, mod): (prof, mod) for prof, mod in tasks}
         for f in as_completed(future_map):
-            err = f.exception()
-            if err:
-                prof, mod = future_map[f]
-                log_cb(f"[{prof}] << ERROR en {mod}: {err}")
+            prof, mod = future_map[f]
+
+            if cancel_event.is_set() and f.cancelled():
+                continue
+
+            try:
+                result = f.result()
+            except Exception as err:
+                success = False
+                if not cancel_event.is_set():
+                    cancel_event.set()
+                if not error_reported:
+                    log_cb(f"[{prof}] << ERROR en {mod}: {err}")
+                    log_cb("<< ERROR: Pipeline detenido por fallas.")
+                    error_reported = True
+                continue
+
+            if result == "ok":
+                pending = profile_pending.get(prof)
+                if pending:
+                    pending.discard(mod)
+                    if not pending:
+                        log_cb(f"[{prof}] >> Perfil completado.")
+                continue
+
+            if result == "cancelled":
+                success = False
+                continue
+
+            if result == "error":
+                success = False
+                if not error_reported:
+                    log_cb("<< ERROR: Pipeline detenido por fallas.")
+                    error_reported = True
+
+        if cancel_event.is_set():
+            for fut in future_map:
+                fut.cancel()
+
+    if cancel_event.is_set() and not error_reported and not success:
+        log_cb("<< Pipeline cancelado por el usuario.")
+
+    return success and not cancel_event.is_set()
 
 
 # ------------------ Deploy (sin cambios) ------------------
@@ -240,7 +344,7 @@ def build_project(
     log_cb=print,
     group_key: str | None=None,
     modules_filter: set[str] | None = None,
-) -> None:
+) -> bool:
     return build_project_for_profile(
         cfg, project_key, profile, include_optional, log_cb=log_cb,
         group_key=group_key, modules_filter=modules_filter
