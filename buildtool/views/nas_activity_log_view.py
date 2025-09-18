@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.branch_store import load_nas_activity_log
+from ..ui.widgets import combo_with_arrow
 
 
 class NasActivityLogView(QWidget):
@@ -40,12 +41,12 @@ class NasActivityLogView(QWidget):
         filters.addWidget(QLabel("Grupo:"))
         self.cboGroup = QComboBox()
         self.cboGroup.addItem("Todos", userData=None)
-        filters.addWidget(self.cboGroup)
+        filters.addWidget(combo_with_arrow(self.cboGroup))
 
         filters.addWidget(QLabel("Proyecto:"))
         self.cboProject = QComboBox()
         self.cboProject.addItem("Todos", userData=None)
-        filters.addWidget(self.cboProject)
+        filters.addWidget(combo_with_arrow(self.cboProject))
 
         filters.addWidget(QLabel("Buscar:"))
         self.txtSearch = QLineEdit()

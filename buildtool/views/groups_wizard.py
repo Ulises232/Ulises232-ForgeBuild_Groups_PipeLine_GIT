@@ -10,6 +10,7 @@ import yaml
 from ..core.config import (
     Config, Group, Project, Module, DeployTarget, save_config
 )
+from ..ui.widgets import combo_with_arrow
 
 # ----------------------------- Helpers -----------------------------
 
@@ -86,13 +87,13 @@ class ModuleRow(QWidget):
         lay.addWidget(QLabel("Goals:"),  1, 0); lay.addWidget(self.txtGoals, 1, 1)
         lay.addWidget(QLabel("Flags:"),  1, 2)
         flags_w = QWidget(); flags_h = QHBoxLayout(flags_w); flags_h.setContentsMargins(0,0,0,0); flags_h.setSpacing(6)
-        flags_h.addWidget(self.cmbOptional)
-        flags_h.addWidget(self.cmbNoProfile)
-        flags_h.addWidget(self.cmbRunOnce)
-        flags_h.addWidget(self.cmbSerial)
+        flags_h.addWidget(combo_with_arrow(self.cmbOptional))
+        flags_h.addWidget(combo_with_arrow(self.cmbNoProfile))
+        flags_h.addWidget(combo_with_arrow(self.cmbRunOnce))
+        flags_h.addWidget(combo_with_arrow(self.cmbSerial))
         lay.addWidget(flags_w, 1, 3)
         # Fila 2
-        lay.addWidget(QLabel("Salida:"), 2, 0); lay.addWidget(self.cboSalida, 2, 1)
+        lay.addWidget(QLabel("Salida:"), 2, 0); lay.addWidget(combo_with_arrow(self.cboSalida), 2, 1)
         lay.addWidget(QLabel("Carpeta:"), 2, 2); lay.addWidget(self.txtCustomOut, 2, 3)
         lay.addWidget(self.chkToRoot, 2, 4)
         # Fila 3
@@ -206,7 +207,7 @@ class TargetRow(QWidget):
                 self.cboProject.addItem(p.key, p.key)
 
         lay.addWidget(QLabel("Nombre:"), 0, 0); lay.addWidget(self.txtName, 0, 1, 1, 3)
-        lay.addWidget(QLabel("Proyecto:"), 1, 0); lay.addWidget(self.cboProject, 1, 1)
+        lay.addWidget(QLabel("Proyecto:"), 1, 0); lay.addWidget(combo_with_arrow(self.cboProject), 1, 1)
         lay.addWidget(QLabel("Perfiles:"), 1, 2); lay.addWidget(self.txtProfiles, 1, 3)
         lay.addWidget(QLabel("Path:"), 2, 0); lay.addWidget(self.txtPath, 2, 1, 1, 3)
         lay.addWidget(QLabel("Hotfix path:"), 3, 0); lay.addWidget(self.txtHotfix, 3, 1, 1, 3)
@@ -253,8 +254,8 @@ class ProjectEditor(QWidget):
             self.cboRepo.addItem(k, k)
 
         header.addWidget(QLabel("Proyecto:"), 0, 0); header.addWidget(self.txtKey, 0, 1)
-        header.addWidget(QLabel("Repo:"),     0, 2); header.addWidget(self.cboRepo, 0, 3)
-        header.addWidget(QLabel("Ejecución:"), 0, 4); header.addWidget(self.cboExec, 0, 5)
+        header.addWidget(QLabel("Repo:"),     0, 2); header.addWidget(combo_with_arrow(self.cboRepo), 0, 3)
+        header.addWidget(QLabel("Ejecución:"), 0, 4); header.addWidget(combo_with_arrow(self.cboExec), 0, 5)
         lay.addLayout(header)
 
         # Split
@@ -416,7 +417,8 @@ class GroupEditor(QWidget):
         self.btnAddGroup = QPushButton("Nuevo grupo")
         self.btnRenGroup = QPushButton("Renombrar")
         self.btnDelGroup = QPushButton("Eliminar grupo")
-        top.addWidget(QLabel("Grupo:")); top.addWidget(self.cboGroup, 1)
+        top.addWidget(QLabel("Grupo:"))
+        top.addWidget(combo_with_arrow(self.cboGroup), 1)
         top.addWidget(self.btnAddGroup); top.addWidget(self.btnRenGroup); top.addWidget(self.btnDelGroup)
         main.addLayout(top)
 

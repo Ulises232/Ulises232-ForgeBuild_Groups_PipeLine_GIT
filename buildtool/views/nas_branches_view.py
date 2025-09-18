@@ -32,6 +32,7 @@ from ..core.branch_store import (
     record_activity,
     save_nas_index,
 )
+from ..ui.widgets import combo_with_arrow
 
 
 class NasBranchesView(QWidget):
@@ -57,12 +58,12 @@ class NasBranchesView(QWidget):
         filters.addWidget(QLabel("Grupo:"))
         self.cboGroup = QComboBox()
         self.cboGroup.addItem("Todos", userData=None)
-        filters.addWidget(self.cboGroup)
+        filters.addWidget(combo_with_arrow(self.cboGroup))
 
         filters.addWidget(QLabel("Proyecto:"))
         self.cboProject = QComboBox()
         self.cboProject.addItem("Todos", userData=None)
-        filters.addWidget(self.cboProject)
+        filters.addWidget(combo_with_arrow(self.cboProject))
 
         filters.addWidget(QLabel("Buscar:"))
         self.txtSearch = QLineEdit()

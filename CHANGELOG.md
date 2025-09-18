@@ -4,6 +4,24 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.1.0] - 2025-09-19
+### Añadido
+- Hoja de estilos global (`buildtool/ui/theme.qss`) con tipografía, colores y estados modernos aplicados desde `MainWindow`.
+- Conjunto de iconos SVG compartidos y utilidades para cargarlos en pestañas, encabezados y botones de acción.
+- Worker reutilizable en `buildtool/core/workers.py` para ejecutar builds y despliegues con señales de progreso y finalización.
+- Módulo `buildtool/ui/multi_select.py` con las clases `Logger` y `MultiSelectComboBox` documentadas para su reutilización.
+
+### Cambiado
+- Vistas `MainWindow`, `PipelineView` y `GitView` reorganizadas con `QSplitter`/`QScrollArea`, encabezados iconográficos y botones de acción convertidos a `QToolButton`.
+- Lógica de las vistas de build y deploy actualizada para ejecutar tareas en segundo plano mediante el nuevo worker y gestionar el estado de la UI.
+- Combos multi-selección refactorizados para compartir el mismo diseño con flecha desplegable e inicialización consistente.
+
+### Corregido
+- Limpieza y seguimiento de hilos de fondo a través del `TRACKER`, asegurando la liberación con `deleteLater()` y `wait()` al cerrar la aplicación.
+
+### Interno
+- Cacheo de iconos y utilidades de UI centralizadas en `buildtool/ui/widgets.py` para mantener consistencia visual en todo el proyecto.
+
 ## [1.0.0] - 2025-09-17
 ### Añadido
 - Sistema completo de historial de ramas con sincronización hacia/desde NAS y registro de actividades.
@@ -27,4 +45,5 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Limpieza de logs de depuración y mejoras en los mensajes producidos por las tareas Git.
 - Empaquetado consistente del paquete `buildtool` para PyInstaller y ejecuciones como script.
 
+[1.1.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.0.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT

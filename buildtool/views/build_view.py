@@ -1,68 +1,15 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QComboBox, QAbstractItemView
-from PySide6.QtCore import Qt, Signal, QObject, QThread
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QComboBox
+from PySide6.QtCore import Qt, QThread
+
+from ..core.bg import run_in_thread
 from ..core.config import Config
 from ..core.tasks import build_project_scheduled
+from ..core.thread_tracker import TRACKER
+from ..core.workers import PipelineWorker, build_worker
 
-class Logger(QObject):
-    line = Signal(str)
+from ..ui.multi_select import MultiSelectComboBox
+from ..ui.widgets import combo_with_arrow
 
-def _run_build_scheduled(cfg: Config, group_key: str, project_key: str, profiles: list[str], modules: list[str], logger: Logger):
-    def emit(s: str): logger.line.emit(s)
-    try:
-        build_project_scheduled(
-            cfg, project_key, profiles,
-            modules_filter=set(modules) if modules else None,
-            log_cb=emit, group_key=group_key
-        )
-        emit(">> Listo.")
-    except Exception as e:
-        emit(f"<< ERROR: {e}")
-
-class MultiSelectComboBox(QComboBox):
-    def __init__(self, placeholder="Selecciona…", show_max=2, parent=None):
-        super().__init__(parent)
-        self.setEditable(True)
-        self.lineEdit().setReadOnly(True)
-        self.lineEdit().setPlaceholderText(placeholder)
-        self.setInsertPolicy(QComboBox.NoInsert)
-        self.setFocusPolicy(Qt.StrongFocus)
-        self._show_max = show_max
-        model = QStandardItemModel(self); self.setModel(model)
-        view = self.view(); view.setSelectionMode(QAbstractItemView.SingleSelection)
-        view.pressed.connect(self._on_item_pressed)
-        self.setStyleSheet("QComboBox{min-width:220px;padding:6px 10px;}")
-
-    def set_items(self, items, checked_all=False):
-        model: QStandardItemModel = self.model(); model.clear()
-        for text in items:
-            it = QStandardItem(text)
-            it.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            it.setData(Qt.Checked if checked_all else Qt.Unchecked, Qt.CheckStateRole)
-            model.appendRow(it)
-        self._refresh_display()
-
-    def all_items(self):
-        model: QStandardItemModel = self.model()
-        return [model.item(i).text() for i in range(model.rowCount())]
-
-    def checked_items(self):
-        out=[]; model: QStandardItemModel = self.model()
-        for i in range(model.rowCount()):
-            it: QStandardItem = model.item(i)
-            if it.checkState()==Qt.Checked: out.append(it.text())
-        return out
-
-    def _on_item_pressed(self, index):
-        model: QStandardItemModel = self.model()
-        it: QStandardItem = model.itemFromIndex(index)
-        it.setCheckState(Qt.Unchecked if it.checkState()==Qt.Checked else Qt.Checked)
-        self._refresh_display()
-
-    def _refresh_display(self):
-        sel=self.checked_items()
-        if not sel: self.lineEdit().setText(""); return
-        self.lineEdit().setText(", ".join(sel[:self._show_max]) + (f" +{len(sel)-self._show_max}" if len(sel)>self._show_max else ""))
 
 class BuildView(QWidget):
     def __init__(self, cfg: Config, on_request_reload_config):
@@ -76,17 +23,24 @@ class BuildView(QWidget):
         self.cboGroup = QComboBox()
         groups = [g.key for g in (cfg.groups or [])] or ["GLOBAL"]
         for g in groups: self.cboGroup.addItem(g, g)
-        row.addWidget(self.cboGroup)
+        self.cboGroupContainer = combo_with_arrow(self.cboGroup)
+        row.addWidget(self.cboGroupContainer)
 
         self.lblProject = QLabel("Proyecto:")
         self.cboProject = QComboBox()
-        row.addWidget(self.lblProject); row.addWidget(self.cboProject)
+        row.addWidget(self.lblProject)
+        self.cboProjectContainer = combo_with_arrow(self.cboProject)
+        row.addWidget(self.cboProjectContainer)
 
         row.addWidget(QLabel("Perfiles:"))
-        self.cboProfiles = MultiSelectComboBox("Perfiles…", show_max=2); row.addWidget(self.cboProfiles)
+        self.cboProfiles = MultiSelectComboBox("Perfiles…", show_max=2)
+        self.cboProfilesContainer = combo_with_arrow(self.cboProfiles, arrow_tooltip="Seleccionar perfiles")
+        row.addWidget(self.cboProfilesContainer)
 
         row.addWidget(QLabel("Módulos:"))
-        self.cboModules = MultiSelectComboBox("Módulos…", show_max=2); row.addWidget(self.cboModules)
+        self.cboModules = MultiSelectComboBox("Módulos…", show_max=2)
+        self.cboModulesContainer = combo_with_arrow(self.cboModules, arrow_tooltip="Seleccionar módulos")
+        row.addWidget(self.cboModulesContainer)
 
         self.btnBuildSel = QPushButton("Compilar seleccionados"); row.addWidget(self.btnBuildSel)
         self.btnBuildAll = QPushButton("Compilar TODOS"); row.addWidget(self.btnBuildAll)
@@ -101,7 +55,7 @@ class BuildView(QWidget):
         self.cboGroup.currentIndexChanged.connect(self.refresh_group)
         self.cboProject.currentIndexChanged.connect(self.refresh_project_data)
 
-        self._worker = None
+        self._live_workers: list[tuple[QThread, PipelineWorker]] = []
         self.refresh_group()
 
     def _current_group(self):
@@ -130,11 +84,13 @@ class BuildView(QWidget):
             for k in projects: self.cboProject.addItem(k, k)
             show_proj = len(projects) > 1
             self.lblProject.setVisible(show_proj)
+            self.cboProjectContainer.setVisible(show_proj)
             self.cboProject.setVisible(show_proj)
         else:
             projects = [p.key for p in self.cfg.projects]
             for k in projects: self.cboProject.addItem(k, k)
             self.lblProject.setVisible(True)
+            self.cboProjectContainer.setVisible(True)
             self.cboProject.setVisible(True)
 
         self.refresh_project_data()
@@ -170,10 +126,25 @@ class BuildView(QWidget):
             self.log.append("<< No hay proyecto configurado en este grupo."); return
         selected_modules = self.cboModules.checked_items() or self.cboModules.all_items()
 
-        logger = Logger(); logger.line.connect(lambda s: self.log.append(s))
-        self._worker = QThread(self)
-        self._worker.run = lambda: _run_build_scheduled(self.cfg, gkey, proj.key, profiles, selected_modules, logger)
-        self._worker.start()
+        self.btnBuildSel.setEnabled(False)
+        self.btnBuildAll.setEnabled(False)
+
+        modules_filter = set(selected_modules) if selected_modules else None
+        worker = build_worker(
+            build_project_scheduled,
+            success_message=">> Listo.",
+            cfg=self.cfg,
+            project_key=proj.key,
+            profiles=profiles,
+            modules_filter=modules_filter,
+            group_key=gkey,
+        )
+        thread, worker = run_in_thread(worker)
+        worker.progress.connect(self.log.append, Qt.QueuedConnection)
+        worker.finished.connect(lambda ok, th=thread, wk=worker: self._on_build_finished(th, wk), Qt.QueuedConnection)
+
+        self._live_workers.append((thread, worker))
+        thread.start()
 
     def start_build_selected(self):
         profiles = self.cboProfiles.checked_items()
@@ -184,3 +155,33 @@ class BuildView(QWidget):
         profiles = self.cboProfiles.all_items()
         if not profiles: self.log.append("<< No hay perfiles configurados."); return
         self._start_schedule(profiles)
+
+    def _on_build_finished(self, thread: QThread, worker) -> None:
+        self.btnBuildSel.setEnabled(True)
+        self.btnBuildAll.setEnabled(True)
+        self._cleanup_worker(thread, worker)
+
+    def _cleanup_worker(self, thread: QThread, worker) -> None:
+        if (thread, worker) not in self._live_workers:
+            return
+        self._live_workers.remove((thread, worker))
+        try:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(5000)
+        except Exception:
+            pass
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+        try:
+            thread.deleteLater()
+        except Exception:
+            pass
+        TRACKER.remove(thread)
+
+    def closeEvent(self, event):
+        for thread, worker in list(self._live_workers):
+            self._cleanup_worker(thread, worker)
+        super().closeEvent(event)
