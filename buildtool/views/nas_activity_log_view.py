@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -81,6 +81,7 @@ class NasActivityLogView(QWidget):
         self.txtSearch.textChanged.connect(self._refresh_tree)
 
     # ----- data -----
+    @Slot()
     def _load_entries(self) -> None:
         self._entries = load_nas_activity_log()
         self._entries.sort(key=lambda e: e.get("ts") or 0, reverse=True)
@@ -120,11 +121,13 @@ class NasActivityLogView(QWidget):
         idx = self.cboProject.currentIndex()
         return self.cboProject.itemData(idx)
 
+    @Slot()
     def _on_filters_changed(self) -> None:
         self._update_projects_filter()
         self._refresh_tree()
 
     # ----- rendering -----
+    @Slot()
     def _refresh_tree(self) -> None:
         self.tree.setUpdatesEnabled(False)
         self.tree.clear()

@@ -1,7 +1,7 @@
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QSignalBlocker
+from PySide6.QtCore import Qt, QThread, QSignalBlocker, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -143,6 +143,7 @@ class DeployView(QWidget):
         completer.setFilterMode(Qt.MatchContains)
         combo.lineEdit().setReadOnly(False)
 
+    @Slot()
     def _refresh_presets(self) -> None:
         blocker = QSignalBlocker(self.cboPresets)
         _ = blocker
@@ -161,12 +162,14 @@ class DeployView(QWidget):
                 label += f" ({' / '.join(extra)})"
             self.cboPresets.addItem(label, preset)
 
-    def _on_preset_selected(self) -> None:
+    @Slot(int)
+    def _on_preset_selected(self, _index: int = -1) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
         if preset:
             self._apply_preset(preset)
 
-    def apply_selected_preset(self) -> None:
+    @Slot(bool)
+    def apply_selected_preset(self, _checked: bool = False) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
         if preset:
             self._apply_preset(preset)
@@ -193,7 +196,8 @@ class DeployView(QWidget):
             self.chkHotfix.setChecked(bool(preset.hotfix))
         self.log.append(f"<< Preset '{preset.name}' aplicado.")
 
-    def prompt_save_preset(self) -> None:
+    @Slot(bool)
+    def prompt_save_preset(self, _checked: bool = False) -> None:
         name, ok = QInputDialog.getText(self, "Guardar preset", "Nombre del preset:")
         if not ok:
             return
@@ -238,7 +242,8 @@ class DeployView(QWidget):
             self.preset_notifier.changed.emit()
         self.log.append(f"<< Preset '{name}' guardado.")
 
-    def open_preset_manager(self) -> None:
+    @Slot(bool)
+    def open_preset_manager(self, _checked: bool = False) -> None:
         dlg = PresetManagerDialog(self.cfg, "deploy", self)
         dlg.exec()
         if getattr(dlg, "was_modified", False):
@@ -248,7 +253,8 @@ class DeployView(QWidget):
                 self.preset_notifier.changed.emit()
 
     # ---- helpers de datos ----
-    def refresh_group(self) -> None:
+    @Slot(int)
+    def refresh_group(self, _index: Optional[int] = None) -> None:
         self.cboProject.clear()
         gkey = self._current_group()
 
@@ -271,7 +277,8 @@ class DeployView(QWidget):
 
         self.refresh_project()
 
-    def refresh_project(self) -> None:
+    @Slot(int)
+    def refresh_project(self, _index: Optional[int] = None) -> None:
         self._profile_to_target.clear()
         self.cboProfiles.set_items([])
 
@@ -311,14 +318,16 @@ class DeployView(QWidget):
         self.cboProfiles.set_items(profiles or [])
 
     # ---- despliegue ----
-    def start_deploy_selected(self) -> None:
+    @Slot(bool)
+    def start_deploy_selected(self, _checked: bool = False) -> None:
         profiles = self.cboProfiles.checked_items()
         if not profiles:
             self.log.append("<< Elige al menos un perfil.")
             return
         self._deploy_profiles(profiles)
 
-    def start_deploy_all(self) -> None:
+    @Slot(bool)
+    def start_deploy_all(self, _checked: bool = False) -> None:
         profiles = self.cboProfiles.all_items()
         if not profiles:
             self.log.append("<< No hay perfiles configurados.")
@@ -427,7 +436,8 @@ class DeployView(QWidget):
         if thread:
             TRACKER.remove(thread)
 
-    def cancel_active_deploys(self) -> None:
+    @Slot(bool)
+    def cancel_active_deploys(self, _checked: bool = False) -> None:
         if not self._worker_record:
             self.log.append("<< No hay ejecuciones en curso.")
             return

@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -144,7 +144,9 @@ class LocalBranchesView(QWidget):
         self.btnReset.clicked.connect(self._on_reset)
 
     # ----- data helpers -----
-    def _load_index(self) -> None:
+    @Slot()
+    @Slot(bool)
+    def _load_index(self, *_args: object) -> None:
         self._index = load_index()
         self._current_key = None
         self._populate_filters()
@@ -161,7 +163,9 @@ class LocalBranchesView(QWidget):
                     self.cboGroup.addItem(g, userData=g)
         self._update_projects_filter()
 
-    def _update_projects_filter(self) -> None:
+    @Slot()
+    @Slot(int)
+    def _update_projects_filter(self, *_args: object) -> None:
         group = self._current_group_filter()
         projects = set()
         for rec in self._index.values():
@@ -183,7 +187,10 @@ class LocalBranchesView(QWidget):
         idx = self.cboProject.currentIndex()
         return self.cboProject.itemData(idx)
 
-    def _refresh_tree(self) -> None:
+    @Slot()
+    @Slot(int)
+    @Slot(str)
+    def _refresh_tree(self, *_args: object) -> None:
         if not self.tree:
             return
         self.tree.setUpdatesEnabled(False)
@@ -223,6 +230,7 @@ class LocalBranchesView(QWidget):
         self.tree.resizeColumnToContents(1)
 
     # ----- selection handling -----
+    @Slot()
     def _on_select(self) -> None:
         items = self.tree.selectedItems()
         if not items:
@@ -260,18 +268,24 @@ class LocalBranchesView(QWidget):
         self.lblUpdated.setText(updated)
 
     # ----- commands -----
-    def _on_new(self) -> None:
+    @Slot()
+    @Slot(bool)
+    def _on_new(self, *_args: object) -> None:
         self._current_key = None
         self._clear_form()
         self.txtGroup.setFocus()
 
-    def _on_reset(self) -> None:
+    @Slot()
+    @Slot(bool)
+    def _on_reset(self, *_args: object) -> None:
         if self._current_key and self._current_key in self._index:
             self._load_record(self._index[self._current_key])
         else:
             self._clear_form()
 
-    def _on_save(self) -> None:
+    @Slot()
+    @Slot(bool)
+    def _on_save(self, *_args: object) -> None:
         group = (self.txtGroup.text() or "").strip() or None
         project = (self.txtProject.text() or "").strip() or None
         branch = (self.txtBranch.text() or "").strip()
@@ -331,7 +345,9 @@ class LocalBranchesView(QWidget):
                 self.tree.setCurrentItem(item)
                 break
 
-    def _on_delete(self) -> None:
+    @Slot()
+    @Slot(bool)
+    def _on_delete(self, *_args: object) -> None:
         if not self._current_key or self._current_key not in self._index:
             return
         rec = self._index[self._current_key]

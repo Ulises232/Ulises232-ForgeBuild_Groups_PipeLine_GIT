@@ -1,7 +1,7 @@
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QSignalBlocker
+from PySide6.QtCore import Qt, QThread, QSignalBlocker, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QCompleter,
+    QSpinBox,
 )
 
 from ..core.bg import run_in_thread
@@ -69,6 +70,17 @@ class BuildView(QWidget):
         )
         row.addWidget(self.cboModulesContainer)
 
+        row.addWidget(QLabel("Hilos:"))
+        self.spinMaxWorkers = QSpinBox()
+        self.spinMaxWorkers.setRange(0, 32)
+        self.spinMaxWorkers.setSpecialValueText("Auto")
+        self.spinMaxWorkers.setToolTip(
+            "Número máximo de hilos simultáneos para compilar perfiles."
+        )
+        default_workers = getattr(self.cfg, "max_build_workers", None) or 0
+        self.spinMaxWorkers.setValue(default_workers)
+        row.addWidget(self.spinMaxWorkers)
+
         self.btnBuildSel = QPushButton("Compilar seleccionados")
         row.addWidget(self.btnBuildSel)
         self.btnBuildAll = QPushButton("Compilar TODOS")
@@ -118,6 +130,7 @@ class BuildView(QWidget):
         self.btnApplyPreset.clicked.connect(self.apply_selected_preset)
         self.btnSavePreset.clicked.connect(self.prompt_save_preset)
         self.btnManagePresets.clicked.connect(self.open_preset_manager)
+        self.spinMaxWorkers.valueChanged.connect(self._on_max_workers_changed)
 
         self._worker_records: dict[PipelineWorker, dict] = {}
         self._setup_quick_filter(self.cboGroup)
@@ -151,6 +164,7 @@ class BuildView(QWidget):
         completer.setFilterMode(Qt.MatchContains)
         combo.lineEdit().setReadOnly(False)
 
+    @Slot()
     def _refresh_presets(self) -> None:
         block = QSignalBlocker(self.cboPresets)
         _ = block
@@ -169,12 +183,14 @@ class BuildView(QWidget):
                 label += f" ({' / '.join(extra)})"
             self.cboPresets.addItem(label, preset)
 
-    def _on_preset_selected(self) -> None:
+    @Slot(int)
+    def _on_preset_selected(self, _index: int = -1) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
         if preset:
             self._apply_preset(preset)
 
-    def apply_selected_preset(self) -> None:
+    @Slot(bool)
+    def apply_selected_preset(self, _checked: bool = False) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
         if preset:
             self._apply_preset(preset)
@@ -198,7 +214,8 @@ class BuildView(QWidget):
         self.cboModules.set_checked_items(preset.modules or [])
         self.log.append(f"<< Preset '{preset.name}' aplicado.")
 
-    def prompt_save_preset(self) -> None:
+    @Slot(bool)
+    def prompt_save_preset(self, _checked: bool = False) -> None:
         name, ok = QInputDialog.getText(self, "Guardar preset", "Nombre del preset:")
         if not ok:
             return
@@ -243,7 +260,8 @@ class BuildView(QWidget):
             self.preset_notifier.changed.emit()
         self.log.append(f"<< Preset '{name}' guardado.")
 
-    def open_preset_manager(self) -> None:
+    @Slot(bool)
+    def open_preset_manager(self, _checked: bool = False) -> None:
         dlg = PresetManagerDialog(self.cfg, "build", self)
         dlg.exec()
         if getattr(dlg, "was_modified", False):
@@ -252,7 +270,8 @@ class BuildView(QWidget):
             if hasattr(self.preset_notifier, "changed"):
                 self.preset_notifier.changed.emit()
 
-    def refresh_group(self) -> None:
+    @Slot(int)
+    def refresh_group(self, _index: Optional[int] = None) -> None:
         self.cboProject.clear()
         gkey = self._current_group()
 
@@ -275,7 +294,8 @@ class BuildView(QWidget):
 
         self.refresh_project_data()
 
-    def refresh_project_data(self) -> None:
+    @Slot(int)
+    def refresh_project_data(self, _index: Optional[int] = None) -> None:
         gkey = self._current_group()
         pkey = self.cboProject.currentData()
         profiles: list[str] = []
@@ -319,6 +339,8 @@ class BuildView(QWidget):
 
         modules_filter = set(selected_modules) if selected_modules else None
         cancel_event = threading.Event()
+        workers_value = self.spinMaxWorkers.value()
+        max_workers = workers_value if workers_value > 0 else None
         worker = build_worker(
             build_project_scheduled,
             success_message=">> Listo.",
@@ -327,6 +349,7 @@ class BuildView(QWidget):
             profiles=profiles,
             modules_filter=modules_filter,
             group_key=gkey,
+            max_workers=max_workers,
             cancel_event=cancel_event,
         )
         thread, worker = run_in_thread(worker)
@@ -343,14 +366,16 @@ class BuildView(QWidget):
         }
         thread.start()
 
-    def start_build_selected(self) -> None:
+    @Slot(bool)
+    def start_build_selected(self, _checked: bool = False) -> None:
         profiles = self.cboProfiles.checked_items()
         if not profiles:
             self.log.append("<< Elige al menos un perfil.")
             return
         self._start_schedule(profiles)
 
-    def start_build_all(self) -> None:
+    @Slot(bool)
+    def start_build_all(self, _checked: bool = False) -> None:
         profiles = self.cboProfiles.all_items()
         if not profiles:
             self.log.append("<< No hay perfiles configurados.")
@@ -393,7 +418,8 @@ class BuildView(QWidget):
             pass
         TRACKER.remove(thread)
 
-    def cancel_active_builds(self) -> None:
+    @Slot(bool)
+    def cancel_active_builds(self, _checked: bool = False) -> None:
         if not self._worker_records:
             self.log.append("<< No hay ejecuciones en curso.")
             return
@@ -415,3 +441,11 @@ class BuildView(QWidget):
         for worker in list(self._worker_records):
             self._cleanup_worker(worker)
         super().closeEvent(event)
+
+    @Slot(int)
+    def _on_max_workers_changed(self, value: int) -> None:
+        max_workers = value or None
+        if getattr(self.cfg, "max_build_workers", None) == max_workers:
+            return
+        self.cfg.max_build_workers = max_workers
+        save_config(self.cfg)

@@ -4,6 +4,17 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.3.1] - 2025-09-25
+### Añadido
+- Selector de hilos máximos en la vista de Build que persiste la preferencia y se aplica al crear `PipelineWorker`.
+- Inclusión de proyectos definidos en grupos dentro del filtro del historial, sincronizando las listas al cambiar de grupo.
+
+### Corregido
+- Las vistas de historial y Git etiquetan sus métodos conectados como `@Slot` para evitar advertencias dinámicas y mejorar la respuesta al cambiar de pestaña.
+- Local/NAS Branches y los combos reutilizables eliminan los registros dinámicos de slots, suprimiendo nuevas advertencias al navegar.
+- Las vistas de Build/Deploy y el `MultiSelectComboBox` registran todos sus manejadores como slots nativos, eliminando retrasos y mensajes al alternar pestañas.
+- `GitView` deja de reinstalar `ErrorGuard` en cada inicialización, suprimiendo los mensajes repetidos y reduciendo el retraso al cambiar de pestaña en el asistente.
+
 ## [1.3.0] - 2025-09-24
 ### Añadido
 - Pestaña “Historial local” en la vista Git con un panel de búsqueda, filtrado y edición del índice SQLite local.
