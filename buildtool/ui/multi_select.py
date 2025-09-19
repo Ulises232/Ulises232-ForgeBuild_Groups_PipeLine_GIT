@@ -73,8 +73,12 @@ class MultiSelectComboBox(QComboBox):
         self._filter_text: str = ""
         self._in_filter_mode = False
         self._model = QStandardItemModel(self)
-        self._proxy_model: QSortFilterProxyModel | None = None
-        super().setModel(self._model)
+        self._proxy_model = QSortFilterProxyModel(self)
+        self._proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self._proxy_model.setFilterRole(Qt.DisplayRole)
+        self._proxy_model.setSourceModel(self._model)
+        super().setModel(self._proxy_model)
+        self.setModelColumn(0)
 
         view = self.view()
         view.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -145,7 +149,7 @@ class MultiSelectComboBox(QComboBox):
 
         self._filter_enabled = True
         self._filter_placeholder = placeholder
-        self._ensure_proxy()
+        # No se requiere configuración adicional: el proxy se crea en ``__init__``.
 
     def apply_filter(self, text: str) -> None:
         """Permite aplicar el filtro desde código sin abrir el popup."""
@@ -195,27 +199,11 @@ class MultiSelectComboBox(QComboBox):
         if self._filter_enabled:
             self._leave_filter_mode()
 
-    def _ensure_proxy(self) -> None:
-        if self._proxy_model is not None:
-            return
-
-        proxy = QSortFilterProxyModel(self)
-        proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        proxy.setFilterRole(Qt.DisplayRole)
-        proxy.setSourceModel(self._model)
-        super().setModel(proxy)
-        self.setModelColumn(0)
-        self._proxy_model = proxy
-
     def _apply_filter(self, text: str) -> None:
-        if not self._proxy_model:
-            return
         self._proxy_model.setFilterFixedString(text)
 
     def _map_to_source(self, index):
-        if self._proxy_model is not None:
-            return self._proxy_model.mapToSource(index)
-        return index
+        return self._proxy_model.mapToSource(index)
 
     def _should_preserve_filter_text(self) -> bool:
         return self._filter_enabled and self._in_filter_mode and bool(self._filter_text)
