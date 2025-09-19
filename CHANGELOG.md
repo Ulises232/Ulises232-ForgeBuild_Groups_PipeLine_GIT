@@ -4,6 +4,10 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.3.2] - 2025-09-26
+### Corregido
+- Conversión de los filtros de fechas del historial a UTC para respetar ejecuciones nocturnas al consultar o exportar.
+
 ## [1.3.1] - 2025-09-25
 ### Añadido
 - Selector de hilos máximos en la vista de Build que persiste la preferencia y se aplica al crear `PipelineWorker`.
