@@ -149,6 +149,22 @@ def _run_migrations(base: Path, db: BranchHistoryDB) -> None:
     _migrate_activity_log(base, db)
 
 
+def _retire_legacy_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        backup = path.with_suffix(path.suffix + ".migrated")
+        if backup.exists():
+            path.unlink()
+        else:
+            path.rename(backup)
+    except Exception:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+
+
 def _migrate_index(base: Path, db: BranchHistoryDB) -> None:
     legacy = _legacy_index_path(base)
     if not legacy.exists():
@@ -167,6 +183,7 @@ def _migrate_index(base: Path, db: BranchHistoryDB) -> None:
         index[br.key()] = br
     if index:
         db.replace_branches(_records_to_payloads(index.values()))
+        _retire_legacy_file(legacy)
 
 
 def _migrate_activity_log(base: Path, db: BranchHistoryDB) -> None:
@@ -186,6 +203,7 @@ def _migrate_activity_log(base: Path, db: BranchHistoryDB) -> None:
         return
     if entries:
         db.append_activity(entries)
+        _retire_legacy_file(legacy)
 
 
 def _records_to_payloads(records: Iterable[BranchRecord]) -> List[dict]:

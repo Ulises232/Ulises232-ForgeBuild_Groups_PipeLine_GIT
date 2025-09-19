@@ -69,6 +69,26 @@ class LoadIndexTest(unittest.TestCase):
             self.assertEqual(rec.last_updated_at, 1700000000)
             self.assertEqual(rec.last_updated_by, "alice")
 
+    def test_migration_renames_index_after_import(self):
+        payload = {
+            "version": 1,
+            "items": [
+                {
+                    "branch": "feature/migrated",
+                    "group": "g",
+                    "project": "p",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            path = self._write_index(base, payload)
+            index = load_index(path)
+            migrated = path.with_suffix(path.suffix + ".migrated")
+            self.assertIn("g/p/feature/migrated", index)
+            self.assertFalse(path.exists())
+            self.assertTrue(migrated.exists())
+
     def test_load_activity_log_reads_from_sqlite(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

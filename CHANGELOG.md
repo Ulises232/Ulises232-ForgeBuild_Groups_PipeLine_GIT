@@ -20,6 +20,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Las vistas de Repos y NAS consumen la nueva capa SQL manteniendo filtros y edición manual.
 - La documentación describe cómo localizar el archivo `.sqlite3` y cómo respaldarlo o copiarlo a la NAS.
 
+### Corregido
+- La migración del historial Git retira los archivos JSON legados tras importarlos para evitar reprocesarlos en cada inicio.
+
 ## [1.1.1] - 2025-09-20
 ### Cambiado
 - `run_maven` permite que las ejecuciones en ventana separada concluyan naturalmente y respeta cancelaciones explícitas sin imponer timeouts artificiales.
