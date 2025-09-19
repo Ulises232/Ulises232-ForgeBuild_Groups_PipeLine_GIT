@@ -44,22 +44,19 @@ def run_maven(module_path: str, goals, profile: str | None = None,
                     pass
                 proc.stdout.close()
                 break
-    else:
-        log_cb("[Ventana separada lanzada]")
-        if cancel_event:
-            while proc.poll() is None and not cancel_event.is_set():
-                time.sleep(0.2)
-            if cancel_event.is_set() and proc.poll() is None:
+        return proc.wait()
+
+    log_cb("[Ventana separada lanzada]")
+    if cancel_event:
+        while True:
+            ret = proc.poll()
+            if ret is not None:
+                return ret
+            if cancel_event.is_set():
                 try:
                     proc.terminate()
                 except Exception:
                     pass
-
-    try:
-        return proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        try:
-            proc.kill()
-        except Exception:
-            pass
-        return proc.wait()
+                return proc.wait()
+            time.sleep(0.2)
+    return proc.wait()
