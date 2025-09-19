@@ -1,12 +1,21 @@
-import json
 import tempfile
 from pathlib import Path
 import unittest
 
-from buildtool.core.branch_store import load_index
+import json
+
+from buildtool.core import branch_store
+from buildtool.core.branch_history_db import BranchHistoryDB
+from buildtool.core.branch_store import load_index, load_activity_log
 
 
 class LoadIndexTest(unittest.TestCase):
+
+    def setUp(self):
+        branch_store._DB_CACHE.clear()
+
+    def tearDown(self):
+        branch_store._DB_CACHE.clear()
 
     def _write_index(self, base: Path, payload: dict) -> Path:
         path = base / "branches_index.json"
@@ -59,6 +68,49 @@ class LoadIndexTest(unittest.TestCase):
             self.assertFalse(rec.exists_local)
             self.assertEqual(rec.last_updated_at, 1700000000)
             self.assertEqual(rec.last_updated_by, "alice")
+
+    def test_migration_renames_index_after_import(self):
+        payload = {
+            "version": 1,
+            "items": [
+                {
+                    "branch": "feature/migrated",
+                    "group": "g",
+                    "project": "p",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            path = self._write_index(base, payload)
+            index = load_index(path)
+            migrated = path.with_suffix(path.suffix + ".migrated")
+            self.assertIn("g/p/feature/migrated", index)
+            self.assertFalse(path.exists())
+            self.assertTrue(migrated.exists())
+
+    def test_load_activity_log_reads_from_sqlite(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            db = BranchHistoryDB(base / "branches_history.sqlite3")
+            db.append_activity(
+                [
+                    {
+                        "ts": 1700000001,
+                        "user": "bob",
+                        "group": "g",
+                        "project": "p",
+                        "branch": "feature/z",
+                        "action": "create",
+                        "result": "ok",
+                        "message": "created",
+                    }
+                ]
+            )
+            entries = load_activity_log(base)
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["action"], "create")
+        self.assertEqual(entries[0]["user"], "bob")
 
 
 if __name__ == "__main__":

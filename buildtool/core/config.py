@@ -1,8 +1,18 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Literal
 import yaml, pathlib, os, sys
+class PipelinePreset(BaseModel):
+    name: str
+    pipeline: Literal["build", "deploy"]
+    group_key: Optional[str] = None
+    project_key: Optional[str] = None
+    profiles: List[str] = Field(default_factory=list)
+    modules: List[str] = Field(default_factory=list)
+    version: Optional[str] = None
+    hotfix: Optional[bool] = None
+
 
 class Paths(BaseModel):
     workspaces: Dict[str, str] = Field(default_factory=dict)
@@ -60,6 +70,7 @@ class Config(BaseModel):
     deploy_targets: List[DeployTarget] = Field(default_factory=list)  # legacy
     groups: List[Group] = Field(default_factory=list)
     environment: Dict[str, str] = Field(default_factory=dict)
+    pipeline_presets: List[PipelinePreset] = Field(default_factory=list)
 
 _APPLIED_ENV_KEYS: set[str] = set()
 

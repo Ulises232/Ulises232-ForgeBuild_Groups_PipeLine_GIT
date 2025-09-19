@@ -3,7 +3,8 @@ from __future__ import annotations
 from .config import Config
 from .maven import run_maven
 from .copier import copy_artifacts
-import pathlib, shutil, tempfile, os, threading
+from .pipeline_history import PipelineHistory
+import pathlib, shutil, tempfile, os, threading, getpass
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Event
@@ -216,10 +217,40 @@ def build_project_scheduled(
         project = next(p for p in cfg.projects if p.key == project_key)
 
     all_mods = [m for m in project.modules if (not modules_filter or m.name in modules_filter)]
+    cancel_event = cancel_event or Event()
+
+    history = PipelineHistory()
+    try:
+        history_run_id = history.start_run(
+            "build",
+            user=getpass.getuser(),
+            group_key=group_key,
+            project_key=project_key,
+            profiles=profiles,
+            modules=[m.name for m in all_mods],
+        )
+    except Exception:
+        history_run_id = None
+
+    def _log(message: str) -> None:
+        log_cb(message)
+        if history_run_id:
+            try:
+                history.log_message(history_run_id, message)
+            except Exception:
+                pass
+
+    def _finalize(result: bool, message: str | None = None) -> bool:
+        if history_run_id:
+            status = "success" if result else ("cancelled" if cancel_event.is_set() else "error")
+            try:
+                history.finish_run(history_run_id, status, message)
+            except Exception:
+                pass
+        return result
 
     # commons (run_once + no_profile) una sola vez
     commons = [m.name for m in all_mods if getattr(m, "run_once", False) and getattr(m, "no_profile", False)]
-    cancel_event = cancel_event or Event()
 
     success = True
     error_reported = False
@@ -231,7 +262,7 @@ def build_project_scheduled(
             project_key,
             first,
             True,
-            log_cb=log_cb,
+            log_cb=_log,
             group_key=group_key,
             modules_filter=set(commons),
             cancel_event=cancel_event,
@@ -241,9 +272,9 @@ def build_project_scheduled(
             if not cancel_event.is_set():
                 cancel_event.set()
             if not error_reported:
-                log_cb("<< ERROR: Falló la fase común. Deteniendo el pipeline.")
+                _log("<< ERROR: Falló la fase común. Deteniendo el pipeline.")
                 error_reported = True
-            return False
+            return _finalize(False, "Falló la fase común.")
 
     # módulos que se bloquean entre perfiles
     import threading
@@ -257,7 +288,7 @@ def build_project_scheduled(
     profile_pending: dict[str, set[str]] = {}
 
     for prof in profiles:
-        log_cb(f"== Perfil: {prof} ==")
+        _log(f"== Perfil: {prof} ==")
         pending: set[str] = set()
         for mod in all_mods:
             if mod.name in commons:
@@ -268,7 +299,7 @@ def build_project_scheduled(
             profile_pending[prof] = pending
 
     if not tasks:
-        return True
+        return _finalize(True, "Sin tareas pendientes.")
 
     workers = max_workers or max(2, min(4, len(tasks)))
 
@@ -283,7 +314,7 @@ def build_project_scheduled(
                     project_key,
                     profile,
                     True,
-                    log_cb=log_cb,
+                    log_cb=_log,
                     group_key=group_key,
                     modules_filter={mod_name},
                     cancel_event=cancel_event,
@@ -294,7 +325,7 @@ def build_project_scheduled(
                 project_key,
                 profile,
                 True,
-                log_cb=log_cb,
+                log_cb=_log,
                 group_key=group_key,
                 modules_filter={mod_name},
                 cancel_event=cancel_event,
@@ -322,8 +353,8 @@ def build_project_scheduled(
                 if not cancel_event.is_set():
                     cancel_event.set()
                 if not error_reported:
-                    log_cb(f"[{prof}] << ERROR en {mod}: {err}")
-                    log_cb("<< ERROR: Pipeline detenido por fallas.")
+                    _log(f"[{prof}] << ERROR en {mod}: {err}")
+                    _log("<< ERROR: Pipeline detenido por fallas.")
                     error_reported = True
                 continue
 
@@ -332,7 +363,7 @@ def build_project_scheduled(
                 if pending:
                     pending.discard(mod)
                     if not pending:
-                        log_cb(f"[{prof}] >> Perfil completado.")
+                        _log(f"[{prof}] >> Perfil completado.")
                 continue
 
             if result == "cancelled":
@@ -342,7 +373,7 @@ def build_project_scheduled(
             if result == "error":
                 success = False
                 if not error_reported:
-                    log_cb("<< ERROR: Pipeline detenido por fallas.")
+                    _log("<< ERROR: Pipeline detenido por fallas.")
                     error_reported = True
 
         if cancel_event.is_set():
@@ -350,9 +381,16 @@ def build_project_scheduled(
                 fut.cancel()
 
     if cancel_event.is_set() and not error_reported and not success:
-        log_cb("<< Pipeline cancelado por el usuario.")
+        _log("<< Pipeline cancelado por el usuario.")
 
-    return success and not cancel_event.is_set()
+    result = success and not cancel_event.is_set()
+    if result:
+        summary = "Pipeline completado."
+    elif cancel_event.is_set():
+        summary = "Pipeline cancelado por el usuario."
+    else:
+        summary = "Pipeline con errores."
+    return _finalize(result, summary)
 
 
 # ------------------ Deploy ------------------
@@ -370,6 +408,39 @@ def deploy_profiles_scheduled(
     cancel_event: Event | None = None,
 ) -> bool:
     cancel_event = cancel_event or Event()
+
+    history = PipelineHistory()
+    try:
+        history_run_id = history.start_run(
+            "deploy",
+            user=getpass.getuser(),
+            group_key=group_key,
+            project_key=project_key,
+            profiles=profiles,
+            modules=[],
+            version=version,
+            hotfix=hotfix,
+        )
+    except Exception:
+        history_run_id = None
+
+    def _log(message: str) -> None:
+        log_cb(message)
+        if history_run_id:
+            try:
+                history.log_message(history_run_id, message)
+            except Exception:
+                pass
+
+    def _finalize(result: bool, message: str | None = None) -> bool:
+        if history_run_id:
+            status = "success" if result else ("cancelled" if cancel_event.is_set() else "error")
+            try:
+                history.finish_run(history_run_id, status, message)
+            except Exception:
+                pass
+        return result
+
     success = True
     error_reported = False
 
@@ -378,14 +449,14 @@ def deploy_profiles_scheduled(
             success = False
             break
 
-        log_cb(f"== Perfil: {prof} ==")
+        _log(f"== Perfil: {prof} ==")
 
         target_name = profile_targets.get(prof)
         if not target_name:
             success = False
             if not error_reported:
-                log_cb(f"[{prof}] << ERROR: No hay destino configurado.")
-                log_cb("<< ERROR: Pipeline detenido por fallas.")
+                _log(f"[{prof}] << ERROR: No hay destino configurado.")
+                _log("<< ERROR: Pipeline detenido por fallas.")
                 error_reported = True
             if not cancel_event.is_set():
                 cancel_event.set()
@@ -398,7 +469,7 @@ def deploy_profiles_scheduled(
                 prof,
                 version,
                 target_name,
-                log_cb=log_cb,
+                log_cb=_log,
                 group_key=group_key,
                 hotfix=hotfix,
                 cancel_event=cancel_event,
@@ -408,8 +479,8 @@ def deploy_profiles_scheduled(
             if not cancel_event.is_set():
                 cancel_event.set()
             if not error_reported:
-                log_cb(f"[{prof}] << ERROR: {err}")
-                log_cb("<< ERROR: Pipeline detenido por fallas.")
+                _log(f"[{prof}] << ERROR: {err}")
+                _log("<< ERROR: Pipeline detenido por fallas.")
                 error_reported = True
             continue
 
@@ -418,21 +489,28 @@ def deploy_profiles_scheduled(
             break
 
         if ok:
-            log_cb(f"[{prof}] >> Perfil completado.")
+            _log(f"[{prof}] >> Perfil completado.")
             continue
 
         success = False
         if not cancel_event.is_set():
             cancel_event.set()
         if not error_reported:
-            log_cb("<< ERROR: Pipeline detenido por fallas.")
+            _log("<< ERROR: Pipeline detenido por fallas.")
             error_reported = True
         break
 
     if cancel_event.is_set() and not error_reported and not success:
-        log_cb("<< Pipeline cancelado por el usuario.")
+        _log("<< Pipeline cancelado por el usuario.")
 
-    return success and not cancel_event.is_set()
+    result = success and not cancel_event.is_set()
+    if result:
+        summary = "Deploy completado."
+    elif cancel_event.is_set():
+        summary = "Deploy cancelado por el usuario."
+    else:
+        summary = "Deploy con errores."
+    return _finalize(result, summary)
 
 def build_project(
     cfg: Config,

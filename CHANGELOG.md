@@ -4,6 +4,25 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.2.0] - 2025-09-23
+### Añadido
+- Cuadro de búsqueda opcional en `MultiSelectComboBox` y filtrado rápido en los combos de grupo/proyecto.
+- Presets reutilizables para pipelines de Build y Deploy, con diálogo dedicado para renombrarlos o eliminarlos.
+- Historial persistente de pipelines en SQLite junto con una pestaña de UI para consultar, filtrar, exportar o limpiar registros.
+- Persistencia de historial de ramas y bitácora de actividad en SQLite (`branches_history.sqlite3`) tanto local como en la NAS.
+- Migración automática desde los archivos JSON existentes al nuevo esquema cuando se abre la versión.
+- Pruebas unitarias que validan la lectura de actividad directamente desde la base de datos.
+
+### Cambiado
+- Las vistas de Build/Deploy almacenan cada ejecución (inicio, fin, estado y mensajes) en el nuevo historial y comparten la gestión de presets entre ambas.
+- Documentación ampliada describiendo filtros interactivos, uso de presets y la nueva pestaña de historial.
+- Las sincronizaciones “Recuperar/Publicar NAS” operan sobre la base SQLite y deduplican entradas según la rama registrada.
+- Las vistas de Repos y NAS consumen la nueva capa SQL manteniendo filtros y edición manual.
+- La documentación describe cómo localizar el archivo `.sqlite3` y cómo respaldarlo o copiarlo a la NAS.
+
+### Corregido
+- La migración del historial Git retira los archivos JSON legados tras importarlos para evitar reprocesarlos en cada inicio.
+
 ## [1.1.1] - 2025-09-20
 ### Cambiado
 - `run_maven` permite que las ejecuciones en ventana separada concluyan naturalmente y respeta cancelaciones explícitas sin imponer timeouts artificiales.
@@ -53,6 +72,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Limpieza de logs de depuración y mejoras en los mensajes producidos por las tareas Git.
 - Empaquetado consistente del paquete `buildtool` para PyInstaller y ejecuciones como script.
 
+[1.2.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.1]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.0.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT

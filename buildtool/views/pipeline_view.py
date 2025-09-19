@@ -1,4 +1,5 @@
 from __future__ import annotations
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
     QLabel,
     QHBoxLayout,
@@ -10,13 +11,20 @@ from PySide6.QtWidgets import (
 from ..core.config import Config
 from .build_view import BuildView
 from .deploy_view import DeployView
+from .pipeline_history_view import PipelineHistoryView
 from ..ui.icons import get_icon
+
+
+class PresetNotifier(QObject):
+    changed = Signal()
+
 
 class PipelineView(QWidget):
     def __init__(self, cfg: Config, on_request_reload_config):
         super().__init__()
         self.cfg = cfg
         self.on_request_reload_config = on_request_reload_config
+        self.preset_notifier = PresetNotifier()
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(12)
@@ -38,10 +46,12 @@ class PipelineView(QWidget):
         self.tabs.setMovable(False)
         root.addWidget(self.tabs, 1)
 
-        self.build_view = BuildView(self.cfg, self.on_request_reload_config)
-        self.deploy_view = DeployView(self.cfg)
+        self.build_view = BuildView(self.cfg, self.on_request_reload_config, self.preset_notifier)
+        self.deploy_view = DeployView(self.cfg, self.preset_notifier)
+        self.history_view = PipelineHistoryView(self.cfg)
         self.tabs.addTab(self._wrap_in_scroll(self.build_view), get_icon("build"), "Build")
         self.tabs.addTab(self._wrap_in_scroll(self.deploy_view), get_icon("deploy"), "Deploy")
+        self.tabs.addTab(self._wrap_in_scroll(self.history_view), get_icon("history"), "Historial")
 
     def _wrap_in_scroll(self, widget: QWidget) -> QScrollArea:
         area = QScrollArea()
@@ -56,7 +66,7 @@ class PipelineView(QWidget):
         return area
 
     def closeEvent(self, event):
-        for child in (self.build_view, self.deploy_view):
+        for child in (self.build_view, self.deploy_view, self.history_view):
             try:
                 child.close()
             except Exception:
