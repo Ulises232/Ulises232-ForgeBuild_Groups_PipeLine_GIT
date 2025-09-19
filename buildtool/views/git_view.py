@@ -43,6 +43,7 @@ from ..core.git_fast import get_current_branch_fast
 import shiboken6
 from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
 from .nas_activity_log_view import NasActivityLogView
+from .local_branches_view import LocalBranchesView
 from .nas_branches_view import NasBranchesView
 from ..ui.icons import get_icon
 from ..ui.widgets import combo_with_arrow, set_combo_enabled
@@ -335,6 +336,8 @@ class GitView(QWidget):
         clog_layout.addLayout(hcl)
         bottom_tabs.addTab(console, get_icon("log"), "Consola")
 
+        self.localBranchesView = LocalBranchesView(self)
+        bottom_tabs.addTab(self.localBranchesView, get_icon("branch"), "Historial local")
         self.nasBranchesView = NasBranchesView(self)
         bottom_tabs.addTab(self.nasBranchesView, get_icon("branch"), "Historial NAS")
         self.nasActivityView = NasActivityLogView(self)

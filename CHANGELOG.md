@@ -4,6 +4,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.3.0] - 2025-09-24
+### Añadido
+- Pestaña “Historial local” en la vista Git con un panel de búsqueda, filtrado y edición del índice SQLite local.
+- Widget `LocalBranchesView` que reutiliza la experiencia de NAS para inspeccionar o capturar ramas manualmente.
+
+### Cambiado
+- Los registros manuales de ramas locales sólo generan actividad en el historial local para evitar ruido al sincronizar con la NAS.
+
 ## [1.2.0] - 2025-09-23
 ### Añadido
 - Cuadro de búsqueda opcional en `MultiSelectComboBox` y filtrado rápido en los combos de grupo/proyecto.
@@ -72,6 +80,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Limpieza de logs de depuración y mejoras en los mensajes producidos por las tareas Git.
 - Empaquetado consistente del paquete `buildtool` para PyInstaller y ejecuciones como script.
 
+[1.3.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.2.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.1]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
