@@ -21,7 +21,7 @@ from ..ui.widgets import combo_with_arrow
 
 
 class NasActivityLogView(QWidget):
-    """Visualiza el archivo activity_log.jsonl almacenado en la NAS."""
+    """Visualiza el registro de actividad NAS persistido en SQLite."""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)

@@ -2,11 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import Dict, Optional, List, Any, Iterable
-import json
 import os
 import time
+import json
 
 from .config import load_config
+from .branch_history_db import BranchHistoryDB
 
 # ---------------- paths helpers -----------------
 
@@ -39,11 +40,15 @@ def _nas_dir() -> Path:
     return p
 
 
-def _index_path(base: Path) -> Path:
+def _db_path(base: Path) -> Path:
+    return base / "branches_history.sqlite3"
+
+
+def _legacy_index_path(base: Path) -> Path:
     return base / "branches_index.json"
 
 
-def _log_path(base: Path) -> Path:
+def _legacy_log_path(base: Path) -> Path:
     return base / "activity_log.jsonl"
 
 
@@ -120,54 +125,133 @@ def _normalize_record_payload(raw: Any) -> Optional[BranchRecord]:
                 data[key] = bool(value)
 
     try:
-        return BranchRecord(**data)
+        rec = BranchRecord(**data)
     except Exception:
         return None
+    return rec
 
 
-# ---------------- index persistence -----------------
+_DB_CACHE: Dict[Path, BranchHistoryDB] = {}
 
-def load_index(path: Optional[Path] = None) -> Index:
-    p = path or _index_path(_state_dir())
-    if not p.exists():
-        return {}
+
+def _get_db(base: Path) -> BranchHistoryDB:
+    base = base.resolve()
+    db = _DB_CACHE.get(base)
+    if not db:
+        db = BranchHistoryDB(_db_path(base))
+        _DB_CACHE[base] = db
+        _run_migrations(base, db)
+    return db
+
+
+def _run_migrations(base: Path, db: BranchHistoryDB) -> None:
+    _migrate_index(base, db)
+    _migrate_activity_log(base, db)
+
+
+def _migrate_index(base: Path, db: BranchHistoryDB) -> None:
+    legacy = _legacy_index_path(base)
+    if not legacy.exists():
+        return
+    if db.fetch_branches():
+        return
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
+        raw = json.loads(legacy.read_text(encoding="utf-8"))
     except Exception:
-        return {}
-    items = {}
+        return
+    index: Dict[str, BranchRecord] = {}
     for rec in raw.get("items", []):
         br = _normalize_record_payload(rec)
         if not br:
             continue
-        items[br.key()] = br
+        index[br.key()] = br
+    if index:
+        db.replace_branches(_records_to_payloads(index.values()))
+
+
+def _migrate_activity_log(base: Path, db: BranchHistoryDB) -> None:
+    legacy = _legacy_log_path(base)
+    if not legacy.exists():
+        return
+    entries: List[dict] = []
+    try:
+        for line in legacy.read_text(encoding="utf-8").splitlines():
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(entry, dict):
+                entries.append(entry)
+    except Exception:
+        return
+    if entries:
+        db.append_activity(entries)
+
+
+def _records_to_payloads(records: Iterable[BranchRecord]) -> List[dict]:
+    payloads: List[dict] = []
+    for rec in records:
+        data = asdict(rec)
+        data["group_name"] = data.pop("group", None)
+        data["key"] = rec.key()
+        payloads.append(data)
+    return payloads
+
+
+def _row_to_record(row: dict) -> BranchRecord:
+    data = {
+        "branch": row.get("branch"),
+        "group": row.get("group_name"),
+        "project": row.get("project"),
+        "created_at": int(row.get("created_at") or 0),
+        "created_by": row.get("created_by") or "",
+        "exists_local": bool(row.get("exists_local")),
+        "exists_origin": bool(row.get("exists_origin")),
+        "merge_status": row.get("merge_status") or "",
+        "diverged": None if row.get("diverged") is None else bool(row.get("diverged")),
+        "stale_days": row.get("stale_days"),
+        "last_action": row.get("last_action") or "",
+        "last_updated_at": int(row.get("last_updated_at") or 0),
+        "last_updated_by": row.get("last_updated_by") or "",
+    }
+    if data["stale_days"] not in (None, ""):
+        try:
+            data["stale_days"] = int(data["stale_days"])
+        except (TypeError, ValueError):
+            data["stale_days"] = None
+    else:
+        data["stale_days"] = None
+    return BranchRecord(**data)
+
+
+# ---------------- index persistence -----------------
+
+def _resolve_base(path: Optional[Path]) -> Path:
+    if path is None:
+        return _state_dir()
+    if path.is_dir():
+        return path
+    return path.parent
+
+
+def load_index(path: Optional[Path] = None, *, filter_origin: bool = False) -> Index:
+    base = _resolve_base(path)
+    db = _get_db(base)
+    records = db.fetch_branches(filter_origin=filter_origin)
+    items: Index = {}
+    for row in records:
+        rec = _row_to_record(row)
+        items[rec.key()] = rec
     return items
 
 
 def save_index(index: Index, path: Optional[Path] = None) -> None:
-    p = path or _index_path(_state_dir())
-    tmp = p.with_suffix(".tmp")
-    payload = {"version": 1, "items": [asdict(v) for v in index.values()]}
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(p)
+    base = _resolve_base(path)
+    db = _get_db(base)
+    db.replace_branches(_records_to_payloads(index.values()))
 
 
 # ---------------- activity log -----------------
-
-def _load_log(path: Path) -> List[str]:
-    if not path.exists():
-        return []
-    try:
-        return path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return []
-
-
-def _append_log(lines: List[str], path: Path) -> None:
-    with path.open("a", encoding="utf-8") as fh:
-        for ln in lines:
-            fh.write(ln + "\n")
-
 
 def record_activity(
     action: str,
@@ -192,30 +276,39 @@ def record_activity(
             continue
         seen.add(target)
         if target == "nas":
-            path = _log_path(_nas_dir())
+            base = _nas_dir()
         else:
-            path = _log_path(_state_dir())
-        _append_log([json.dumps(entry, ensure_ascii=False)], path)
+            base = _state_dir()
+        payload = dict(entry)
+        payload["group_name"] = entry.get("group")
+        payload["branch_key"] = f"{entry.get('group') or ''}/{entry.get('project') or ''}/{entry.get('branch') or ''}"
+        _get_db(base).append_activity([payload])
 
 
 # ---------------- basic mutations -----------------
 
 def upsert(rec: BranchRecord, index: Optional[Index] = None, action: str = "upsert") -> Index:
-    idx = index or load_index()
     now = int(time.time())
     rec.last_updated_at = now
     if not rec.created_at:
         rec.created_at = now
-    idx[rec.key()] = rec
-    save_index(idx)
+    _get_db(_state_dir()).upsert_branch(_records_to_payloads([rec])[0])
+    if index is None:
+        idx = load_index()
+    else:
+        idx = index
+        idx[rec.key()] = rec
     record_activity(action, rec)
     return idx
 
 
 def remove(rec: BranchRecord, index: Optional[Index] = None) -> Index:
-    idx = index or load_index()
-    idx.pop(rec.key(), None)
-    save_index(idx)
+    _get_db(_state_dir()).delete_branch(rec.key())
+    if index is None:
+        idx = load_index()
+    else:
+        idx = index
+        idx.pop(rec.key(), None)
     record_activity("remove", rec)
     return idx
 
@@ -225,20 +318,6 @@ def remove(rec: BranchRecord, index: Optional[Index] = None) -> Index:
 def _filter_origin(index: Index) -> Index:
     """Keep only records that were pushed to origin."""
     return {k: v for k, v in index.items() if v.exists_origin}
-
-
-def _filter_log_by_index(lines: List[str], index: Index) -> List[str]:
-    keys = set(index.keys())
-    out: List[str] = []
-    for ln in lines:
-        try:
-            entry = json.loads(ln)
-            key = f"{entry.get('group') or ''}/{entry.get('project') or ''}/{entry.get('branch') or ''}"
-        except Exception:
-            continue
-        if key in keys:
-            out.append(ln)
-    return out
 
 
 # ---------------- NAS sync -----------------
@@ -268,18 +347,13 @@ def _release_lock(base: Path) -> None:
 def recover_from_nas() -> Index:
     base = _nas_dir()
     local = load_index()
-    nas = _filter_origin(load_index(_index_path(base)))
+    nas = load_index(base, filter_origin=True)
     merged = merge_indexes(local, nas)
     save_index(merged)
-
-    # merge activity log
-    local_log = _load_log(_log_path(_state_dir()))
-    nas_log_raw = _load_log(_log_path(base))
-    nas_log = _filter_log_by_index(nas_log_raw, nas)
-    seen = set(local_log)
-    new_lines = [ln for ln in nas_log if ln not in seen]
-    if new_lines:
-        _append_log(new_lines, _log_path(_state_dir()))
+    if nas:
+        nas_entries = _get_db(base).fetch_activity(branch_keys=nas.keys())
+        if nas_entries:
+            _get_db(_state_dir()).append_activity(nas_entries)
     return merged
 
 
@@ -288,23 +362,16 @@ def publish_to_nas() -> Index:
     if not _acquire_lock(base):
         raise RuntimeError("NAS lock busy")
     try:
-        local = _filter_origin(load_index())
-        remote = _filter_origin(load_index(_index_path(base)))
-        merged = merge_indexes(remote, local)
-        save_index(merged, _index_path(base))
+        local_origin = _filter_origin(load_index())
+        remote_origin = load_index(base, filter_origin=True)
+        merged = merge_indexes(remote_origin, local_origin)
+        save_index(merged, base)
 
-        # publish activity log
-        base_log = _log_path(base)
-        local_log_raw = _load_log(_log_path(_state_dir()))
-        local_log = _filter_log_by_index(local_log_raw, local)
-        remote_log_raw = _load_log(base_log)
-        remote_log = _filter_log_by_index(remote_log_raw, remote)
-        if remote_log != remote_log_raw:
-            base_log.write_text("\n".join(remote_log) + ("\n" if remote_log else ""), encoding="utf-8")
-        seen = set(remote_log)
-        new_lines = [ln for ln in local_log if ln not in seen]
-        if new_lines:
-            _append_log(new_lines, base_log)
+        remote_db = _get_db(base)
+        remote_db.prune_activity(merged.keys())
+        if local_origin:
+            entries = _get_db(_state_dir()).fetch_activity(branch_keys=local_origin.keys())
+            remote_db.append_activity(entries)
         return merged
     finally:
         _release_lock(base)
@@ -327,28 +394,35 @@ def merge_indexes(a: Index, b: Index) -> Index:
 
 def load_nas_index() -> Index:
     """Load the branches index stored in the NAS directory."""
-    return load_index(_index_path(_nas_dir()))
+    return load_index(_nas_dir())
 
 
 def save_nas_index(index: Index) -> None:
     """Persist the NAS index to disk."""
-    save_index(index, _index_path(_nas_dir()))
+    save_index(index, _nas_dir())
 
 
 def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
     """Return parsed activity log entries from *path* (defaults to local log)."""
-    lines = _load_log(path or _log_path(_state_dir()))
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_activity()
     entries: List[dict[str, Any]] = []
-    for ln in lines:
-        try:
-            entry = json.loads(ln)
-        except Exception:
-            continue
-        if isinstance(entry, dict):
-            entries.append(entry)
+    for row in rows:
+        entries.append(
+            {
+                "ts": row.get("ts"),
+                "user": row.get("user"),
+                "group": row.get("group_name"),
+                "project": row.get("project"),
+                "branch": row.get("branch"),
+                "action": row.get("action"),
+                "result": row.get("result"),
+                "message": row.get("message"),
+            }
+        )
     return entries
 
 
 def load_nas_activity_log() -> List[dict[str, Any]]:
     """Return parsed activity log entries stored in the NAS directory."""
-    return load_activity_log(_log_path(_nas_dir()))
+    return load_activity_log(_nas_dir())

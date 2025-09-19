@@ -4,6 +4,17 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.3.0] - 2025-09-23
+### Añadido
+- Persistencia de historial de ramas y bitácora de actividad en SQLite (`branches_history.sqlite3`) tanto local como en la NAS.
+- Migración automática desde los archivos JSON existentes al nuevo esquema cuando se abre la versión.
+- Pruebas unitarias que validan la lectura de actividad directamente desde la base de datos.
+
+### Cambiado
+- Las sincronizaciones “Recuperar/Publicar NAS” operan sobre la base SQLite y deduplican entradas según la rama registrada.
+- Las vistas de Repos y NAS consumen la nueva capa SQL manteniendo filtros y edición manual.
+- La documentación describe cómo localizar el archivo `.sqlite3` y cómo respaldarlo o copiarlo a la NAS.
+
 ## [1.2.1] - 2025-09-22
 ### Corregido
 - Evitado el bloqueo al recargar elementos en `MultiSelectComboBox` después de activar el filtrado, preservando el modelo interno.
@@ -67,6 +78,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Limpieza de logs de depuración y mejoras en los mensajes producidos por las tareas Git.
 - Empaquetado consistente del paquete `buildtool` para PyInstaller y ejecuciones como script.
 
+[1.3.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.2.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.1]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT

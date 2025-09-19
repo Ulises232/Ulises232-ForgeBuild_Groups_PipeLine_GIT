@@ -36,7 +36,7 @@ from ..ui.widgets import combo_with_arrow
 
 
 class NasBranchesView(QWidget):
-    """Permite consultar y editar el historial de ramas almacenado en la NAS."""
+    """Permite consultar y editar el historial de ramas almacenado en la NAS (SQLite)."""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
