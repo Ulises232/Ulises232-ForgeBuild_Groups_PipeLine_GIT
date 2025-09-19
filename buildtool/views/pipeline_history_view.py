@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QSignalBlocker
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -63,9 +63,6 @@ class PipelineHistoryView(QWidget):
 
         filter_row.addWidget(QLabel("Proyecto:"))
         self.cboProject = QComboBox()
-        self.cboProject.addItem("Todos", None)
-        for proj in cfg.projects:
-            self.cboProject.addItem(proj.key, proj.key)
         filter_row.addWidget(self.cboProject)
 
         filter_row.addWidget(QLabel("Desde:"))
@@ -118,12 +115,51 @@ class PipelineHistoryView(QWidget):
         self.txtLogs.setMinimumHeight(160)
         layout.addWidget(self.txtLogs, 1)
 
+        self._global_project_keys = {proj.key for proj in cfg.projects}
+        self._group_project_keys = {
+            grp.key: {proj.key for proj in (grp.projects or [])}
+            for grp in cfg.groups
+        }
+        all_projects = set(self._global_project_keys)
+        for keys in self._group_project_keys.values():
+            all_projects.update(keys)
+        self._all_project_keys = sorted(all_projects)
+
+        self._populate_project_combo(None)
+
+        self.cboGroup.currentIndexChanged.connect(self._on_group_changed)
         self.btnRefresh.clicked.connect(self.refresh)
         self.btnExport.clicked.connect(self.export_csv)
         self.btnClear.clicked.connect(self.clear_history)
         self.table.itemSelectionChanged.connect(self._load_selected_logs)
 
         self.refresh()
+
+    def _populate_project_combo(self, group_key: str | None) -> None:
+        previous = self.cboProject.currentData()
+        with QSignalBlocker(self.cboProject):
+            self.cboProject.clear()
+            self.cboProject.addItem("Todos", None)
+
+            if group_key:
+                project_keys = sorted(self._group_project_keys.get(group_key, set()))
+                if not project_keys:
+                    project_keys = sorted(self._global_project_keys)
+            else:
+                project_keys = list(self._all_project_keys)
+
+            for key in project_keys:
+                self.cboProject.addItem(key, key)
+
+            idx = self.cboProject.findData(previous)
+            if idx != -1:
+                self.cboProject.setCurrentIndex(idx)
+            else:
+                self.cboProject.setCurrentIndex(0)
+
+    def _on_group_changed(self) -> None:
+        group_key = self.cboGroup.currentData()
+        self._populate_project_combo(group_key)
 
     def _filters(self) -> dict:
         start = datetime.combine(self.dtStart.date().toPython(), datetime.min.time())

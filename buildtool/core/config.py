@@ -71,6 +71,7 @@ class Config(BaseModel):
     groups: List[Group] = Field(default_factory=list)
     environment: Dict[str, str] = Field(default_factory=dict)
     pipeline_presets: List[PipelinePreset] = Field(default_factory=list)
+    max_build_workers: Optional[int] = None
 
 _APPLIED_ENV_KEYS: set[str] = set()
 
