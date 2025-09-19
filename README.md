@@ -199,7 +199,7 @@ La pestaña de Git reúne operaciones globales para todos los repos del proyecto
 Todas las acciones corren en hilos de fondo con protección de errores; la bitácora informa el avance y la UI muestra diálogos de éxito/fallo.
 
 #### 5.4.1 Historial unificado en SQLite
-- A partir de la versión 1.3.0 el índice de ramas y el activity log dejan de escribirse en `branches_index.json` / `activity_log.jsonl`.
+- A partir de la versión 1.2.0 el índice de ramas y el activity log dejan de escribirse en `branches_index.json` / `activity_log.jsonl`.
 - La aplicación crea un archivo `branches_history.sqlite3` tanto en la carpeta local (`%APPDATA%\ForgeBuild` o `~/.local/share/forgebuild`) como en la NAS definida en la configuración.
 - Al abrir una versión nueva se migra automáticamente el contenido existente de los JSON a la base de datos sin perder información.
 - Las vistas **Repos**, **NAS → Ramas** y **NAS → Activity Log** leen directamente desde SQLite, conservando filtros, búsquedas y edición manual.
