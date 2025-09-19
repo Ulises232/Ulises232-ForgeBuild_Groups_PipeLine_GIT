@@ -4,10 +4,6 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
-## [1.2.1] - 2025-09-22
-### Corregido
-- Evitado el bloqueo al recargar elementos en `MultiSelectComboBox` después de activar el filtrado, preservando el modelo interno.
-
 ## [1.2.0] - 2025-09-23
 ### Añadido
 - Cuadro de búsqueda opcional en `MultiSelectComboBox` y filtrado rápido en los combos de grupo/proyecto.
