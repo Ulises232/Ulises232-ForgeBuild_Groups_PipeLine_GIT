@@ -165,6 +165,9 @@ class PipelineHistoryView(QWidget):
     def _filters(self) -> dict:
         start = datetime.combine(self.dtStart.date().toPython(), datetime.min.time())
         end = datetime.combine(self.dtEnd.date().toPython(), datetime.max.time())
+        offset = datetime.now() - datetime.utcnow()
+        start = (start - offset).replace(microsecond=0)
+        end = (end - offset).replace(microsecond=0)
         filters: dict = {
             "pipeline": self.cboPipeline.currentData(),
             "status": self.cboStatus.currentData(),
