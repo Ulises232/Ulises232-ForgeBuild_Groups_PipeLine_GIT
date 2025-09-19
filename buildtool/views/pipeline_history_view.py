@@ -196,4 +196,3 @@ class PipelineHistoryView(QWidget):
             return
         self.history.clear()
         self.refresh()
-*** End of File

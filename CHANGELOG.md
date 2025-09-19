@@ -4,6 +4,10 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.2.1] - 2025-09-22
+### Corregido
+- Se eliminó un marcador residual en `PipelineHistoryView` que provocaba un `SyntaxError` al iniciar la aplicación.
+
 ## [1.2.0] - 2025-09-21
 ### Añadido
 - Cuadro de búsqueda opcional en `MultiSelectComboBox` y filtrado rápido en los combos de grupo/proyecto.
