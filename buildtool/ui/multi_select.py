@@ -14,7 +14,15 @@ públicos, facilitando su reutilización.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QObject, QSortFilterProxyModel, QSignalBlocker
+from PySide6.QtCore import (
+    Qt,
+    Signal,
+    Slot,
+    QObject,
+    QSortFilterProxyModel,
+    QSignalBlocker,
+    QModelIndex,
+)
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import QAbstractItemView, QComboBox
 
@@ -162,7 +170,8 @@ class MultiSelectComboBox(QComboBox):
     # ------------------------------------------------------------------
     # Manejo interno
     # ------------------------------------------------------------------
-    def _on_item_pressed(self, index) -> None:
+    @Slot(QModelIndex)
+    def _on_item_pressed(self, index: QModelIndex) -> None:
         model_index = self._map_to_source(index)
         if not model_index.isValid():
             return
@@ -228,6 +237,7 @@ class MultiSelectComboBox(QComboBox):
         self.lineEdit().setPlaceholderText(self._display_placeholder)
         self._refresh_display()
 
+    @Slot(str)
     def _on_line_edit_text_edited(self, text: str) -> None:
         if not self._filter_enabled or not self._in_filter_mode:
             return
@@ -236,6 +246,7 @@ class MultiSelectComboBox(QComboBox):
         if not text:
             self._refresh_display()
 
+    @Slot()
     def _on_line_edit_editing_finished(self) -> None:
         if not self._filter_enabled or not self._in_filter_mode:
             return

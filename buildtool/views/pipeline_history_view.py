@@ -203,6 +203,7 @@ class PipelineHistoryView(QWidget):
         else:
             self.txtLogs.clear()
 
+    @Slot()
     def _load_selected_logs(self) -> None:
         items = self.table.selectedItems()
         if not items:
@@ -217,14 +218,16 @@ class PipelineHistoryView(QWidget):
         for ts, message in logs:
             self.txtLogs.append(f"[{ts}] {message}")
 
-    def export_csv(self) -> None:
+    @Slot(bool)
+    def export_csv(self, _checked: bool = False) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Exportar historial", "historial.csv", "CSV (*.csv)")
         if not path:
             return
         self.history.export_csv(Path(path), **self._filters())
         QMessageBox.information(self, "Historial", "Exportación completada.")
 
-    def clear_history(self) -> None:
+    @Slot(bool)
+    def clear_history(self, _checked: bool = False) -> None:
         reply = QMessageBox.question(
             self,
             "Limpiar historial",

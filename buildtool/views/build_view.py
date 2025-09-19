@@ -1,7 +1,7 @@
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QSignalBlocker
+from PySide6.QtCore import Qt, QThread, QSignalBlocker, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -164,6 +164,7 @@ class BuildView(QWidget):
         completer.setFilterMode(Qt.MatchContains)
         combo.lineEdit().setReadOnly(False)
 
+    @Slot()
     def _refresh_presets(self) -> None:
         block = QSignalBlocker(self.cboPresets)
         _ = block
@@ -182,12 +183,14 @@ class BuildView(QWidget):
                 label += f" ({' / '.join(extra)})"
             self.cboPresets.addItem(label, preset)
 
-    def _on_preset_selected(self) -> None:
+    @Slot(int)
+    def _on_preset_selected(self, _index: int = -1) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
         if preset:
             self._apply_preset(preset)
 
-    def apply_selected_preset(self) -> None:
+    @Slot(bool)
+    def apply_selected_preset(self, _checked: bool = False) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
         if preset:
             self._apply_preset(preset)
@@ -211,7 +214,8 @@ class BuildView(QWidget):
         self.cboModules.set_checked_items(preset.modules or [])
         self.log.append(f"<< Preset '{preset.name}' aplicado.")
 
-    def prompt_save_preset(self) -> None:
+    @Slot(bool)
+    def prompt_save_preset(self, _checked: bool = False) -> None:
         name, ok = QInputDialog.getText(self, "Guardar preset", "Nombre del preset:")
         if not ok:
             return
@@ -256,7 +260,8 @@ class BuildView(QWidget):
             self.preset_notifier.changed.emit()
         self.log.append(f"<< Preset '{name}' guardado.")
 
-    def open_preset_manager(self) -> None:
+    @Slot(bool)
+    def open_preset_manager(self, _checked: bool = False) -> None:
         dlg = PresetManagerDialog(self.cfg, "build", self)
         dlg.exec()
         if getattr(dlg, "was_modified", False):
@@ -265,7 +270,8 @@ class BuildView(QWidget):
             if hasattr(self.preset_notifier, "changed"):
                 self.preset_notifier.changed.emit()
 
-    def refresh_group(self) -> None:
+    @Slot(int)
+    def refresh_group(self, _index: Optional[int] = None) -> None:
         self.cboProject.clear()
         gkey = self._current_group()
 
@@ -288,7 +294,8 @@ class BuildView(QWidget):
 
         self.refresh_project_data()
 
-    def refresh_project_data(self) -> None:
+    @Slot(int)
+    def refresh_project_data(self, _index: Optional[int] = None) -> None:
         gkey = self._current_group()
         pkey = self.cboProject.currentData()
         profiles: list[str] = []
@@ -359,14 +366,16 @@ class BuildView(QWidget):
         }
         thread.start()
 
-    def start_build_selected(self) -> None:
+    @Slot(bool)
+    def start_build_selected(self, _checked: bool = False) -> None:
         profiles = self.cboProfiles.checked_items()
         if not profiles:
             self.log.append("<< Elige al menos un perfil.")
             return
         self._start_schedule(profiles)
 
-    def start_build_all(self) -> None:
+    @Slot(bool)
+    def start_build_all(self, _checked: bool = False) -> None:
         profiles = self.cboProfiles.all_items()
         if not profiles:
             self.log.append("<< No hay perfiles configurados.")
@@ -409,7 +418,8 @@ class BuildView(QWidget):
             pass
         TRACKER.remove(thread)
 
-    def cancel_active_builds(self) -> None:
+    @Slot(bool)
+    def cancel_active_builds(self, _checked: bool = False) -> None:
         if not self._worker_records:
             self.log.append("<< No hay ejecuciones en curso.")
             return
@@ -432,6 +442,7 @@ class BuildView(QWidget):
             self._cleanup_worker(worker)
         super().closeEvent(event)
 
+    @Slot(int)
     def _on_max_workers_changed(self, value: int) -> None:
         max_workers = value or None
         if getattr(self.cfg, "max_build_workers", None) == max_workers:
