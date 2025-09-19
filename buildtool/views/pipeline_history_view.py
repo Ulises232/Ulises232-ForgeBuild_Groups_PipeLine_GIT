@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QDate, QSignalBlocker
+from PySide6.QtCore import Qt, QDate, QSignalBlocker, Slot
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -157,6 +157,7 @@ class PipelineHistoryView(QWidget):
             else:
                 self.cboProject.setCurrentIndex(0)
 
+    @Slot()
     def _on_group_changed(self) -> None:
         group_key = self.cboGroup.currentData()
         self._populate_project_combo(group_key)
@@ -174,6 +175,7 @@ class PipelineHistoryView(QWidget):
         }
         return {k: v for k, v in filters.items() if v is not None}
 
+    @Slot()
     def refresh(self) -> None:
         filters = self._filters()
         runs = self.history.list_runs(**filters)

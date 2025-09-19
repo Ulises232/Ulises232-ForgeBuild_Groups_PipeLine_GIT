@@ -9,6 +9,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Selector de hilos máximos en la vista de Build que persiste la preferencia y se aplica al crear `PipelineWorker`.
 - Inclusión de proyectos definidos en grupos dentro del filtro del historial, sincronizando las listas al cambiar de grupo.
 
+### Corregido
+- Las vistas de historial y Git etiquetan sus métodos conectados como `@Slot` para evitar advertencias dinámicas y mejorar la respuesta al cambiar de pestaña.
+
 ## [1.3.0] - 2025-09-24
 ### Añadido
 - Pestaña “Historial local” en la vista Git con un panel de búsqueda, filtrado y edición del índice SQLite local.

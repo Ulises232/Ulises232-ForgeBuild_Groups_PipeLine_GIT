@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QSizePolicy,
 )
-from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize
+from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize, Slot
 from ..core.config import Config
 # Import our local-only shim
 from ..core.git_tasks_local import (
@@ -56,7 +56,7 @@ def safe_slot(fn: Callable):
         except Exception as e:
             self._dbg(f"!! {fn.__name__}: {e}")
             return None
-    return wrapper
+    return Slot()(wrapper)
 
 def _is_valid_qobj(obj) -> bool:
     try:
@@ -389,10 +389,12 @@ class GitView(QWidget):
         gkey = self.cboProject.itemData(idx) if idx >= 0 else None
         return gkey, pkey
 
+    @Slot(str)
     def _on_project_changed(self, _):
         self._dbg("on_project_changed")
         self._post_project_change()
 
+    @Slot()
     def _post_init(self):
         self._dbg("post_init: start")
         self._post_project_change()
@@ -412,6 +414,7 @@ class GitView(QWidget):
                 return p
         return None
 
+    @Slot()
     def _post_project_change(self):
         self._dbg("post_project_change: start")
         try:
