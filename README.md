@@ -159,22 +159,25 @@ Usa `environment` para centralizar configuraciones como rutas de Maven/Java, pro
 - **Bitácora**: cada vista incluye un panel de texto donde se imprimen logs de Maven, Git o copias de archivos.
 
 ### 5.2 Pipeline → Build
-1. Selecciona un **Grupo**. Si el grupo solo tiene un proyecto, el combo “Proyecto” se oculta automáticamente.
-2. Marca los **Perfiles** a compilar (multiselección). Puedes usar “Compilar seleccionados” o “Compilar TODOS”.
-3. Define los **Módulos** a incluir. Todos vienen seleccionados por defecto; desmarca los que quieras omitir.
-4. Al ejecutar, la app agenda los perfiles en serie y distribuye los módulos en paralelo respetando `run_once` y `serial_across_profiles`.
-5. Los logs muestran los comandos Maven ejecutados, advertencias (ruta faltante, patrón no encontrado) y resultados de copia.
+1. Selecciona un **Grupo**. Si el grupo solo tiene un proyecto, el combo “Proyecto” se oculta automáticamente. Puedes escribir en los combos para filtrar rápidamente la lista de grupos/proyectos.
+2. Marca los **Perfiles** a compilar (multiselección). El cuadro admite búsqueda incremental, de modo que basta con teclear parte del nombre para filtrar los perfiles disponibles.
+3. Define los **Módulos** a incluir. Todos vienen seleccionados por defecto; el buscador te permite localizar módulos específicos en listas largas.
+4. Usa el combo **Presets** para aplicar configuraciones guardadas (grupo, proyecto, perfiles y módulos) o para crear una nueva con “Guardar preset…”. El botón “Administrar…” abre un diálogo para renombrar o eliminar presets existentes.
+5. Al ejecutar, la app agenda los perfiles en serie y distribuye los módulos en paralelo respetando `run_once` y `serial_across_profiles`.
+6. Los logs muestran los comandos Maven ejecutados, advertencias (ruta faltante, patrón no encontrado) y resultados de copia.
 
 Tips:
 - Si un módulo opcional es necesario, asegúrate de usar “Compilar TODOS”.
 - Revisa que `mvn` esté en el `PATH`; de lo contrario verás errores inmediatos.
+- La gestión de presets es compartida con la vista de Deploy; cualquier cambio queda disponible para ambos flujos.
 
 ### 5.3 Pipeline → Deploy
-1. Selecciona **Grupo** y, si corresponde, el **Proyecto**.
-2. Marca los **Perfiles** destino (puedes copiar varios en paralelo).
+1. Selecciona **Grupo** y, si corresponde, el **Proyecto** (ambos combos admiten búsqueda por texto).
+2. Marca los **Perfiles** destino; el cuadro de selección incluye filtro incremental.
 3. Escribe la **Versión** (formato sugerido: `yyyy-mm-dd_nnn`).
 4. Marca **Hotfix** si deseas usar `hotfix_path_template`.
-5. Usa “Copiar seleccionados” o “Copiar TODOS”. Cada perfil utiliza el `deploy_target` configurado; la bitácora indica la ruta final y archivos copiados.
+5. Guarda combinaciones frecuentes (grupo/proyecto/perfiles/version/hotfix) con el combo **Presets** y aplícalas con un clic.
+6. Usa “Copiar seleccionados” o “Copiar TODOS”. Cada perfil utiliza el `deploy_target` configurado; la bitácora indica la ruta final y archivos copiados.
 
 Si algún perfil no tiene destino configurado, la UI mostrará un mensaje y omitirá ese perfil.
 
@@ -202,6 +205,14 @@ El asistente está dividido en pestañas para **Grupos**, **Proyectos**, **Módu
 - Cada módulo permite configurar rutas, goals, flags y archivos de versión desde una interfaz amigable.
 - El asistente valida claves duplicadas, rutas vacías y listas de perfiles antes de guardar.
 - Al guardar, se ejecuta `save_config` y la ventana principal recarga datos inmediatamente.
+
+### 5.6 Historial de pipelines
+La pestaña **Historial** centraliza los builds y deploys ejecutados desde la aplicación:
+
+- Filtra por tipo de pipeline, estado, grupo, proyecto y rango de fechas.
+- Consulta los detalles principales (perfiles, módulos, usuario, versión y mensaje final) en una tabla ordenada cronológicamente.
+- Selecciona una fila para revisar el log completo almacenado en la base SQLite interna.
+- Exporta los resultados a CSV o limpia el historial cuando ya no sea necesario conservarlo.
 
 ## 6. Flujo sugerido de trabajo diario
 1. **Abrir la app** y confirmar que el grupo/proyecto correctos estén seleccionados.

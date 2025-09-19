@@ -14,7 +14,7 @@ públicos, facilitando su reutilización.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtCore import Qt, Signal, QObject, QSortFilterProxyModel, QSignalBlocker
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import QAbstractItemView, QComboBox
 
@@ -66,14 +66,24 @@ class MultiSelectComboBox(QComboBox):
         self.setFocusPolicy(Qt.StrongFocus)
         self._show_max = show_max
 
-        model = QStandardItemModel(self)
-        self.setModel(model)
+        self._display_placeholder = placeholder
+        self._summary_text: str = ""
+        self._filter_enabled = False
+        self._filter_placeholder = "Escribe para filtrar…"
+        self._filter_text: str = ""
+        self._in_filter_mode = False
+        self._model = QStandardItemModel(self)
+        self._proxy_model: QSortFilterProxyModel | None = None
+        super().setModel(self._model)
 
         view = self.view()
         view.setSelectionMode(QAbstractItemView.SingleSelection)
         view.pressed.connect(self._on_item_pressed)
 
         self.setStyleSheet("QComboBox{min-width:220px;padding:6px 10px;}")
+
+        self.lineEdit().textEdited.connect(self._on_line_edit_text_edited)
+        self.lineEdit().editingFinished.connect(self._on_line_edit_editing_finished)
 
     # ------------------------------------------------------------------
     # API pública
@@ -89,42 +99,71 @@ class MultiSelectComboBox(QComboBox):
             Si es ``True`` todos los elementos se marcan por defecto.
         """
 
-        model: QStandardItemModel = self.model()
-        model.clear()
+        self._model.clear()
 
         for text in items:
             item = QStandardItem(text)
             item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             item.setData(Qt.Checked if checked_all else Qt.Unchecked, Qt.CheckStateRole)
-            model.appendRow(item)
+            self._model.appendRow(item)
 
+        self._apply_filter(self._filter_text if self._filter_enabled else "")
         self._refresh_display()
 
     def all_items(self) -> list[str]:
         """Devuelve todas las etiquetas disponibles en el combo."""
 
-        model: QStandardItemModel = self.model()
-        return [model.item(i).text() for i in range(model.rowCount())]
+        return [self._model.item(i).text() for i in range(self._model.rowCount())]
 
     def checked_items(self) -> list[str]:
         """Obtiene únicamente los elementos seleccionados."""
 
         selected: list[str] = []
-        model: QStandardItemModel = self.model()
-
-        for i in range(model.rowCount()):
-            item: QStandardItem = model.item(i)
+        for i in range(self._model.rowCount()):
+            item: QStandardItem = self._model.item(i)
             if item.checkState() == Qt.Checked:
                 selected.append(item.text())
 
         return selected
 
+    def set_checked_items(self, items: list[str] | tuple[str, ...]) -> None:
+        """Marca únicamente los elementos presentes en ``items``."""
+
+        wanted = set(items)
+        for i in range(self._model.rowCount()):
+            item: QStandardItem = self._model.item(i)
+            item.setCheckState(Qt.Checked if item.text() in wanted else Qt.Unchecked)
+
+        self._refresh_display()
+
+    def enable_filter(self, placeholder: str = "Escribe para filtrar…") -> None:
+        """Activa el filtrado incremental dentro del combo."""
+
+        if self._filter_enabled:
+            self._filter_placeholder = placeholder
+            return
+
+        self._filter_enabled = True
+        self._filter_placeholder = placeholder
+        self._ensure_proxy()
+
+    def apply_filter(self, text: str) -> None:
+        """Permite aplicar el filtro desde código sin abrir el popup."""
+
+        if not self._filter_enabled:
+            return
+        self._filter_text = text
+        self._apply_filter(text)
+
     # ------------------------------------------------------------------
     # Manejo interno
     # ------------------------------------------------------------------
     def _on_item_pressed(self, index) -> None:
-        model: QStandardItemModel = self.model()
-        item: QStandardItem = model.itemFromIndex(index)
+        model_index = self._map_to_source(index)
+        if not model_index.isValid():
+            return
+
+        item: QStandardItem = self._model.itemFromIndex(model_index)
         if item.checkState() == Qt.Checked:
             item.setCheckState(Qt.Unchecked)
         else:
@@ -134,11 +173,84 @@ class MultiSelectComboBox(QComboBox):
     def _refresh_display(self) -> None:
         selected = self.checked_items()
         if not selected:
-            self.lineEdit().setText("")
+            self._summary_text = ""
+            if not self._should_preserve_filter_text():
+                self._set_line_edit_text("")
             return
 
         text = ", ".join(selected[: self._show_max])
         if len(selected) > self._show_max:
             text += f" +{len(selected) - self._show_max}"
+        self._summary_text = text
+        if not self._should_preserve_filter_text():
+            self._set_line_edit_text(text)
+
+    def showPopup(self) -> None:
+        if self._filter_enabled:
+            self._enter_filter_mode()
+        super().showPopup()
+
+    def hidePopup(self) -> None:
+        super().hidePopup()
+        if self._filter_enabled:
+            self._leave_filter_mode()
+
+    def _ensure_proxy(self) -> None:
+        if self._proxy_model is not None:
+            return
+
+        proxy = QSortFilterProxyModel(self)
+        proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        proxy.setFilterRole(Qt.DisplayRole)
+        proxy.setSourceModel(self._model)
+        super().setModel(proxy)
+        self.setModelColumn(0)
+        self._proxy_model = proxy
+
+    def _apply_filter(self, text: str) -> None:
+        if not self._proxy_model:
+            return
+        self._proxy_model.setFilterFixedString(text)
+
+    def _map_to_source(self, index):
+        if self._proxy_model is not None:
+            return self._proxy_model.mapToSource(index)
+        return index
+
+    def _should_preserve_filter_text(self) -> bool:
+        return self._filter_enabled and self._in_filter_mode and bool(self._filter_text)
+
+    def _set_line_edit_text(self, text: str) -> None:
+        blocker = QSignalBlocker(self.lineEdit())
+        _ = blocker  # avoid unused warning
         self.lineEdit().setText(text)
+
+    def _enter_filter_mode(self) -> None:
+        self._in_filter_mode = True
+        self.lineEdit().setReadOnly(False)
+        self.lineEdit().setPlaceholderText(self._filter_placeholder)
+        self._set_line_edit_text(self._filter_text)
+        self.lineEdit().selectAll()
+
+    def _leave_filter_mode(self) -> None:
+        self._in_filter_mode = False
+        self._filter_text = ""
+        self._apply_filter("")
+        self.lineEdit().setReadOnly(True)
+        self.lineEdit().setPlaceholderText(self._display_placeholder)
+        self._refresh_display()
+
+    def _on_line_edit_text_edited(self, text: str) -> None:
+        if not self._filter_enabled or not self._in_filter_mode:
+            return
+        self._filter_text = text
+        self._apply_filter(text)
+        if not text:
+            self._refresh_display()
+
+    def _on_line_edit_editing_finished(self) -> None:
+        if not self._filter_enabled or not self._in_filter_mode:
+            return
+        if not self._filter_text:
+            self._refresh_display()
 
