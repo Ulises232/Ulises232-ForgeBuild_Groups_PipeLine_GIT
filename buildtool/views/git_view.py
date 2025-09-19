@@ -72,7 +72,6 @@ class GitView(QWidget):
     """v4.1 — Local-only shim: usa comandos git locales; acciones globales; historial y cache."""
     def __init__(self, cfg: Config, parent=None):
         super().__init__(parent)
-        errguard.install(verbose=True)
         self.cfg = cfg
         self.logger = Logger()
         self._threads: list = []

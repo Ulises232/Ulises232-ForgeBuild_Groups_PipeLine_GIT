@@ -13,6 +13,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Las vistas de historial y Git etiquetan sus métodos conectados como `@Slot` para evitar advertencias dinámicas y mejorar la respuesta al cambiar de pestaña.
 - Local/NAS Branches y los combos reutilizables eliminan los registros dinámicos de slots, suprimiendo nuevas advertencias al navegar.
 - Las vistas de Build/Deploy y el `MultiSelectComboBox` registran todos sus manejadores como slots nativos, eliminando retrasos y mensajes al alternar pestañas.
+- `GitView` deja de reinstalar `ErrorGuard` en cada inicialización, suprimiendo los mensajes repetidos y reduciendo el retraso al cambiar de pestaña en el asistente.
 
 ## [1.3.0] - 2025-09-24
 ### Añadido
