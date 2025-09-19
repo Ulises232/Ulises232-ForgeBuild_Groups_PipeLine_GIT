@@ -11,6 +11,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ### Corregido
 - Las vistas de historial y Git etiquetan sus métodos conectados como `@Slot` para evitar advertencias dinámicas y mejorar la respuesta al cambiar de pestaña.
+- Local/NAS Branches y los combos reutilizables eliminan los registros dinámicos de slots, suprimiendo nuevas advertencias al navegar.
 
 ## [1.3.0] - 2025-09-24
 ### Añadido

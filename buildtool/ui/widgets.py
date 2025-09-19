@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSize, QObject, QEvent
+from PySide6.QtCore import Qt, QSize, QObject, QEvent, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -49,7 +49,12 @@ def combo_with_arrow(combo: QComboBox, *, arrow_tooltip: Optional[str] = None) -
     if arrow_tooltip:
         arrow.setToolTip(arrow_tooltip)
     arrow.setEnabled(combo.isEnabled())
-    arrow.clicked.connect(combo.showPopup)
+
+    @Slot()
+    def _show_popup() -> None:
+        combo.showPopup()
+
+    arrow.clicked.connect(_show_popup)
     layout.addWidget(arrow)
 
     container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
