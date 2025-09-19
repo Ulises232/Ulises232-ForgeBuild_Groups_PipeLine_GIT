@@ -65,6 +65,10 @@ class ModuleRow(QWidget):
         self.cmbNoProfile = QComboBox(); self.cmbNoProfile.addItems(["Con perfil", "Sin perfil"])
         self.cmbRunOnce   = QComboBox(); self.cmbRunOnce.addItems(["Cada perfil", "Una vez por sesión"])
         self.cmbSerial    = QComboBox(); self.cmbSerial.addItems(["Paralelo entre perfiles", "Serial entre perfiles"])
+        self.txtProfileOverride = QLineEdit(); self.txtProfileOverride.setPlaceholderText("Perfil override")
+        self.txtProfileOverride.setMaximumWidth(160)
+        self.txtOnlyIfProfile = QLineEdit(); self.txtOnlyIfProfile.setPlaceholderText("Solo si perfil = ...")
+        self.txtOnlyIfProfile.setMaximumWidth(180)
 
         # Salida
         self.cboSalida = QComboBox()
@@ -91,6 +95,8 @@ class ModuleRow(QWidget):
         flags_h.addWidget(combo_with_arrow(self.cmbNoProfile))
         flags_h.addWidget(combo_with_arrow(self.cmbRunOnce))
         flags_h.addWidget(combo_with_arrow(self.cmbSerial))
+        flags_h.addWidget(self.txtProfileOverride)
+        flags_h.addWidget(self.txtOnlyIfProfile)
         lay.addWidget(flags_w, 1, 3)
         # Fila 2
         lay.addWidget(QLabel("Salida:"), 2, 0); lay.addWidget(combo_with_arrow(self.cboSalida), 2, 1)
@@ -121,6 +127,8 @@ class ModuleRow(QWidget):
         self.cmbNoProfile.setCurrentIndex(1 if getattr(m, "no_profile", False) else 0)
         self.cmbRunOnce.setCurrentIndex(1 if getattr(m, "run_once", False) else 0)
         self.cmbSerial.setCurrentIndex(1 if getattr(m, "serial_across_profiles", False) else 0)
+        self.txtProfileOverride.setText(getattr(m, "profile_override", "") or "")
+        self.txtOnlyIfProfile.setText(getattr(m, "only_if_profile_equals", "") or "")
 
         if getattr(m, "copy_to_subfolder", None):
             self.cboSalida.setCurrentIndex(2)
@@ -147,6 +155,8 @@ class ModuleRow(QWidget):
             run_once=(self.cmbRunOnce.currentIndex() == 1),
             serial_across_profiles=(self.cmbSerial.currentIndex() == 1),
         )
+        m.profile_override = (self.txtProfileOverride.text().strip() or None)
+        m.only_if_profile_equals = (self.txtOnlyIfProfile.text().strip() or None)
         idx = self.cboSalida.currentIndex()
         if idx == 0:  # WAR
             m.copy_to_profile_war = True

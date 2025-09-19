@@ -24,15 +24,20 @@ def copy_artifacts(
         if cancel_event and cancel_event.is_set():
             break
         if path.is_dir():
-            if recursive and path.name in exclude_dirs:
-                continue
             continue
         name = path.name
+        if recursive:
+            rel_path = path.relative_to(src_dir)
+            if any(part in exclude_dirs for part in rel_path.parts[:-1]):
+                continue
+        else:
+            rel_path = None
         if any(name.endswith(s) for s in exclude_suffixes):
             continue
         if not any(fnmatch.fnmatch(name, pat) for pat in patterns):
             continue
-        target = dest_dir / name
+        target = dest_dir / (rel_path if recursive else name)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
         log_cb(f"Copiado: {path} -> {target}")
         n += 1

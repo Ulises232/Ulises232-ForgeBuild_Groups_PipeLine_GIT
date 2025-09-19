@@ -4,6 +4,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.1.1] - 2025-09-20
+### Cambiado
+- `run_maven` permite que las ejecuciones en ventana separada concluyan naturalmente y respeta cancelaciones explícitas sin imponer timeouts artificiales.
+- El asistente de módulos ahora expone los campos de `profile_override` y `only_if_profile_equals`, conservando sus valores al editar y guardar.
+
+### Corregido
+- El deploy copia recursivamente la estructura de carpetas de cada subdirectorio del perfil, manteniendo la jerarquía completa en el destino.
+
 ## [1.1.0] - 2025-09-19
 ### Añadido
 - Hoja de estilos global (`buildtool/ui/theme.qss`) con tipografía, colores y estados modernos aplicados desde `MainWindow`.
@@ -45,5 +53,6 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Limpieza de logs de depuración y mejoras en los mensajes producidos por las tareas Git.
 - Empaquetado consistente del paquete `buildtool` para PyInstaller y ejecuciones como script.
 
+[1.1.1]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.1.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT
 [1.0.0]: https://github.com/Ulises232/Ulises232-ForgeBuild_Groups_PipeLine_GIT

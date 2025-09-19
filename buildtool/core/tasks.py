@@ -526,6 +526,7 @@ def deploy_version(
                 ["*"],
                 sub_dst,
                 log_cb=lambda s: log_cb(f"[{profile}] {s}"),
+                recursive=True,
                 cancel_event=cancel_event,
             )
             if cancel_event and cancel_event.is_set():
