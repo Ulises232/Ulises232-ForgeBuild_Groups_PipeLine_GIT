@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from ..core.branch_store import (
     BranchRecord,
     Index,
+    NasUnavailableError,
     load_nas_index,
     record_activity,
     save_nas_index,
@@ -152,7 +153,23 @@ class NasBranchesView(QWidget):
     @Slot()
     @Slot(bool)
     def _load_index(self, *_args: object) -> None:
-        self._index = load_nas_index()
+        try:
+            self._index = load_nas_index()
+        except NasUnavailableError as exc:
+            self._index = {}
+            self._current_key = None
+            self.tree.clear()
+            self.tree.setEnabled(False)
+            for btn in (self.btnNew, self.btnSave, self.btnDelete, self.btnReset):
+                btn.setEnabled(False)
+            QMessageBox.warning(self, "NAS no disponible", str(exc))
+            self._populate_filters()
+            self._refresh_tree()
+            self._clear_form()
+            return
+        self.tree.setEnabled(True)
+        for btn in (self.btnNew, self.btnSave, self.btnDelete, self.btnReset):
+            btn.setEnabled(True)
         self._current_key = None
         self._populate_filters()
         self._refresh_tree()
@@ -332,10 +349,13 @@ class NasBranchesView(QWidget):
         self._index[new_key] = rec
         try:
             save_nas_index(self._index)
+            record_activity(action, rec, targets=("local", "nas"), message="NAS manual")
+        except NasUnavailableError as exc:
+            QMessageBox.warning(self, "NAS", str(exc))
+            return
         except Exception as exc:
             QMessageBox.critical(self, "NAS", f"No se pudo guardar el índice: {exc}")
             return
-        record_activity(action, rec, targets=("local", "nas"), message="NAS manual")
         self._current_key = new_key
         self._populate_filters()
         self._refresh_tree()
@@ -366,10 +386,13 @@ class NasBranchesView(QWidget):
         self._index.pop(self._current_key, None)
         try:
             save_nas_index(self._index)
+            record_activity("manual_delete", rec, targets=("local", "nas"), message="NAS manual")
+        except NasUnavailableError as exc:
+            QMessageBox.warning(self, "NAS", str(exc))
+            return
         except Exception as exc:
             QMessageBox.critical(self, "NAS", f"No se pudo eliminar el registro: {exc}")
             return
-        record_activity("manual_delete", rec, targets=("local", "nas"), message="NAS manual")
         self._current_key = None
         self._populate_filters()
         self._refresh_tree()

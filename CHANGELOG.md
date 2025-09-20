@@ -4,6 +4,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.3.4] - 2025-09-28
+### Corregido
+- La interfaz Git y la vista de ramas NAS ahora muestran advertencias claras y continúan en modo offline cuando la NAS no está disponible, evitando cierres inesperados.
+- Las operaciones que escriben en la NAS propagan errores descriptivos para informar a la UI y al historial de actividad.
+
 ## [1.3.3] - 2025-09-27
 ### Corregido
 - Los merges desde ramas remotas ahora realizan `fetch` previo y evitan ejecutar `merge` si la preparación del checkout falla.

@@ -41,7 +41,12 @@ from PySide6 import QtCore, QtWidgets
 from datetime import datetime
 from ..core.git_fast import get_current_branch_fast
 import shiboken6
-from ..core.branch_store import load_index, recover_from_nas, publish_to_nas
+from ..core.branch_store import (
+    NasUnavailableError,
+    load_index,
+    publish_to_nas,
+    recover_from_nas,
+)
 from .nas_activity_log_view import NasActivityLogView
 from .local_branches_view import LocalBranchesView
 from .nas_branches_view import NasBranchesView
@@ -775,21 +780,57 @@ class GitView(QWidget):
 
     @safe_slot
     def _do_recover_nas(self):
+        error_state: dict[str, Optional[str]] = {"text": None}
+
         def task():
             emit = self.logger.line.emit
             emit("[task] Recuperar NAS")
-            recover_from_nas()
+            try:
+                recover_from_nas()
+            except NasUnavailableError as exc:
+                msg = str(exc)
+                error_state["text"] = msg
+                emit(f"[task][WARN] {msg}")
+                self._dbg(msg, force=True)
+                return False
             emit("[task] DONE")
             return True
-        self._start_task("Recuperar NAS", task, success="Historial recuperado de NAS", error="Error al recuperar NAS")
+        def _after(ok: bool):
+            if not ok and error_state["text"]:
+                self._pending_error = error_state["text"]
+        self._start_task(
+            "Recuperar NAS",
+            task,
+            _after,
+            success="Historial recuperado de NAS",
+            error="Error al recuperar NAS",
+        )
 
     @safe_slot
     def _do_publish_nas(self):
+        error_state: dict[str, Optional[str]] = {"text": None}
+
         def task():
             emit = self.logger.line.emit
             emit("[task] Publicar NAS")
-            publish_to_nas()
+            try:
+                publish_to_nas()
+            except NasUnavailableError as exc:
+                msg = str(exc)
+                error_state["text"] = msg
+                emit(f"[task][WARN] {msg}")
+                self._dbg(msg, force=True)
+                return False
             emit("[task] DONE")
             return True
-        self._start_task("Publicar NAS", task, success="Historial publicado en NAS", error="Error al publicar NAS")
+        def _after(ok: bool):
+            if not ok and error_state["text"]:
+                self._pending_error = error_state["text"]
+        self._start_task(
+            "Publicar NAS",
+            task,
+            _after,
+            success="Historial publicado en NAS",
+            error="Error al publicar NAS",
+        )
 
