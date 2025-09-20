@@ -66,9 +66,52 @@ def build_project_for_profile(
                                    getattr(project, "repo", None), getattr(project, "workspace", None))
     output_base = _resolve_output_base(cfg, project_key, profile, group_key)
 
-    # creación perezosa de carpetas
-    out_war = None
-    out_ui  = None
+    cleaned_destinations: set[pathlib.Path] = set()
+
+    def _prepare_destination(dest: pathlib.Path, *, create: bool) -> pathlib.Path:
+        dest = pathlib.Path(dest)
+        if create:
+            dest.mkdir(parents=True, exist_ok=True)
+        elif not dest.exists():
+            return dest
+        resolved = dest.resolve()
+        if resolved in cleaned_destinations:
+            return resolved
+        for child in list(resolved.iterdir()):
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            except FileNotFoundError:
+                continue
+        cleaned_destinations.add(resolved)
+        return resolved
+
+    def _module_destinations(mod) -> set[pathlib.Path]:
+        dests: set[pathlib.Path] = set()
+        if getattr(mod, "copy_to_profile_war", False):
+            if getattr(mod, "copy_to_root", False):
+                dests.add(output_base)
+            else:
+                dests.add(output_base / "war")
+        if getattr(mod, "copy_to_profile_ui", False):
+            if getattr(mod, "copy_to_root", False):
+                dests.add(output_base)
+            else:
+                dests.add(output_base / "ui-ellis")
+        if getattr(mod, "copy_to_subfolder", None):
+            dests.add(output_base / mod.copy_to_subfolder)
+        if getattr(mod, "rename_jar_to", None):
+            sub = getattr(mod, "copy_to_subfolder", None)
+            dests.add(output_base / (sub or ""))
+        if getattr(mod, "select_pattern", None) and getattr(mod, "rename_jar_to", None) and not dests:
+            dests.add(output_base)
+        return dests
+
+    def _clean_if_skipped(dests: set[pathlib.Path]):
+        for dest in dests:
+            _prepare_destination(dest, create=False)
 
     # --- ORDEN: primero los módulos "commons": run_once + no_profile (prioridad)
     def _priority(m):
@@ -76,8 +119,11 @@ def build_project_for_profile(
     modules_in_order = sorted(project.modules, key=_priority)
 
     for mod in modules_in_order:
+        module_dests = _module_destinations(mod)
+
         # Filtro por módulos seleccionados
         if modules_filter and mod.name not in modules_filter:
+            _clean_if_skipped(module_dests)
             continue
 
         if cancel_event and cancel_event.is_set():
@@ -85,9 +131,11 @@ def build_project_for_profile(
             return False
 
         if getattr(mod, "optional", False) and not include_optional:
+            _clean_if_skipped(module_dests)
             log_cb(f"[{profile}] Saltando módulo opcional: {mod.name}")
             continue
         if getattr(mod, "only_if_profile_equals", None) and mod.only_if_profile_equals != profile:
+            _clean_if_skipped(module_dests)
             log_cb(f"[{profile}] Saltando {mod.name} (solo para perfil {mod.only_if_profile_equals})")
             continue
 
@@ -132,13 +180,17 @@ def build_project_for_profile(
         if getattr(mod, "select_pattern", None) and getattr(mod, "rename_jar_to", None):
             # --- Destino preferente para selectivo ---
             if getattr(mod, "copy_to_subfolder", None):
-                dest_dir = _ensure(output_base / mod.copy_to_subfolder)
+                dest_dir = _prepare_destination(output_base / mod.copy_to_subfolder, create=True)
             elif getattr(mod, "copy_to_profile_ui", False):
-                dest_dir = output_base if getattr(mod, "copy_to_root", False) else _ensure(output_base / "ui-ellis")
+                dest_dir = (_prepare_destination(output_base, create=True)
+                            if getattr(mod, "copy_to_root", False)
+                            else _prepare_destination(output_base / "ui-ellis", create=True))
             elif getattr(mod, "copy_to_profile_war", False):
-                dest_dir = output_base if getattr(mod, "copy_to_root", False) else _ensure(output_base / "war")
+                dest_dir = (_prepare_destination(output_base, create=True)
+                            if getattr(mod, "copy_to_root", False)
+                            else _prepare_destination(output_base / "war", create=True))
             else:
-                dest_dir = _ensure(output_base)
+                dest_dir = _prepare_destination(output_base, create=True)
 
 
             src = _pick_artifact(target_dir, [mod.select_pattern])
@@ -152,9 +204,9 @@ def build_project_for_profile(
         # Flujo clásico
         
         if getattr(mod, "copy_to_profile_war", False):
-            dest = output_base if getattr(mod, "copy_to_root", False) else (_ensure(output_base / "war") if out_war is None else out_war)
-            # refresca out_war si no era raíz
-            if dest != output_base: out_war = dest
+            dest = (_prepare_destination(output_base, create=True)
+                    if getattr(mod, "copy_to_root", False)
+                    else _prepare_destination(output_base / "war", create=True))
             copy_artifacts(
                 target_dir,
                 ["*.war"],
@@ -164,8 +216,9 @@ def build_project_for_profile(
                 cancel_event=cancel_event,
             )
         if getattr(mod, "copy_to_profile_ui", False):
-            dest = output_base if getattr(mod, "copy_to_root", False) else (_ensure(output_base / "ui-ellis") if out_ui is None else out_ui)
-            if dest != output_base: out_ui = dest
+            dest = (_prepare_destination(output_base, create=True)
+                    if getattr(mod, "copy_to_root", False)
+                    else _prepare_destination(output_base / "ui-ellis", create=True))
             copy_artifacts(
                 target_dir,
                 ["*.jar"],
@@ -175,7 +228,7 @@ def build_project_for_profile(
                 cancel_event=cancel_event,
             )
         if getattr(mod, "copy_to_subfolder", None):
-            dest = _ensure(output_base / mod.copy_to_subfolder)
+            dest = _prepare_destination(output_base / mod.copy_to_subfolder, create=True)
             copy_artifacts(
                 target_dir,
                 ["*.jar","*.war"],
@@ -188,8 +241,7 @@ def build_project_for_profile(
         if getattr(mod, "rename_jar_to", None):
             src = _pick_artifact(target_dir, ["*-jar-with-dependencies.jar", "*.jar", "*.war"])
             if src:
-                dest_dir = output_base / (mod.copy_to_subfolder or "")
-                _ensure(dest_dir)
+                dest_dir = _prepare_destination(output_base / (mod.copy_to_subfolder or ""), create=True)
                 shutil.copy2(src, dest_dir / mod.rename_jar_to)
                 log_cb(f"[{profile}] Renombrado {src.name} -> {mod.rename_jar_to} en {dest_dir}")
 
