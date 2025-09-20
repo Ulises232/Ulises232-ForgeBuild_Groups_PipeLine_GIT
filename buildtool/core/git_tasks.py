@@ -180,12 +180,23 @@ def merge_into_current_branch(cfg: Config, group_key: Optional[str], project_key
     for g, p, m, path in _iter_modules(cfg, group_key, project_key, only):
         label = f"{p.key}/{m.name}"; log(f"\\n=== [{label}] {path}")
         cur = current_branch(str(path))
-        exists = local_branch_exists(str(path), source) or remote_branch_exists(str(path), source)
-        if not exists:
+        fetch_result = fetch(str(path))
+        if fetch_result.code != 0:
+            log(f"!! fetch falló, se omite: {fetch_result.out.strip() or fetch_result.code}")
+            continue
+        local_exists = local_branch_exists(str(path), source)
+        remote_exists = remote_branch_exists(str(path), source)
+        if not (local_exists or remote_exists):
             log(f"-- La rama {source} no existe en {label}"); continue
-        if (not local_branch_exists(str(path), source)) and remote_branch_exists(str(path), source):
-            _ = checkout(str(path), source, create=True, track=f"origin/{source}")
-            _ = checkout(str(path), cur)
+        if (not local_exists) and remote_exists:
+            checkout_new = checkout(str(path), source, create=True, track=f"origin/{source}")
+            if checkout_new.code != 0:
+                log(f"!! No se pudo preparar rama remota {source}: {checkout_new.out.strip()}")
+                continue
+            checkout_back = checkout(str(path), cur)
+            if checkout_back.code != 0:
+                log(f"!! No se pudo volver a {cur}: {checkout_back.out.strip()}")
+                continue
         r = merge_into_current(str(path), source)
         if r.code==0:
             log(f"OK merge {source} -> {cur}")
