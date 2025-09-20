@@ -9,6 +9,11 @@ import json
 from .config import load_config
 from .branch_history_db import BranchHistoryDB
 
+
+class NasUnavailableError(RuntimeError):
+    """Raised when the configured NAS directory cannot be accessed."""
+
+
 # ---------------- paths helpers -----------------
 
 def _root_dir() -> Path:
@@ -36,7 +41,13 @@ def _nas_dir() -> Path:
     if not base:
         base = str(_root_dir() / "_nas_dev")
     p = Path(base)
-    p.mkdir(parents=True, exist_ok=True)
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except (FileNotFoundError, OSError) as exc:
+        detail = getattr(exc, "strerror", "") or str(exc)
+        raise NasUnavailableError(
+            f"El recurso NAS en '{base}' no está disponible: {detail}"
+        ) from exc
     return p
 
 
@@ -294,7 +305,12 @@ def record_activity(
             continue
         seen.add(target)
         if target == "nas":
-            base = _nas_dir()
+            try:
+                base = _nas_dir()
+            except NasUnavailableError as exc:
+                raise NasUnavailableError(
+                    f"No se pudo registrar la actividad en la NAS: {exc}"
+                ) from exc
         else:
             base = _state_dir()
         payload = dict(entry)
@@ -363,7 +379,12 @@ def _release_lock(base: Path) -> None:
 
 
 def recover_from_nas() -> Index:
-    base = _nas_dir()
+    try:
+        base = _nas_dir()
+    except NasUnavailableError as exc:
+        raise NasUnavailableError(
+            f"No se pudo acceder a la NAS para recuperar el historial: {exc}"
+        ) from exc
     local = load_index()
     nas = load_index(base, filter_origin=True)
     merged = merge_indexes(local, nas)
@@ -376,7 +397,12 @@ def recover_from_nas() -> Index:
 
 
 def publish_to_nas() -> Index:
-    base = _nas_dir()
+    try:
+        base = _nas_dir()
+    except NasUnavailableError as exc:
+        raise NasUnavailableError(
+            f"No se pudo acceder a la NAS para publicar el historial: {exc}"
+        ) from exc
     if not _acquire_lock(base):
         raise RuntimeError("NAS lock busy")
     try:
@@ -412,12 +438,22 @@ def merge_indexes(a: Index, b: Index) -> Index:
 
 def load_nas_index() -> Index:
     """Load the branches index stored in the NAS directory."""
-    return load_index(_nas_dir())
+    try:
+        base = _nas_dir()
+    except NasUnavailableError:
+        return {}
+    return load_index(base)
 
 
 def save_nas_index(index: Index) -> None:
     """Persist the NAS index to disk."""
-    save_index(index, _nas_dir())
+    try:
+        base = _nas_dir()
+    except NasUnavailableError as exc:
+        raise NasUnavailableError(
+            f"No se pudo guardar el índice en la NAS: {exc}"
+        ) from exc
+    save_index(index, base)
 
 
 def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
@@ -443,4 +479,8 @@ def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
 
 def load_nas_activity_log() -> List[dict[str, Any]]:
     """Return parsed activity log entries stored in the NAS directory."""
-    return load_activity_log(_nas_dir())
+    try:
+        base = _nas_dir()
+    except NasUnavailableError:
+        return []
+    return load_activity_log(base)
