@@ -23,6 +23,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - El `MultiSelectComboBox` ahora delega en `ComboBoxMenu.exec()` para aplicar la animación Fluent con la firma correcta, eliminando los fallos `aniType`/`TypeError` al desplegar opciones en PySide6 6.8.1.
 - La ventana Fluent vuelve a registrar las rutas Pipeline/Git antes de recrearlas, evitando referencias a vistas destruidas y el error `Internal C++ object (GitView) already deleted` al navegar.
 - Ajustes adicionales en `MultiSelectComboBox` para alinear el popup con las animaciones de QFluentWidgets y mantener con vida el menú hasta liberar sus animaciones, evitando los `access violation` y congelamientos al interactuar con el selector en Windows.
+- El cierre del `MultiSelectComboBox` replica la limpieza diferida de `ComboBox`, manteniendo el popup activo hasta que Qt termine sus animaciones y eliminando los cierres inesperados al reabrir combos con filtro en Windows.
 
 ## [1.3.4] - 2025-09-28
 ### Corregido

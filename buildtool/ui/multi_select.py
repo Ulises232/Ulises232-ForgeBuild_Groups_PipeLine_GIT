@@ -176,15 +176,11 @@ class MultiSelectComboBox(ComboBox):
         if self._search_input:
             self._filter_text = self._search_input.text()
 
-        menu = self._active_menu
-        if menu is not None:
-            menu.deleteLater()
-
         self._active_menu = None
         self._menu_actions = []
         self._search_input = None
         self._search_action = None
-        self.dropMenu = None
+        ComboBox._onDropMenuClosed(self)
 
     def _showComboMenu(self):  # type: ignore[override]
         if self.count() == 0:
@@ -193,6 +189,8 @@ class MultiSelectComboBox(ComboBox):
         menu = _MultiSelectMenu(self)
         self._active_menu = menu
         self._menu_actions = []
+
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         if self._filter_enabled:
             search = SearchLineEdit(menu)
