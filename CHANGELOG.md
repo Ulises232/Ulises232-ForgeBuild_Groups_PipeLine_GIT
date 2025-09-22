@@ -8,6 +8,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Corregido
 - Al cambiar a ramas creadas por otro usuario, la vista de historial conserva al autor
   original y registra al editor únicamente en el historial de actividad.
+- Las vistas de ramas local y NAS muestran al creador antes que al último editor en sus
+  listados para mantener claro el propietario original.
 
 ## [1.4.2] - 2025-10-01
 ### Cambiado
