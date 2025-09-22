@@ -1,13 +1,9 @@
 from __future__ import annotations
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import (
-    QLabel,
-    QHBoxLayout,
-    QScrollArea,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
+
+from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget
+
+from qfluentwidgets import Pivot, ScrollArea, SubtitleLabel, StrongBodyLabel
 from ..core.config import Config
 from .build_view import BuildView
 from .deploy_view import DeployView
@@ -29,34 +25,54 @@ class PipelineView(QWidget):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(12)
 
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(12)
-        icon = QLabel()
-        icon.setPixmap(get_icon("pipeline").pixmap(32, 32))
-        header.addWidget(icon)
-        title = QLabel("Pipeline de compilación y despliegue")
-        title.setProperty("role", "title")
-        header.addWidget(title)
-        header.addStretch(1)
-        root.addLayout(header)
+        header_widget = QWidget(self)
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(12)
 
-        self.tabs = QTabWidget()
-        self.tabs.setTabPosition(QTabWidget.North)
-        self.tabs.setMovable(False)
-        root.addWidget(self.tabs, 1)
+        header_icon = QLabel(header_widget)
+        header_icon.setPixmap(get_icon("pipeline").pixmap(32, 32))
+        header_layout.addWidget(header_icon, 0, Qt.AlignVCenter)
+
+        title_container = QWidget(header_widget)
+        title_layout = QVBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(2)
+
+        title = SubtitleLabel("Pipeline de compilación y despliegue", title_container)
+        description = StrongBodyLabel(
+            "Construye, despliega y consulta el historial desde un solo lugar",
+            title_container,
+        )
+        title_layout.addWidget(title)
+        title_layout.addWidget(description)
+
+        header_layout.addWidget(title_container, 1)
+        root.addWidget(header_widget)
+
+        self.pivot = Pivot(self)
+        root.addWidget(self.pivot)
+
+        self.stack = QStackedWidget(self)
+        root.addWidget(self.stack, 1)
 
         self.build_view = BuildView(self.cfg, self.on_request_reload_config, self.preset_notifier)
         self.deploy_view = DeployView(self.cfg, self.preset_notifier)
         self.history_view = PipelineHistoryView(self.cfg)
-        self.tabs.addTab(self._wrap_in_scroll(self.build_view), get_icon("build"), "Build")
-        self.tabs.addTab(self._wrap_in_scroll(self.deploy_view), get_icon("deploy"), "Deploy")
-        self.tabs.addTab(self._wrap_in_scroll(self.history_view), get_icon("history"), "Historial")
 
-    def _wrap_in_scroll(self, widget: QWidget) -> QScrollArea:
-        area = QScrollArea()
+        self._routes = {}
+        self._register_page("build", self.build_view, "Build", "build")
+        self._register_page("deploy", self.deploy_view, "Deploy", "deploy")
+        self._register_page("history", self.history_view, "Historial", "history")
+
+        self.pivot.currentItemChanged.connect(self._switch_to_route)
+        self.pivot.setCurrentItem("build")
+        self._switch_to_route("build")
+
+    def _wrap_in_scroll(self, widget: QWidget) -> ScrollArea:
+        area = ScrollArea(self)
         area.setWidgetResizable(True)
-        area.setFrameShape(QScrollArea.NoFrame)
+        area.setFrameShape(ScrollArea.NoFrame)
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -64,6 +80,19 @@ class PipelineView(QWidget):
         layout.addWidget(widget)
         area.setWidget(container)
         return area
+
+    def _register_page(self, route: str, view: QWidget, label: str, icon_name: str) -> None:
+        page = self._wrap_in_scroll(view)
+        page.setObjectName(f"{route}Scroll")
+        self.stack.addWidget(page)
+        self._routes[route] = page
+        self.pivot.addItem(route, label, icon=get_icon(icon_name))
+
+    def _switch_to_route(self, route: str) -> None:
+        target = self._routes.get(route)
+        if target is None:
+            return
+        self.stack.setCurrentWidget(target)
 
     def closeEvent(self, event):
         for child in (self.build_view, self.deploy_view, self.history_view):

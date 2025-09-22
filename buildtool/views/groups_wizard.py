@@ -3,14 +3,15 @@ from typing import List, Optional, Dict
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QLineEdit, QPushButton, QComboBox, QListWidget, QListWidgetItem,
-    QFileDialog, QMessageBox, QCheckBox, QSplitter, QTabWidget, QGroupBox
+    QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QFileDialog, QMessageBox, QSplitter, QTabWidget, QGroupBox
 )
+
+from qfluentwidgets import ComboBox, CheckBox, PushButton, PrimaryPushButton
 import yaml
 from ..core.config import (
     Config, Group, Project, Module, DeployTarget, save_config
 )
-from ..ui.widgets import combo_with_arrow
 
 # ----------------------------- Helpers -----------------------------
 
@@ -43,12 +44,12 @@ class ModuleRow(QWidget):
         lay.setHorizontalSpacing(8)
         lay.setVerticalSpacing(6)
         # --- Archivos de versión ---
-        from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem, QLineEdit, QPushButton, QLabel
+        from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem, QLineEdit, QLabel
         self.gbVersion = QGroupBox('Archivos de versión (relativos al módulo)')
         _vlay = QVBoxLayout(self.gbVersion)
         self.lstVersionFiles = QListWidget()
         _row = QHBoxLayout(); self.txtVF = QLineEdit(); self.txtVF.setPlaceholderText('src/.../web.xml')
-        self.btnAddVF = QPushButton('Agregar'); self.btnDelVF = QPushButton('Quitar')
+        self.btnAddVF = PushButton('Agregar'); self.btnDelVF = PushButton('Quitar')
         _row.addWidget(QLabel('Archivo:')); _row.addWidget(self.txtVF, 1); _row.addWidget(self.btnAddVF); _row.addWidget(self.btnDelVF)
         _vlay.addLayout(_row); _vlay.addWidget(self.lstVersionFiles)
         lay.addWidget(self.gbVersion, 99, 0, 1, 2)
@@ -61,21 +62,21 @@ class ModuleRow(QWidget):
         self.txtGoals = QLineEdit("clean package")
 
         # Flags
-        self.cmbOptional  = QComboBox(); self.cmbOptional.addItems(["No opcional", "Opcional"])
-        self.cmbNoProfile = QComboBox(); self.cmbNoProfile.addItems(["Con perfil", "Sin perfil"])
-        self.cmbRunOnce   = QComboBox(); self.cmbRunOnce.addItems(["Cada perfil", "Una vez por sesión"])
-        self.cmbSerial    = QComboBox(); self.cmbSerial.addItems(["Paralelo entre perfiles", "Serial entre perfiles"])
+        self.cmbOptional  = ComboBox(); self.cmbOptional.addItems(["No opcional", "Opcional"])
+        self.cmbNoProfile = ComboBox(); self.cmbNoProfile.addItems(["Con perfil", "Sin perfil"])
+        self.cmbRunOnce   = ComboBox(); self.cmbRunOnce.addItems(["Cada perfil", "Una vez por sesión"])
+        self.cmbSerial    = ComboBox(); self.cmbSerial.addItems(["Paralelo entre perfiles", "Serial entre perfiles"])
         self.txtProfileOverride = QLineEdit(); self.txtProfileOverride.setPlaceholderText("Perfil override")
         self.txtProfileOverride.setMaximumWidth(160)
         self.txtOnlyIfProfile = QLineEdit(); self.txtOnlyIfProfile.setPlaceholderText("Solo si perfil = ...")
         self.txtOnlyIfProfile.setMaximumWidth(180)
 
         # Salida
-        self.cboSalida = QComboBox()
+        self.cboSalida = ComboBox()
         self.cboSalida.addItems(["WAR → /war", "UI-JAR → /ui-ellis", "Carpeta personalizada"])
         self.txtCustomOut = QLineEdit()
         self.txtCustomOut.setPlaceholderText("ej. fp-correos")
-        self.chkToRoot = QCheckBox("A la raíz")
+        self.chkToRoot = CheckBox("A la raíz")
 
         # Selectivo
         self.txtSelectPattern = QLineEdit()
@@ -91,15 +92,15 @@ class ModuleRow(QWidget):
         lay.addWidget(QLabel("Goals:"),  1, 0); lay.addWidget(self.txtGoals, 1, 1)
         lay.addWidget(QLabel("Flags:"),  1, 2)
         flags_w = QWidget(); flags_h = QHBoxLayout(flags_w); flags_h.setContentsMargins(0,0,0,0); flags_h.setSpacing(6)
-        flags_h.addWidget(combo_with_arrow(self.cmbOptional))
-        flags_h.addWidget(combo_with_arrow(self.cmbNoProfile))
-        flags_h.addWidget(combo_with_arrow(self.cmbRunOnce))
-        flags_h.addWidget(combo_with_arrow(self.cmbSerial))
+        flags_h.addWidget(self.cmbOptional)
+        flags_h.addWidget(self.cmbNoProfile)
+        flags_h.addWidget(self.cmbRunOnce)
+        flags_h.addWidget(self.cmbSerial)
         flags_h.addWidget(self.txtProfileOverride)
         flags_h.addWidget(self.txtOnlyIfProfile)
         lay.addWidget(flags_w, 1, 3)
         # Fila 2
-        lay.addWidget(QLabel("Salida:"), 2, 0); lay.addWidget(combo_with_arrow(self.cboSalida), 2, 1)
+        lay.addWidget(QLabel("Salida:"), 2, 0); lay.addWidget(self.cboSalida, 2, 1)
         lay.addWidget(QLabel("Carpeta:"), 2, 2); lay.addWidget(self.txtCustomOut, 2, 3)
         lay.addWidget(self.chkToRoot, 2, 4)
         # Fila 3
@@ -202,7 +203,7 @@ class TargetRow(QWidget):
         lay.setVerticalSpacing(6)
 
         self.txtName = QLineEdit()
-        self.cboProject = QComboBox()
+        self.cboProject = ComboBox()
         self.txtProfiles = QLineEdit()
         self.txtProfiles.setPlaceholderText("Perfiles separados por coma, ej: Desarrollo, Produccion")
         self.txtPath = QLineEdit(); self.txtPath.setPlaceholderText(r"\\server\...\{version}\ ")
@@ -217,7 +218,7 @@ class TargetRow(QWidget):
                 self.cboProject.addItem(p.key, p.key)
 
         lay.addWidget(QLabel("Nombre:"), 0, 0); lay.addWidget(self.txtName, 0, 1, 1, 3)
-        lay.addWidget(QLabel("Proyecto:"), 1, 0); lay.addWidget(combo_with_arrow(self.cboProject), 1, 1)
+        lay.addWidget(QLabel("Proyecto:"), 1, 0); lay.addWidget(self.cboProject, 1, 1)
         lay.addWidget(QLabel("Perfiles:"), 1, 2); lay.addWidget(self.txtProfiles, 1, 3)
         lay.addWidget(QLabel("Path:"), 2, 0); lay.addWidget(self.txtPath, 2, 1, 1, 3)
         lay.addWidget(QLabel("Hotfix path:"), 3, 0); lay.addWidget(self.txtHotfix, 3, 1, 1, 3)
@@ -257,15 +258,15 @@ class ProjectEditor(QWidget):
         header = QGridLayout()
         header.setHorizontalSpacing(8); header.setVerticalSpacing(6)
         self.txtKey = QLineEdit()
-        self.cboRepo = QComboBox()
-        self.cboExec = QComboBox(); self.cboExec.addItems(["integrated", "separate_windows"])
+        self.cboRepo = ComboBox()
+        self.cboExec = ComboBox(); self.cboExec.addItems(["integrated", "separate_windows"])
 
         for k in (group.repos or {}).keys():
             self.cboRepo.addItem(k, k)
 
         header.addWidget(QLabel("Proyecto:"), 0, 0); header.addWidget(self.txtKey, 0, 1)
-        header.addWidget(QLabel("Repo:"),     0, 2); header.addWidget(combo_with_arrow(self.cboRepo), 0, 3)
-        header.addWidget(QLabel("Ejecución:"), 0, 4); header.addWidget(combo_with_arrow(self.cboExec), 0, 5)
+        header.addWidget(QLabel("Repo:"),     0, 2); header.addWidget(self.cboRepo, 0, 3)
+        header.addWidget(QLabel("Ejecución:"), 0, 4); header.addWidget(self.cboExec, 0, 5)
         lay.addLayout(header)
 
         # Split
@@ -273,8 +274,8 @@ class ProjectEditor(QWidget):
         left = QWidget(); left_lay = QVBoxLayout(left); left_lay.setContentsMargins(0,0,0,0); left_lay.setSpacing(6)
         self.lstModules = QListWidget()
         btns_w = QWidget(); btns = QHBoxLayout(btns_w); btns.setContentsMargins(0,0,0,0); btns.setSpacing(6)
-        self.btnAddMod = QPushButton("Agregar módulo")
-        self.btnDelMod = QPushButton("Quitar módulo")
+        self.btnAddMod = PushButton("Agregar módulo")
+        self.btnDelMod = PushButton("Quitar módulo")
         btns.addWidget(self.btnAddMod); btns.addWidget(self.btnDelMod); btns.addStretch(1)
         left_lay.addWidget(self.lstModules, 1); left_lay.addWidget(btns_w)
         split.addWidget(left)
@@ -381,9 +382,9 @@ class GroupEditor(QWidget):
         # NAS path + import/export
         nas_row = QHBoxLayout()
         self.txtNasDir = QLineEdit(getattr(getattr(self.cfg, "paths", {}), "nas_dir", ""))
-        self.btnNasBrowse = QPushButton("...")
-        self.btnNasImport = QPushButton("Importar")
-        self.btnNasExport = QPushButton("Exportar")
+        self.btnNasBrowse = PushButton("...")
+        self.btnNasImport = PushButton("Importar")
+        self.btnNasExport = PushButton("Exportar")
         nas_row.addWidget(QLabel("Carpeta NAS:"))
         nas_row.addWidget(self.txtNasDir, 1)
         nas_row.addWidget(self.btnNasBrowse)
@@ -409,9 +410,9 @@ class GroupEditor(QWidget):
         env_form.addWidget(QLabel("Valor:"), 1, 0); env_form.addWidget(self.txtEnvValue, 1, 1)
 
         env_btns = QHBoxLayout()
-        self.btnEnvSave = QPushButton("Guardar variable")
-        self.btnEnvDelete = QPushButton("Eliminar")
-        self.btnEnvClear = QPushButton("Limpiar campos")
+        self.btnEnvSave = PushButton("Guardar variable")
+        self.btnEnvDelete = PushButton("Eliminar")
+        self.btnEnvClear = PushButton("Limpiar campos")
         env_btns.addWidget(self.btnEnvSave)
         env_btns.addWidget(self.btnEnvDelete)
         env_btns.addWidget(self.btnEnvClear)
@@ -423,12 +424,12 @@ class GroupEditor(QWidget):
 
         # Top: selector de grupo
         top = QHBoxLayout()
-        self.cboGroup = QComboBox()
-        self.btnAddGroup = QPushButton("Nuevo grupo")
-        self.btnRenGroup = QPushButton("Renombrar")
-        self.btnDelGroup = QPushButton("Eliminar grupo")
+        self.cboGroup = ComboBox()
+        self.btnAddGroup = PushButton("Nuevo grupo")
+        self.btnRenGroup = PushButton("Renombrar")
+        self.btnDelGroup = PushButton("Eliminar grupo")
         top.addWidget(QLabel("Grupo:"))
-        top.addWidget(combo_with_arrow(self.cboGroup), 1)
+        top.addWidget(self.cboGroup, 1)
         top.addWidget(self.btnAddGroup); top.addWidget(self.btnRenGroup); top.addWidget(self.btnDelGroup)
         main.addLayout(top)
 
@@ -442,11 +443,11 @@ class GroupEditor(QWidget):
 
         # Repos
         self.lstRepos = QListWidget()
-        self.btnAddRepo = QPushButton("Agregar repo")
-        self.btnDelRepo = QPushButton("Quitar repo")
+        self.btnAddRepo = PushButton("Agregar repo")
+        self.btnDelRepo = PushButton("Quitar repo")
         self.txtRepoKey = QLineEdit()
         self.txtRepoPath = QLineEdit()
-        self.btnRepoPath = QPushButton("...")
+        self.btnRepoPath = PushButton("...")
 
         lay_gen.addWidget(QLabel("Repos:"), 0, 0)
         lay_gen.addWidget(self.lstRepos, 1, 0, 3, 1)
@@ -467,7 +468,7 @@ class GroupEditor(QWidget):
 
         # Output base
         self.txtOutputBase = QLineEdit()
-        self.btnOutputBase = QPushButton("...")
+        self.btnOutputBase = PushButton("...")
         out_w = QWidget(); out_h = QHBoxLayout(out_w)
         out_h.setContentsMargins(0,0,0,0); out_h.setSpacing(6)
         out_h.addWidget(self.txtOutputBase, 1); out_h.addWidget(self.btnOutputBase)
@@ -475,8 +476,8 @@ class GroupEditor(QWidget):
 
         # Perfiles
         self.lstProfiles = QListWidget()
-        self.btnAddProfile = QPushButton("Agregar perfil")
-        self.btnDelProfile = QPushButton("Quitar perfil")
+        self.btnAddProfile = PushButton("Agregar perfil")
+        self.btnDelProfile = PushButton("Quitar perfil")
         self.txtProfile = QLineEdit()
 
         lay_gen.addWidget(QLabel("Perfiles:"), 4, 0)
@@ -496,8 +497,8 @@ class GroupEditor(QWidget):
         tab_proj = QWidget(); lay_proj = QVBoxLayout(tab_proj); lay_proj.setSpacing(6)
         proj_top = QHBoxLayout()
         self.lstProjects = QListWidget()
-        self.btnAddProject = QPushButton("Agregar proyecto")
-        self.btnDelProject = QPushButton("Quitar proyecto")
+        self.btnAddProject = PushButton("Agregar proyecto")
+        self.btnDelProject = PushButton("Quitar proyecto")
         proj_top.addWidget(self.lstProjects, 1)
         proj_btns_w = QWidget(); proj_btns = QHBoxLayout(proj_btns_w)
         proj_btns.setContentsMargins(0,0,0,0); proj_btns.setSpacing(6)
@@ -513,8 +514,8 @@ class GroupEditor(QWidget):
         tab_dep = QWidget(); lay_dep = QVBoxLayout(tab_dep); lay_dep.setSpacing(6)
         dep_top = QHBoxLayout()
         self.lstTargets = QListWidget()
-        self.btnAddTarget = QPushButton("Agregar target")
-        self.btnDelTarget = QPushButton("Quitar target")
+        self.btnAddTarget = PushButton("Agregar target")
+        self.btnDelTarget = PushButton("Quitar target")
         dep_top.addWidget(self.lstTargets, 1)
         dep_btns_w = QWidget(); dep_btns = QHBoxLayout(dep_btns_w)
         dep_btns.setContentsMargins(0,0,0,0); dep_btns.setSpacing(6)
@@ -530,7 +531,7 @@ class GroupEditor(QWidget):
 
         # Bottom actions
         bottom = QHBoxLayout()
-        self.btnSave = QPushButton("Guardar"); self.btnClose = QPushButton("Cerrar")
+        self.btnSave = PrimaryPushButton("Guardar"); self.btnClose = PushButton("Cerrar")
         bottom.addStretch(1); bottom.addWidget(self.btnSave); bottom.addWidget(self.btnClose)
         main.addLayout(bottom)
 

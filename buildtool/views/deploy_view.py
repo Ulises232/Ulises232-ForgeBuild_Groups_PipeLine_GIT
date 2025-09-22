@@ -1,20 +1,25 @@
 import threading
 from typing import Optional
 
-from PySide6.QtCore import Qt, QThread, QSignalBlocker, Slot
+from PySide6.QtCore import Qt, QThread, QSignalBlocker, Slot, QStringListModel
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QComboBox,
-    QLineEdit,
-    QTextEdit,
-    QCheckBox,
     QInputDialog,
     QMessageBox,
     QCompleter,
+)
+
+from qfluentwidgets import (
+    ComboBox,
+    EditableComboBox,
+    PrimaryPushButton,
+    PushButton,
+    CheckBox,
+    LineEdit,
+    FluentIcon,
 )
 
 from ..core.bg import run_in_thread
@@ -24,7 +29,7 @@ from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker
 
 from ..ui.multi_select import MultiSelectComboBox
-from ..ui.widgets import combo_with_arrow
+from ..ui.widgets import ForgeLogTextEdit
 from .preset_manager import PresetManagerDialog
 
 
@@ -42,38 +47,38 @@ class DeployView(QWidget):
         row.setSpacing(12)
 
         row.addWidget(QLabel("Grupo:"))
-        self.cboGroup = QComboBox()
+        self.cboGroup = EditableComboBox()
         groups = [g.key for g in (cfg.groups or [])] or ["GLOBAL"]
         for g in groups:
             self.cboGroup.addItem(g, g)
-        self.cboGroupContainer = combo_with_arrow(self.cboGroup)
-        row.addWidget(self.cboGroupContainer)
+        self._update_completer_model(self.cboGroup)
+        row.addWidget(self.cboGroup)
 
         self.lblProject = QLabel("Proyecto:")
-        self.cboProject = QComboBox()
+        self.cboProject = EditableComboBox()
         row.addWidget(self.lblProject)
-        self.cboProjectContainer = combo_with_arrow(self.cboProject)
-        row.addWidget(self.cboProjectContainer)
+        row.addWidget(self.cboProject)
 
         row.addWidget(QLabel("Perfiles:"))
         self.cboProfiles = MultiSelectComboBox("Perfiles…", show_max=2)
         self.cboProfiles.enable_filter("Filtra perfiles…")
-        self.cboProfilesContainer = combo_with_arrow(
-            self.cboProfiles, arrow_tooltip="Seleccionar perfiles"
-        )
-        row.addWidget(self.cboProfilesContainer)
+        self.cboProfiles.setMinimumWidth(220)
+        row.addWidget(self.cboProfiles)
 
         row.addWidget(QLabel("Versión:"))
-        self.txtVersion = QLineEdit()
+        self.txtVersion = LineEdit()
         self.txtVersion.setPlaceholderText("yyyy-mm-dd_nnn")
         self.txtVersion.setFixedWidth(200)
+        self.txtVersion.setProperty("useThemePalette", True)
         row.addWidget(self.txtVersion)
 
-        self.chkHotfix = QCheckBox("Hotfix")
+        self.chkHotfix = CheckBox("Hotfix")
         row.addWidget(self.chkHotfix)
 
-        self.btnDeploySel = QPushButton("Copiar seleccionados")
-        self.btnDeployAll = QPushButton("Copiar TODOS")
+        self.btnDeploySel = PrimaryPushButton("Copiar seleccionados")
+        self.btnDeploySel.setIcon(FluentIcon.SEND.icon())
+        self.btnDeployAll = PrimaryPushButton("Copiar TODOS")
+        self.btnDeployAll.setIcon(FluentIcon.SEND_FILL.icon())
         row.addWidget(self.btnDeploySel)
         row.addWidget(self.btnDeployAll)
 
@@ -83,31 +88,31 @@ class DeployView(QWidget):
         preset_row = QHBoxLayout()
         preset_row.setSpacing(8)
         preset_row.addWidget(QLabel("Presets:"))
-        self.cboPresets = QComboBox()
-        self.cboPresetsContainer = combo_with_arrow(self.cboPresets)
-        preset_row.addWidget(self.cboPresetsContainer)
-        self.btnApplyPreset = QPushButton("Aplicar")
+        self.cboPresets = ComboBox()
+        preset_row.addWidget(self.cboPresets)
+        self.btnApplyPreset = PushButton("Aplicar")
         preset_row.addWidget(self.btnApplyPreset)
-        self.btnSavePreset = QPushButton("Guardar preset…")
+        self.btnSavePreset = PushButton("Guardar preset…")
+        self.btnSavePreset.setIcon(FluentIcon.SAVE.icon())
         preset_row.addWidget(self.btnSavePreset)
-        self.btnManagePresets = QPushButton("Administrar…")
+        self.btnManagePresets = PushButton("Administrar…")
+        self.btnManagePresets.setIcon(FluentIcon.SETTING.icon())
         preset_row.addWidget(self.btnManagePresets)
         preset_row.addStretch(1)
         lay.addLayout(preset_row)
 
-        self.log = QTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setStyleSheet("font-family:Consolas,monospace;")
-        self.log.setMinimumHeight(280)
+        self.log = ForgeLogTextEdit("deployLog", minimum_height=280)
         lay.addWidget(self.log)
 
         footer = QHBoxLayout()
         footer.setContentsMargins(0, 0, 0, 0)
         footer.setSpacing(12)
         footer.addStretch(1)
-        self.btnClearLog = QPushButton("Limpiar consola")
+        self.btnClearLog = PushButton("Limpiar consola")
+        self.btnClearLog.setIcon(FluentIcon.DELETE.icon())
         footer.addWidget(self.btnClearLog)
-        self.btnCancel = QPushButton("Cancelar pipeline")
+        self.btnCancel = PushButton("Cancelar pipeline")
+        self.btnCancel.setIcon(FluentIcon.CANCEL.icon())
         self.btnCancel.setEnabled(False)
         footer.addWidget(self.btnCancel)
         lay.addLayout(footer)
@@ -135,13 +140,18 @@ class DeployView(QWidget):
         val = self.cboGroup.currentData()
         return None if val == "GLOBAL" else val
 
-    def _setup_quick_filter(self, combo: QComboBox) -> None:
-        combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.NoInsert)
-        completer: QCompleter = combo.completer()
+    def _setup_quick_filter(self, combo: EditableComboBox) -> None:
+        completer = QCompleter(combo)
         completer.setCompletionMode(QCompleter.PopupCompletion)
         completer.setFilterMode(Qt.MatchContains)
-        combo.lineEdit().setReadOnly(False)
+        combo.setCompleter(completer)
+
+    def _update_completer_model(self, combo: EditableComboBox) -> None:
+        completer = combo.completer()
+        if not completer:
+            return
+        model = QStringListModel([combo.itemText(i) for i in range(combo.count())], combo)
+        completer.setModel(model)
 
     @Slot()
     def _refresh_presets(self) -> None:
@@ -265,16 +275,15 @@ class DeployView(QWidget):
                 self.cboProject.addItem(k, k)
             show_proj = len(projects) > 1
             self.lblProject.setVisible(show_proj)
-            self.cboProjectContainer.setVisible(show_proj)
             self.cboProject.setVisible(show_proj)
         else:
             projects = [p.key for p in self.cfg.projects]
             for k in projects:
                 self.cboProject.addItem(k, k)
             self.lblProject.setVisible(True)
-            self.cboProjectContainer.setVisible(True)
             self.cboProject.setVisible(True)
 
+        self._update_completer_model(self.cboProject)
         self.refresh_project()
 
     @Slot(int)

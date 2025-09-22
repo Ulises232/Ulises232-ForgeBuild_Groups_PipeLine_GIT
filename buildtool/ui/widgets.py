@@ -1,77 +1,56 @@
-"""Shared UI widgets and helpers for ForgeBuild."""
+"""Reusable Fluent-friendly widget helpers."""
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, QSize, QObject, QEvent, Slot
-from PySide6.QtWidgets import (
-    QComboBox,
-    QHBoxLayout,
-    QSizePolicy,
-    QToolButton,
-    QWidget,
-)
+from PySide6.QtGui import QFont, QFontDatabase
+from qfluentwidgets import TextEdit
 
-from .icons import get_icon
+__all__ = ["ForgeLogTextEdit", "apply_monospace_font"]
 
 
-class _ComboSync(QObject):
-    """Synchronize combo enabled state with its attached arrow button."""
-
-    def __init__(self, combo: QComboBox, arrow: QToolButton) -> None:
-        super().__init__(combo)
-        self._combo = combo
-        self._arrow = arrow
-        combo.installEventFilter(self)
-
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt signature
-        if obj is self._combo and event.type() == QEvent.EnabledChange:
-            self._arrow.setEnabled(self._combo.isEnabled())
-        return super().eventFilter(obj, event)
+def _monospace_font(point_size: int = 12) -> QFont:
+    font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+    if font.pointSize() <= 0:
+        font.setPointSize(point_size)
+    else:
+        font.setPointSize(point_size)
+    font.setStyleStrategy(QFont.PreferDefault)
+    return font
 
 
-def combo_with_arrow(combo: QComboBox, *, arrow_tooltip: Optional[str] = None) -> QWidget:
-    """Wrap a :class:`QComboBox` with a clickable arrow button."""
+class ForgeLogTextEdit(TextEdit):
+    """Text edit preconfigured for ForgeBuild log viewers."""
 
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(6)
-    layout.addWidget(combo, 1)
-
-    arrow = QToolButton(container)
-    arrow.setIcon(get_icon("chevron-down"))
-    arrow.setAutoRaise(True)
-    arrow.setCursor(Qt.PointingHandCursor)
-    arrow.setFixedSize(26, 24)
-    arrow.setIconSize(QSize(16, 16))
-    arrow.setToolButtonStyle(Qt.ToolButtonIconOnly)
-    if arrow_tooltip:
-        arrow.setToolTip(arrow_tooltip)
-    arrow.setEnabled(combo.isEnabled())
-
-    @Slot()
-    def _show_popup() -> None:
-        combo.showPopup()
-
-    arrow.clicked.connect(_show_popup)
-    layout.addWidget(arrow)
-
-    container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-    setattr(combo, "_arrow_button", arrow)
-    _ComboSync(combo, arrow)
-    return container
+    def __init__(
+        self,
+        object_name: Optional[str] = None,
+        parent=None,
+        *,
+        wrap_mode: Optional[TextEdit.LineWrapMode] = TextEdit.NoWrap,
+        minimum_height: Optional[int] = None,
+        point_size: int = 12,
+    ) -> None:
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setProperty("isAcrylic", False)
+        self.setProperty("useThemePalette", True)
+        if object_name:
+            self.setObjectName(object_name)
+        if wrap_mode is not None:
+            try:
+                self.setLineWrapMode(wrap_mode)
+            except Exception:
+                pass
+        self.setFont(_monospace_font(point_size))
+        if minimum_height:
+            self.setMinimumHeight(minimum_height)
 
 
-def set_combo_enabled(combo: QComboBox, enabled: bool) -> None:
-    """Enable/disable a combo and its extra arrow button."""
+def apply_monospace_font(widget, point_size: int = 12) -> None:
+    """Apply a monospace font to any QTextEdit/TextEdit."""
 
     try:
-        combo.setEnabled(enabled)
-    finally:
-        arrow = getattr(combo, "_arrow_button", None)
-        if isinstance(arrow, QToolButton):
-            arrow.setEnabled(enabled)
-
-
-__all__ = ["combo_with_arrow", "set_combo_enabled"]
+        widget.setFont(_monospace_font(point_size))
+    except Exception:
+        pass

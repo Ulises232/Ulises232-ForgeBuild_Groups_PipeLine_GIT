@@ -9,18 +9,18 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QComboBox,
     QDateEdit,
     QTableWidget,
     QTableWidgetItem,
-    QTextEdit,
     QFileDialog,
     QMessageBox,
 )
 
+from qfluentwidgets import ComboBox, PushButton, PrimaryPushButton, FluentIcon
+
 from ..core.config import Config
 from ..core.pipeline_history import PipelineHistory
+from ..ui.widgets import ForgeLogTextEdit
 
 
 class PipelineHistoryView(QWidget):
@@ -40,14 +40,14 @@ class PipelineHistoryView(QWidget):
         filter_row.setSpacing(8)
 
         filter_row.addWidget(QLabel("Tipo:"))
-        self.cboPipeline = QComboBox()
+        self.cboPipeline = ComboBox()
         self.cboPipeline.addItem("Todos", None)
         self.cboPipeline.addItem("Build", "build")
         self.cboPipeline.addItem("Deploy", "deploy")
         filter_row.addWidget(self.cboPipeline)
 
         filter_row.addWidget(QLabel("Estado:"))
-        self.cboStatus = QComboBox()
+        self.cboStatus = ComboBox()
         self.cboStatus.addItem("Todos", None)
         self.cboStatus.addItem("Exitoso", "success")
         self.cboStatus.addItem("Falló", "error")
@@ -55,14 +55,14 @@ class PipelineHistoryView(QWidget):
         filter_row.addWidget(self.cboStatus)
 
         filter_row.addWidget(QLabel("Grupo:"))
-        self.cboGroup = QComboBox()
+        self.cboGroup = ComboBox()
         self.cboGroup.addItem("Todos", None)
         for grp in cfg.groups:
             self.cboGroup.addItem(grp.key, grp.key)
         filter_row.addWidget(self.cboGroup)
 
         filter_row.addWidget(QLabel("Proyecto:"))
-        self.cboProject = QComboBox()
+        self.cboProject = ComboBox()
         filter_row.addWidget(self.cboProject)
 
         filter_row.addWidget(QLabel("Desde:"))
@@ -77,11 +77,14 @@ class PipelineHistoryView(QWidget):
         self.dtEnd.setDate(QDate.currentDate())
         filter_row.addWidget(self.dtEnd)
 
-        self.btnRefresh = QPushButton("Refrescar")
+        self.btnRefresh = PrimaryPushButton("Refrescar")
+        self.btnRefresh.setIcon(FluentIcon.SYNC.icon())
         filter_row.addWidget(self.btnRefresh)
-        self.btnExport = QPushButton("Exportar CSV…")
+        self.btnExport = PushButton("Exportar CSV…")
+        self.btnExport.setIcon(FluentIcon.SAVE.icon())
         filter_row.addWidget(self.btnExport)
-        self.btnClear = QPushButton("Limpiar historial")
+        self.btnClear = PushButton("Limpiar historial")
+        self.btnClear.setIcon(FluentIcon.CLEAR_SELECTION.icon())
         filter_row.addWidget(self.btnClear)
         filter_row.addStretch(1)
 
@@ -110,9 +113,7 @@ class PipelineHistoryView(QWidget):
         layout.addWidget(self.table, 3)
 
         layout.addWidget(QLabel("Log del pipeline:"))
-        self.txtLogs = QTextEdit()
-        self.txtLogs.setReadOnly(True)
-        self.txtLogs.setMinimumHeight(160)
+        self.txtLogs = ForgeLogTextEdit("historyLog", minimum_height=160, wrap_mode=None)
         layout.addWidget(self.txtLogs, 1)
 
         self._global_project_keys = {proj.key for proj in cfg.projects}

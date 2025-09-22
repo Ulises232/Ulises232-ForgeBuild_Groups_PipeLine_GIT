@@ -1,15 +1,14 @@
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QApplication,
-    QHBoxLayout,
-    QLabel,
-    QSplitter,
-    QTabWidget,
-    QToolButton,
-    QVBoxLayout,
-    QWidget,
+from PySide6.QtWidgets import QWidget
+
+from qfluentwidgets import (
+    FluentTitleBar,
+    FluentWindow,
+    NavigationInterface,
+    NavigationItemPosition,
+    PrimaryPushButton,
 )
 
 from buildtool import __version__
@@ -25,86 +24,44 @@ from .ui.theme import apply_theme, ThemeMode
 TAB_PIPELINE = "Pipeline"
 TAB_GIT = "Repos (Git)"
 
-class MainWindow(QWidget):
+_PIPELINE_ROUTE = "pipelineView"
+_GIT_ROUTE = "gitView"
+
+
+class MainWindow(FluentWindow):
     def __init__(self):
         super().__init__()
         self.setObjectName("MainWindow")
         self.setWindowTitle(f"ForgeBuild (Grupos) v{__version__}")
         self.resize(1280, 780)
+        self.setWindowIcon(get_icon("app"))
+
         self.cfg: Config = load_config()
         self._groups_win: Optional[GroupsWizard] = None
         self._ensure_theme()
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(12)
-
-        splitter = QSplitter(Qt.Vertical)
-        splitter.setObjectName("mainSplitter")
-        splitter.setHandleWidth(2)
-        root.addWidget(splitter)
-
-        header_widget = QWidget()
-        header_widget.setObjectName("headerPanel")
-        header_widget.setMaximumHeight(96)
-        header_widget.setMinimumHeight(80)
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(16, 16, 16, 16)
-        header_layout.setSpacing(12)
-
-        icon_label = QLabel()
-        icon_label.setPixmap(get_icon("app").pixmap(48, 48))
-        header_layout.addWidget(icon_label)
-
-        title_block = QVBoxLayout()
-        title_block.setContentsMargins(0, 0, 0, 0)
-        title_block.setSpacing(4)
-        title = QLabel("ForgeBuild")
-        title.setProperty("role", "title")
-        subtitle = QLabel(f"Grupos — v{__version__}")
-        subtitle.setProperty("role", "subtitle")
-        title_block.addWidget(title)
-        title_block.addWidget(subtitle)
-        header_layout.addLayout(title_block, 1)
-
-        self.btnGroups = QToolButton()
-        self.btnGroups.setText("Config/Wizard")
-        self.btnGroups.setIcon(get_icon("config"))
-        self.btnGroups.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        self.btnGroups.setAutoRaise(True)
-        header_layout.addWidget(self.btnGroups)
-
-        splitter.addWidget(header_widget)
-
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(12)
-
-        self.tabs = QTabWidget()
-        self.tabs.setTabPosition(QTabWidget.North)
-        self.tabs.setMovable(False)
-        content_layout.addWidget(self.tabs)
-
-        self.pipeline = PipelineView(self.cfg, self.reload_config)
-        self.git = GitView(self.cfg, self)
-        self.tabs.addTab(self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
-        self.tabs.addTab(self.git, get_icon("git"), TAB_GIT)
-
-        splitter.addWidget(content)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([header_widget.sizeHint().height(), 640])
+        self._setup_title_bar()
+        self._setup_navigation()
+        self._load_interfaces()
         self.btnGroups.clicked.connect(self.open_groups)
 
     def reload_config(self):
-        self.cfg = load_config(); idx = self.tabs.currentIndex()
-        self.tabs.removeTab(1); self.git.deleteLater()
-        self.tabs.removeTab(0); self.pipeline.deleteLater()
-        self.pipeline = PipelineView(self.cfg, self.reload_config); self.git = GitView(self.cfg, self)
-        self.tabs.insertTab(0, self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
-        self.tabs.insertTab(1, self.git, get_icon("git"), TAB_GIT)
-        self.tabs.setCurrentIndex(idx if idx < self.tabs.count() else 0)
+        current_widget = self.stackedWidget.currentWidget()
+        current_route = current_widget.objectName() if current_widget else _PIPELINE_ROUTE
+
+        self.cfg = load_config()
+
+        self._remove_interface(self.pipeline)
+        self._remove_interface(self.git)
+
+        self.pipeline = self._create_pipeline_view()
+        self.git = self._create_git_view()
+        self._register_interfaces()
+
+        target_route = current_route if current_route in (self.pipeline.objectName(), self.git.objectName()) else _PIPELINE_ROUTE
+        target_widget = self._route_to_widget(target_route)
+        if target_widget is not None:
+            self.switchTo(target_widget)
 
     def open_groups(self):
         if self._groups_win is None:
@@ -133,3 +90,72 @@ class MainWindow(QWidget):
         """Expose theme switching for future UI toggles."""
 
         return apply_theme(mode)
+
+    # --- Fluent UI helpers -------------------------------------------------
+
+    def _setup_title_bar(self) -> None:
+        self.btnGroups = PrimaryPushButton("Config/Wizard", self)
+        self.btnGroups.setObjectName("configWizardButton")
+        self.btnGroups.setIcon(get_icon("config"))
+        self.btnGroups.setCursor(Qt.PointingHandCursor)
+
+        try:
+            self.setTitleBar(FluentTitleBar(self))
+        except Exception:
+            return
+
+        if not hasattr(self, "titleBar"):
+            return
+
+        self.titleBar.hBoxLayout.insertStretch(2, 1)
+        self.titleBar.hBoxLayout.insertWidget(3, self.btnGroups, 0, Qt.AlignRight | Qt.AlignVCenter)
+
+    def _setup_navigation(self) -> None:
+        if not isinstance(getattr(self, "navigationInterface", None), NavigationInterface):
+            self.navigationInterface = NavigationInterface(self, showMenuButton=True, showReturnButton=False)
+            self.hBoxLayout.insertWidget(0, self.navigationInterface)
+
+        self.navigationInterface.setReturnButtonVisible(False)
+        self.navigationInterface.setMinimumExpandWidth(320)
+        self.navigationInterface.setCollapsible(True)
+
+    def _load_interfaces(self) -> None:
+        self.pipeline = self._create_pipeline_view()
+        self.git = self._create_git_view()
+        self._register_interfaces()
+
+    def _register_interfaces(self) -> None:
+        self._routes = {}
+
+        for widget, icon_name, label in (
+            (self.pipeline, "pipeline", TAB_PIPELINE),
+            (self.git, "git", TAB_GIT),
+        ):
+            if widget is None:
+                continue
+
+            widget.setObjectName(_PIPELINE_ROUTE if widget is self.pipeline else _GIT_ROUTE)
+            self.addSubInterface(widget, get_icon(icon_name), label, position=NavigationItemPosition.TOP)
+            self._routes[widget.objectName()] = widget
+
+    def _create_pipeline_view(self) -> PipelineView:
+        return PipelineView(self.cfg, self.reload_config)
+
+    def _create_git_view(self) -> GitView:
+        return GitView(self.cfg, self)
+
+    def _remove_interface(self, widget: Optional[QWidget]) -> None:
+        if widget is None:
+            return
+        try:
+            widget.close()
+        except Exception:
+            pass
+        try:
+            self.removeInterface(widget, isDelete=True)
+        except Exception:
+            widget.setParent(None)
+            widget.deleteLater()
+
+    def _route_to_widget(self, route: str) -> Optional[QWidget]:
+        return getattr(self, "_routes", {}).get(route)

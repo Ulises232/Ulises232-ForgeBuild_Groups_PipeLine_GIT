@@ -9,11 +9,12 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QHBoxLayout,
-    QPushButton,
     QMessageBox,
     QInputDialog,
     QLabel,
 )
+
+from qfluentwidgets import PushButton, FluentIcon
 
 from ..core.config import Config, PipelinePreset
 
@@ -37,9 +38,12 @@ class PresetManagerDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        self.btnRename = QPushButton("Renombrar…")
-        self.btnDelete = QPushButton("Eliminar")
-        btn_close = QPushButton("Cerrar")
+        self.btnRename = PushButton("Renombrar…")
+        self.btnRename.setIcon(FluentIcon.EDIT.icon())
+        self.btnDelete = PushButton("Eliminar")
+        self.btnDelete.setIcon(FluentIcon.DELETE.icon())
+        btn_close = PushButton("Cerrar")
+        btn_close.setIcon(FluentIcon.CANCEL.icon())
         btn_row.addWidget(self.btnRename)
         btn_row.addWidget(self.btnDelete)
         btn_row.addStretch(1)

@@ -5,19 +5,18 @@ from typing import List, Optional
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
+from qfluentwidgets import ComboBox, PushButton
+
 from ..core.branch_store import load_nas_activity_log
-from ..ui.widgets import combo_with_arrow
 
 
 class NasActivityLogView(QWidget):
@@ -39,21 +38,21 @@ class NasActivityLogView(QWidget):
         filters.setSpacing(6)
 
         filters.addWidget(QLabel("Grupo:"))
-        self.cboGroup = QComboBox()
+        self.cboGroup = ComboBox()
         self.cboGroup.addItem("Todos", userData=None)
-        filters.addWidget(combo_with_arrow(self.cboGroup))
+        filters.addWidget(self.cboGroup)
 
         filters.addWidget(QLabel("Proyecto:"))
-        self.cboProject = QComboBox()
+        self.cboProject = ComboBox()
         self.cboProject.addItem("Todos", userData=None)
-        filters.addWidget(combo_with_arrow(self.cboProject))
+        filters.addWidget(self.cboProject)
 
         filters.addWidget(QLabel("Buscar:"))
         self.txtSearch = QLineEdit()
         self.txtSearch.setPlaceholderText("Usuario, rama, acción o mensaje")
         filters.addWidget(self.txtSearch, 1)
 
-        self.btnRefresh = QPushButton("Refrescar")
+        self.btnRefresh = PushButton("Refrescar")
         filters.addWidget(self.btnRefresh)
         self.lblCount = QLabel("0 registros")
         filters.addWidget(self.lblCount)

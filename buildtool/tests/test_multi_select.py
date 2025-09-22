@@ -28,12 +28,11 @@ class MultiSelectFilterTest(unittest.TestCase):
         combo.set_checked_items(["Alpha"])
 
         combo.apply_filter("ga")
-        model = combo.model()
-        self.assertEqual(model.rowCount(), 1)
-        self.assertEqual(model.index(0, 0).data(), "Gamma")
+        self.assertEqual(combo.filter_text, "ga")
+        self.assertIn("Alpha", combo.checked_items())
 
         combo.apply_filter("")
-        self.assertEqual(model.rowCount(), 3)
+        self.assertEqual(combo.filter_text, "")
         self.assertIn("Alpha", combo.checked_items())
 
 

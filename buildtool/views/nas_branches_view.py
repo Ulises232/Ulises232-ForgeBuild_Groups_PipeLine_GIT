@@ -9,20 +9,27 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
+    QDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QSplitter,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+)
+
+from qfluentwidgets import (
+    ComboBox,
+    CheckBox,
+    Dialog,
+    InfoBar,
+    InfoBarPosition,
+    PrimaryPushButton,
+    PushButton,
+    ScrollArea,
+    SettingCardGroup,
 )
 
 from ..core.branch_store import (
@@ -33,7 +40,6 @@ from ..core.branch_store import (
     record_activity,
     save_nas_index,
 )
-from ..ui.widgets import combo_with_arrow
 
 
 class NasBranchesView(QWidget):
@@ -57,31 +63,39 @@ class NasBranchesView(QWidget):
         filters.setSpacing(6)
 
         filters.addWidget(QLabel("Grupo:"))
-        self.cboGroup = QComboBox()
+        self.cboGroup = ComboBox()
         self.cboGroup.addItem("Todos", userData=None)
-        filters.addWidget(combo_with_arrow(self.cboGroup))
+        filters.addWidget(self.cboGroup)
 
         filters.addWidget(QLabel("Proyecto:"))
-        self.cboProject = QComboBox()
+        self.cboProject = ComboBox()
         self.cboProject.addItem("Todos", userData=None)
-        filters.addWidget(combo_with_arrow(self.cboProject))
+        filters.addWidget(self.cboProject)
 
         filters.addWidget(QLabel("Buscar:"))
         self.txtSearch = QLineEdit()
         self.txtSearch.setPlaceholderText("Nombre de rama o usuario")
         filters.addWidget(self.txtSearch, 1)
 
-        self.btnRefresh = QPushButton("Refrescar")
+        self.btnRefresh = PushButton("Refrescar")
         filters.addWidget(self.btnRefresh)
-        self.btnNew = QPushButton("Nuevo registro")
+        self.btnNew = PrimaryPushButton("Nuevo registro")
         filters.addWidget(self.btnNew)
 
         root.addLayout(filters)
 
-        splitter = QSplitter()
-        splitter.setOrientation(Qt.Horizontal)
-        root.addWidget(splitter, 1)
+        scroll = ScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        content_layout = QVBoxLayout(container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
 
+        tree_group = SettingCardGroup("Registros de ramas", container)
+        tree_card = QWidget(tree_group)
+        tree_layout = QVBoxLayout(tree_card)
+        tree_layout.setContentsMargins(16, 16, 16, 16)
+        tree_layout.setSpacing(8)
         self.tree = QTreeWidget()
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(False)
@@ -95,12 +109,16 @@ class NasBranchesView(QWidget):
             "Actualizado",
             "Usuario",
         ])
-        splitter.addWidget(self.tree)
+        tree_layout.addWidget(self.tree)
+        tree_group.addSettingCard(tree_card)
+        content_layout.addWidget(tree_group)
 
-        form_box = QGroupBox("Detalle")
-        form_layout = QFormLayout(form_box)
+        detail_group = SettingCardGroup("Detalle", container)
+        detail_card = QWidget(detail_group)
+        form_layout = QFormLayout(detail_card)
         form_layout.setLabelAlignment(Qt.AlignLeft)
         form_layout.setFormAlignment(Qt.AlignTop)
+        form_layout.setContentsMargins(16, 16, 16, 16)
 
         self.txtGroup = QLineEdit()
         form_layout.addRow("Grupo", self.txtGroup)
@@ -109,9 +127,9 @@ class NasBranchesView(QWidget):
         self.txtBranch = QLineEdit()
         form_layout.addRow("Rama", self.txtBranch)
 
-        self.chkLocal = QCheckBox("Existe local")
+        self.chkLocal = CheckBox("Existe local")
         form_layout.addRow("Local", self.chkLocal)
-        self.chkOrigin = QCheckBox("Existe origin")
+        self.chkOrigin = CheckBox("Existe origin")
         form_layout.addRow("Origin", self.chkOrigin)
         self.txtMerge = QLineEdit()
         form_layout.addRow("Estado merge", self.txtMerge)
@@ -126,17 +144,20 @@ class NasBranchesView(QWidget):
 
         buttons = QHBoxLayout()
         buttons.setSpacing(6)
-        self.btnSave = QPushButton("Guardar cambios")
-        self.btnDelete = QPushButton("Eliminar")
-        self.btnReset = QPushButton("Descartar")
+        self.btnSave = PrimaryPushButton("Guardar cambios")
+        self.btnDelete = PushButton("Eliminar")
+        self.btnReset = PushButton("Descartar")
         buttons.addWidget(self.btnSave)
         buttons.addWidget(self.btnDelete)
         buttons.addWidget(self.btnReset)
         form_layout.addRow(buttons)
 
-        splitter.addWidget(form_box)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        detail_group.addSettingCard(detail_card)
+        content_layout.addWidget(detail_group)
+        content_layout.addStretch(1)
+
+        scroll.setWidget(container)
+        root.addWidget(scroll, 1)
 
         self.cboGroup.currentIndexChanged.connect(self._update_projects_filter)
         self.cboGroup.currentIndexChanged.connect(self._refresh_tree)
@@ -162,7 +183,7 @@ class NasBranchesView(QWidget):
             self.tree.setEnabled(False)
             for btn in (self.btnNew, self.btnSave, self.btnDelete, self.btnReset):
                 btn.setEnabled(False)
-            QMessageBox.warning(self, "NAS no disponible", str(exc))
+            self._notify("NAS no disponible", str(exc), "warning")
             self._populate_filters()
             self._refresh_tree()
             self._clear_form()
@@ -312,7 +333,7 @@ class NasBranchesView(QWidget):
         project = (self.txtProject.text() or "").strip() or None
         branch = (self.txtBranch.text() or "").strip()
         if not branch:
-            QMessageBox.warning(self, "NAS", "El nombre de la rama es obligatorio.")
+            self._notify("NAS", "El nombre de la rama es obligatorio.", "warning")
             return
         user = (self.txtUser.text() or "").strip() or self._user_default
 
@@ -351,10 +372,10 @@ class NasBranchesView(QWidget):
             save_nas_index(self._index)
             record_activity(action, rec, targets=("local", "nas"), message="NAS manual")
         except NasUnavailableError as exc:
-            QMessageBox.warning(self, "NAS", str(exc))
+            self._notify("NAS", str(exc), "warning")
             return
         except Exception as exc:
-            QMessageBox.critical(self, "NAS", f"No se pudo guardar el índice: {exc}")
+            self._notify("NAS", f"No se pudo guardar el índice: {exc}", "error")
             return
         self._current_key = new_key
         self._populate_filters()
@@ -376,22 +397,20 @@ class NasBranchesView(QWidget):
         if not self._current_key or self._current_key not in self._index:
             return
         rec = self._index[self._current_key]
-        confirm = QMessageBox.question(
-            self,
+        if not self._confirm(
             "NAS",
             f"¿Eliminar la rama '{rec.branch}' del proyecto '{rec.project or ''}'?",
-        )
-        if confirm != QMessageBox.Yes:
+        ):
             return
         self._index.pop(self._current_key, None)
         try:
             save_nas_index(self._index)
             record_activity("manual_delete", rec, targets=("local", "nas"), message="NAS manual")
         except NasUnavailableError as exc:
-            QMessageBox.warning(self, "NAS", str(exc))
+            self._notify("NAS", str(exc), "warning")
             return
         except Exception as exc:
-            QMessageBox.critical(self, "NAS", f"No se pudo eliminar el registro: {exc}")
+            self._notify("NAS", f"No se pudo eliminar el registro: {exc}", "error")
             return
         self._current_key = None
         self._populate_filters()
@@ -399,6 +418,32 @@ class NasBranchesView(QWidget):
         self._clear_form()
 
     # ----- utils -----
+    def _notify(self, title: str, message: str, level: str = "info") -> None:
+        mapping = {
+            "info": InfoBar.info,
+            "warning": InfoBar.warning,
+            "error": InfoBar.error,
+            "success": InfoBar.success,
+        }
+        method = mapping.get(level, InfoBar.info)
+        try:
+            method(
+                title=title,
+                content=message,
+                isClosable=True,
+                duration=5000,
+                position=InfoBarPosition.TOP_RIGHT,
+                parent=self,
+            )
+        except Exception:
+            pass
+
+    def _confirm(self, title: str, message: str) -> bool:
+        dialog = Dialog(title, message, self)
+        dialog.yesButton.setText("Aceptar")
+        dialog.cancelButton.setText("Cancelar")
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
     @staticmethod
     def _fmt_ts(ts: int) -> str:
         if not ts:

@@ -21,6 +21,7 @@ El objetivo es centralizar la configuración en un YAML único por usuario y ofr
 El proyecto depende de:
 
 - `PySide6` 6.8.1
+- `PySide6-Fluent-Widgets` 1.8.7 (módulo `qfluentwidgets`)
 - `PyYAML` 6.0.2
 - `rich` 13.7.1
 - `pydantic` 1.10.14

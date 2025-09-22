@@ -4,6 +4,22 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.3.5] - 2025-09-29
+### Cambiado
+- `requirements.txt` ahora fija `PySide6-Fluent-Widgets (qfluentwidgets)` en la versión 1.8.7 para alinearse con PySide6 6.8.1 y evitar instalaciones incompatibles.
+- El script `build_exe.bat` recopila automáticamente los recursos de `qfluentwidgets` al generar el ejecutable con PyInstaller y deja de adjuntar las hojas de estilo QSS legadas.
+
+- La inicialización de la UI aplica los temas de QFluentWidgets mediante `setTheme`/`setThemeColor` y registra los recursos desde `initialize_fluent_widgets` para mantener la detección automática del modo del sistema.
+- La ventana principal hereda ahora de `FluentWindow`, usa la `NavigationInterface` lateral para las vistas de Pipeline/Git y expone el acceso a “Config/Wizard” como botón primario en la barra de título.
+- La `PipelineView` reemplaza las pestañas clásicas por un `Pivot` de QFluentWidgets con subpáginas Build/Deploy/Historial envueltas en áreas desplazables y un encabezado renovado con `SubtitleLabel`/`StrongBodyLabel`.
+- Las vistas de Build/Deploy/Historial migran sus combos, botones y selectores a componentes Fluent (incluyendo un nuevo `MultiSelectComboBox` sin QSS) y armonizan los visores de log con la paleta acrílica desactivada.
+- Las vistas Git, NAS y el asistente de grupos adoptan combos/botones/checkboxes Fluent eliminando `combo_with_arrow`, y los campos de versión junto con los logs usan la paleta dinámica del tema.
+- Git y los historiales local/NAS ahora organizan sus secciones con `SettingCardGroup`, pivot Fluent y `ScrollArea` del framework, reemplazando `QGroupBox`/`QSplitter` y mostrando avisos mediante `InfoBar` y diálogos Fluent.
+- Se retiraron los archivos QSS y los iconos redundantes, sustituyéndolos por el helper `ForgeLogTextEdit` y fuentes monoespaciadas aplicadas desde componentes Fluent sin estilos en línea.
+
+### Corregido
+- El README documenta la nueva dependencia, manteniendo actualizada la lista de prerrequisitos.
+
 ## [1.3.4] - 2025-09-28
 ### Corregido
 - La interfaz Git y la vista de ramas NAS ahora muestran advertencias claras y continúan en modo offline cuando la NAS no está disponible, evitando cierres inesperados.

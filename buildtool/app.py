@@ -134,6 +134,9 @@ def main():
     app = QApplication.instance() or QApplication(sys.argv)
     log("== app.main: QApplication ready ==")
 
+    from buildtool.ui.theme import initialize_fluent_widgets
+    initialize_fluent_widgets(app)
+
     # (Opcional) Volcado extra en crash_fh para uncaught del main
     def _sys_excepthook(exctype, value, tb):
         msg = "[UNCAUGHT] " + "".join(traceback.format_exception(exctype, value, tb))
