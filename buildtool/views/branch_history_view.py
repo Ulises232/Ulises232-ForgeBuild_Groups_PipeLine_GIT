@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 import getpass
 import os
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Literal, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
@@ -25,21 +23,68 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.branch_store import BranchRecord, Index, load_index, save_index, record_activity
+from ..core.branch_store import (
+    BranchRecord,
+    Index,
+    NasUnavailableError,
+    load_index,
+    load_nas_index,
+    record_activity,
+    save_index,
+    save_nas_index,
+)
 from ..ui.widgets import combo_with_arrow
-from .nas_branches_view import SignalBlocker
 
 
-class LocalBranchesView(QWidget):
-    """Permite consultar y editar el historial de ramas almacenado localmente (SQLite)."""
+@dataclass(frozen=True)
+class BranchHistoryBackend:
+    """Configura el origen de datos para la vista de historial de ramas."""
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    storage: Literal["local", "nas"]
+    title: str
+    load: Callable[[], Index]
+    save: Callable[[Index], None]
+    activity_targets: Sequence[str]
+    activity_message: str
+    unavailable_exceptions: Tuple[type[BaseException], ...] = ()
+
+    def is_unavailable_error(self, exc: BaseException) -> bool:
+        return bool(self.unavailable_exceptions) and isinstance(exc, self.unavailable_exceptions)
+
+
+class BranchHistoryView(QWidget):
+    """Permite consultar y editar el historial de ramas tanto local como en NAS."""
+
+    def __init__(self, storage: Literal["local", "nas"], parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self.backend = self._build_backend(storage)
         self._index: Index = {}
         self._current_key: Optional[str] = None
         self._user_default = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
         self._setup_ui()
         self._load_index()
+
+    def _build_backend(self, storage: Literal["local", "nas"]) -> BranchHistoryBackend:
+        if storage == "local":
+            return BranchHistoryBackend(
+                storage="local",
+                title="Historial local",
+                load=load_index,
+                save=save_index,
+                activity_targets=("local",),
+                activity_message="Local manual",
+            )
+        if storage == "nas":
+            return BranchHistoryBackend(
+                storage="nas",
+                title="NAS",
+                load=load_nas_index,
+                save=save_nas_index,
+                activity_targets=("local", "nas"),
+                activity_message="NAS manual",
+                unavailable_exceptions=(NasUnavailableError,),
+            )
+        raise ValueError(f"Storage '{storage}' is not supported")
 
     # ----- setup -----
     def _setup_ui(self) -> None:
@@ -79,16 +124,18 @@ class LocalBranchesView(QWidget):
         self.tree = QTreeWidget()
         self.tree.setAlternatingRowColors(True)
         self.tree.setRootIsDecorated(False)
-        self.tree.setHeaderLabels([
-            "Rama",
-            "Grupo",
-            "Proyecto",
-            "Local",
-            "Origin",
-            "Merge",
-            "Actualizado",
-            "Usuario",
-        ])
+        self.tree.setHeaderLabels(
+            [
+                "Rama",
+                "Grupo",
+                "Proyecto",
+                "Local",
+                "Origin",
+                "Merge",
+                "Actualizado",
+                "Usuario",
+            ]
+        )
         splitter.addWidget(self.tree)
 
         form_box = QGroupBox("Detalle")
@@ -132,6 +179,8 @@ class LocalBranchesView(QWidget):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
 
+        self._togglable_controls = (self.tree, self.btnNew, self.btnSave, self.btnDelete, self.btnReset)
+
         self.cboGroup.currentIndexChanged.connect(self._update_projects_filter)
         self.cboGroup.currentIndexChanged.connect(self._refresh_tree)
         self.cboProject.currentIndexChanged.connect(self._refresh_tree)
@@ -147,11 +196,32 @@ class LocalBranchesView(QWidget):
     @Slot()
     @Slot(bool)
     def _load_index(self, *_args: object) -> None:
-        self._index = load_index()
+        try:
+            self._index = self.backend.load()
+        except Exception as exc:  # noqa: BLE001 - Queremos distinguir indisponibilidad NAS
+            if self.backend.is_unavailable_error(exc):
+                self._handle_unavailable(exc)
+                return
+            QMessageBox.critical(self, self.backend.title, f"No se pudo cargar el índice: {exc}")
+            self._index = {}
+        self._set_controls_enabled(True)
         self._current_key = None
         self._populate_filters()
         self._refresh_tree()
         self._clear_form()
+
+    def _handle_unavailable(self, exc: BaseException) -> None:
+        self._index = {}
+        self._current_key = None
+        self._set_controls_enabled(False)
+        QMessageBox.warning(self, f"{self.backend.title} no disponible", str(exc))
+        self._populate_filters()
+        self._refresh_tree()
+        self._clear_form()
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        for widget in self._togglable_controls:
+            widget.setEnabled(enabled)
 
     def _populate_filters(self) -> None:
         groups = sorted({rec.group or "" for rec in self._index.values()})
@@ -219,16 +289,18 @@ class LocalBranchesView(QWidget):
                 ).lower()
                 if search not in haystack:
                     continue
-            item = QTreeWidgetItem([
-                rec.branch,
-                rec.group or "",
-                rec.project or "",
-                "Sí" if rec.exists_local else "No",
-                "Sí" if rec.exists_origin else "No",
-                rec.merge_status or "",
-                self._fmt_ts(rec.last_updated_at or rec.created_at),
-                self._format_user(rec),
-            ])
+            item = QTreeWidgetItem(
+                [
+                    rec.branch,
+                    rec.group or "",
+                    rec.project or "",
+                    "Sí" if rec.exists_local else "No",
+                    "Sí" if rec.exists_origin else "No",
+                    rec.merge_status or "",
+                    self._fmt_ts(rec.last_updated_at or rec.created_at),
+                    self._format_user(rec),
+                ]
+            )
             item.setData(0, Qt.UserRole, rec.key())
             self.tree.addTopLevelItem(item)
         self.tree.setUpdatesEnabled(True)
@@ -267,8 +339,6 @@ class LocalBranchesView(QWidget):
         self.chkLocal.setChecked(bool(rec.exists_local))
         self.chkOrigin.setChecked(bool(rec.exists_origin))
         self.txtMerge.setText(rec.merge_status or "")
-        # Mostrar siempre el propietario original de la rama para evitar que las
-        # acciones de otros usuarios sobrescriban el campo visualmente.
         self.txtUser.setText(rec.created_by or rec.last_updated_by or "")
         created = self._fmt_ts(rec.created_at)
         updated = self._fmt_ts(rec.last_updated_at or rec.created_at)
@@ -298,7 +368,7 @@ class LocalBranchesView(QWidget):
         project = (self.txtProject.text() or "").strip() or None
         branch = (self.txtBranch.text() or "").strip()
         if not branch:
-            QMessageBox.warning(self, "Historial local", "El nombre de la rama es obligatorio.")
+            QMessageBox.warning(self, self.backend.title, "El nombre de la rama es obligatorio.")
             return
         user = (self.txtUser.text() or "").strip() or self._user_default
 
@@ -333,16 +403,29 @@ class LocalBranchesView(QWidget):
         if self._current_key and self._current_key != new_key:
             self._index.pop(self._current_key, None)
         self._index[new_key] = rec
-        try:
-            save_index(self._index)
-        except Exception as exc:
-            QMessageBox.critical(self, "Historial local", f"No se pudo guardar el índice: {exc}")
+        if not self._persist_index():
             return
-        record_activity(action, rec, targets=("local",), message="Local manual")
+        self._record_activity(action, rec)
         self._current_key = new_key
         self._populate_filters()
         self._refresh_tree()
         self._select_current()
+
+    def _persist_index(self) -> bool:
+        try:
+            self.backend.save(self._index)
+        except Exception as exc:  # noqa: BLE001 - diferenciamos indisponibilidad NAS
+            if self.backend.is_unavailable_error(exc):
+                QMessageBox.warning(self, self.backend.title, str(exc))
+                return False
+            QMessageBox.critical(self, self.backend.title, f"No se pudo guardar el índice: {exc}")
+            return False
+        return True
+
+    def _record_activity(self, action: str, rec: BranchRecord) -> None:
+        if not self.backend.activity_targets:
+            return
+        record_activity(action, rec, targets=tuple(self.backend.activity_targets), message=self.backend.activity_message)
 
     def _select_current(self) -> None:
         if not self._current_key:
@@ -373,20 +456,17 @@ class LocalBranchesView(QWidget):
         rec = self._index[self._current_key]
         confirm = QMessageBox.question(
             self,
-            "Historial local",
+            self.backend.title,
             f"¿Eliminar la rama '{rec.branch}' del proyecto '{rec.project or ''}'?",
         )
         if confirm != QMessageBox.Yes:
             return
         backup = rec
         self._index.pop(self._current_key, None)
-        try:
-            save_index(self._index)
-        except Exception as exc:
+        if not self._persist_index():
             self._index[self._current_key] = backup
-            QMessageBox.critical(self, "Historial local", f"No se pudo eliminar el registro: {exc}")
             return
-        record_activity("manual_delete", rec, targets=("local",), message="Local manual")
+        self._record_activity("manual_delete", rec)
         self._current_key = None
         self._populate_filters()
         self._refresh_tree()
@@ -399,5 +479,28 @@ class LocalBranchesView(QWidget):
             return "—"
         try:
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-        except Exception:
+        except Exception:  # noqa: BLE001 - cualquier error produce guion largo
             return "—"
+
+
+class SignalBlocker:
+    """Context helper similar a QSignalBlocker pero apto para `with`."""
+
+    def __init__(self, widget):
+        self.widget = widget
+        self._blocked = False
+
+    def __enter__(self):
+        try:
+            self.widget.blockSignals(True)
+            self._blocked = True
+        except Exception:  # noqa: BLE001 - no interrumpir flujo de UI
+            self._blocked = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._blocked:
+            try:
+                self.widget.blockSignals(False)
+            except Exception:  # noqa: BLE001 - silencioso, solo UI
+                pass
