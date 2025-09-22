@@ -5,6 +5,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Callable, Literal, Optional, Sequence, Tuple
 
+from operator import attrgetter
+
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -33,7 +35,12 @@ from ..core.branch_store import (
     save_index,
     save_nas_index,
 )
-from ..ui.widgets import SignalBlocker, combo_with_arrow
+from ..ui.widgets import combo_with_arrow
+from .shared_filters import (
+    iter_filtered_records,
+    sync_group_project_filters,
+    update_project_filter,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,8 @@ class BranchHistoryView(QWidget):
         self._index: Index = {}
         self._current_key: Optional[str] = None
         self._user_default = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+        self._group_getter = attrgetter("group")
+        self._project_getter = attrgetter("project")
         self._setup_ui()
         self._load_index()
 
@@ -181,8 +190,7 @@ class BranchHistoryView(QWidget):
 
         self._togglable_controls = (self.tree, self.btnNew, self.btnSave, self.btnDelete, self.btnReset)
 
-        self.cboGroup.currentIndexChanged.connect(self._update_projects_filter)
-        self.cboGroup.currentIndexChanged.connect(self._refresh_tree)
+        self.cboGroup.currentIndexChanged.connect(self._on_group_filter_changed)
         self.cboProject.currentIndexChanged.connect(self._refresh_tree)
         self.txtSearch.textChanged.connect(self._refresh_tree)
         self.btnRefresh.clicked.connect(self._load_index)
@@ -206,7 +214,13 @@ class BranchHistoryView(QWidget):
             self._index = {}
         self._set_controls_enabled(True)
         self._current_key = None
-        self._populate_filters()
+        sync_group_project_filters(
+            self.cboGroup,
+            self.cboProject,
+            self._index.values(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
         self._refresh_tree()
         self._clear_form()
 
@@ -215,7 +229,13 @@ class BranchHistoryView(QWidget):
         self._current_key = None
         self._set_controls_enabled(False)
         QMessageBox.warning(self, f"{self.backend.title} no disponible", str(exc))
-        self._populate_filters()
+        sync_group_project_filters(
+            self.cboGroup,
+            self.cboProject,
+            self._index.values(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
         self._refresh_tree()
         self._clear_form()
 
@@ -223,39 +243,17 @@ class BranchHistoryView(QWidget):
         for widget in self._togglable_controls:
             widget.setEnabled(enabled)
 
-    def _populate_filters(self) -> None:
-        groups = sorted({rec.group or "" for rec in self._index.values()})
-        with SignalBlocker(self.cboGroup):
-            self.cboGroup.clear()
-            self.cboGroup.addItem("Todos", userData=None)
-            for g in groups:
-                if g:
-                    self.cboGroup.addItem(g, userData=g)
-        self._update_projects_filter()
-
     @Slot()
     @Slot(int)
-    def _update_projects_filter(self, *_args: object) -> None:
-        group = self._current_group_filter()
-        projects = set()
-        for rec in self._index.values():
-            if group and rec.group != group:
-                continue
-            if rec.project:
-                projects.add(rec.project)
-        with SignalBlocker(self.cboProject):
-            self.cboProject.clear()
-            self.cboProject.addItem("Todos", userData=None)
-            for proj in sorted(projects):
-                self.cboProject.addItem(proj, userData=proj)
-
-    def _current_group_filter(self) -> Optional[str]:
-        idx = self.cboGroup.currentIndex()
-        return self.cboGroup.itemData(idx)
-
-    def _current_project_filter(self) -> Optional[str]:
-        idx = self.cboProject.currentIndex()
-        return self.cboProject.itemData(idx)
+    def _on_group_filter_changed(self, *_args: object) -> None:
+        update_project_filter(
+            self.cboGroup,
+            self.cboProject,
+            self._index.values(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
+        self._refresh_tree()
 
     @Slot()
     @Slot(int)
@@ -265,30 +263,23 @@ class BranchHistoryView(QWidget):
             return
         self.tree.setUpdatesEnabled(False)
         self.tree.clear()
-        group = self._current_group_filter()
-        project = self._current_project_filter()
-        search = (self.txtSearch.text() or "").strip().lower()
         records = sorted(self._index.values(), key=lambda r: (r.group or "", r.project or "", r.branch))
-        for rec in records:
-            if group and rec.group != group:
-                continue
-            if project and rec.project != project:
-                continue
-            if search:
-                haystack = " ".join(
-                    filter(
-                        None,
-                        [
-                            rec.branch,
-                            rec.group or "",
-                            rec.project or "",
-                            rec.created_by or "",
-                            rec.last_updated_by or "",
-                        ],
-                    )
-                ).lower()
-                if search not in haystack:
-                    continue
+        filtered = iter_filtered_records(
+            records,
+            group_combo=self.cboGroup,
+            project_combo=self.cboProject,
+            search_text=self.txtSearch.text(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+            haystack_builder=lambda rec: (
+                rec.branch,
+                rec.group or "",
+                rec.project or "",
+                rec.created_by or "",
+                rec.last_updated_by or "",
+            ),
+        )
+        for rec in filtered:
             item = QTreeWidgetItem(
                 [
                     rec.branch,
@@ -407,7 +398,13 @@ class BranchHistoryView(QWidget):
             return
         self._record_activity(action, rec)
         self._current_key = new_key
-        self._populate_filters()
+        sync_group_project_filters(
+            self.cboGroup,
+            self.cboProject,
+            self._index.values(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
         self._refresh_tree()
         self._select_current()
 
@@ -468,7 +465,13 @@ class BranchHistoryView(QWidget):
             return
         self._record_activity("manual_delete", rec)
         self._current_key = None
-        self._populate_filters()
+        sync_group_project_filters(
+            self.cboGroup,
+            self.cboProject,
+            self._index.values(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
         self._refresh_tree()
         self._clear_form()
 

@@ -8,6 +8,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - El helper `SignalBlocker` vive en `buildtool/ui/widgets.py` para reutilizarlo entre vistas y
   evitar definiciones duplicadas en los historiales.
+- Los historiales de ramas y actividad NAS comparten helpers de filtros y búsqueda para
+  eliminar duplicaciones y mantener una experiencia consistente.
 
 ## [1.4.4] - 2025-10-03
 ### Cambiado
