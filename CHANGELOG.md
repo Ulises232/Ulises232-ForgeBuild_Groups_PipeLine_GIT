@@ -4,6 +4,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.2] - 2025-10-01
+### Cambiado
+- Funciones compartidas en `core.config_queries` centralizan la lectura de grupos, proyectos, módulos, perfiles y targets,
+  reutilizadas por las vistas de pipeline y Git para evitar consultas duplicadas y mantener la UI consistente.
+
 ## [1.4.1] - 2025-09-30
 ### Corregido
 - La persistencia del asistente de grupos ahora actualiza registros existentes en `config.sqlite3` en lugar de reinserciones masivas, preservando los identificadores y evitando el crecimiento artificial de claves.

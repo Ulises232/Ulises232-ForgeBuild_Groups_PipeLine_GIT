@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.config import Config
+from ..core.config_queries import iter_group_projects, iter_groups
 from ..core.pipeline_history import PipelineHistory
 
 
@@ -57,7 +58,7 @@ class PipelineHistoryView(QWidget):
         filter_row.addWidget(QLabel("Grupo:"))
         self.cboGroup = QComboBox()
         self.cboGroup.addItem("Todos", None)
-        for grp in cfg.groups:
+        for grp in iter_groups(cfg):
             self.cboGroup.addItem(grp.key, grp.key)
         filter_row.addWidget(self.cboGroup)
 
@@ -115,10 +116,11 @@ class PipelineHistoryView(QWidget):
         self.txtLogs.setMinimumHeight(160)
         layout.addWidget(self.txtLogs, 1)
 
-        self._group_project_keys = {
-            grp.key: {proj.key for proj in (grp.projects or [])}
-            for grp in cfg.groups
-        }
+        self._group_project_keys: dict[str, set[str]] = {}
+        for grp in iter_groups(cfg):
+            self._group_project_keys[grp.key] = {
+                project.key for _, project in iter_group_projects(cfg, grp.key)
+            }
         all_projects: set[str] = set()
         for keys in self._group_project_keys.values():
             all_projects.update(keys)
