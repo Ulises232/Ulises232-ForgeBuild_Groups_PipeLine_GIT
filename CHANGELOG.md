@@ -19,6 +19,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ### Corregido
 - El README documenta la nueva dependencia, manteniendo actualizada la lista de prerrequisitos.
+- Los combos editables de la vista Git utilizan `EditableComboBox` de QFluentWidgets para evitar errores al crear ramas o merges.
 
 ## [1.3.4] - 2025-09-28
 ### Corregido

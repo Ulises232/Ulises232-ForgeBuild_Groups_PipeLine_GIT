@@ -258,8 +258,7 @@ class GitView(QWidget):
         new_layout.addWidget(self.btnPushBranch)
         ops_group.addSettingCard(new_card)
 
-        self.cboDeleteBranch = ComboBox()
-        self.cboDeleteBranch.setEditable(True)
+        self.cboDeleteBranch = EditableComboBox()
         self.chkConfirmDelete = CheckBox("Confirmar")
         self.btnDeleteBranch = self._make_tool_button("Eliminar local (global)", "delete")
         delete_card = QWidget(ops_group)
@@ -285,8 +284,7 @@ class GitView(QWidget):
         version_layout.addWidget(self.btnRunCreateVersion)
         ops_group.addSettingCard(version_card)
 
-        self.cboHistoryMerge = ComboBox()
-        self.cboHistoryMerge.setEditable(True)
+        self.cboHistoryMerge = EditableComboBox()
         self.chkMergePush = CheckBox("Push al terminar")
         self.btnMerge = self._make_tool_button("Merge a rama actual (global)", "merge")
         merge_card = QWidget(ops_group)
