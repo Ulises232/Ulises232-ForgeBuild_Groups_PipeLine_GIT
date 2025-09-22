@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.branch_store import load_nas_activity_log
-from ..ui.widgets import combo_with_arrow
+from ..ui.widgets import SignalBlocker, combo_with_arrow
 
 
 class NasActivityLogView(QWidget):
@@ -171,24 +171,3 @@ class NasActivityLogView(QWidget):
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
         except Exception:
             return "—"
-
-
-class SignalBlocker:
-    def __init__(self, widget):
-        self.widget = widget
-        self._blocked = False
-
-    def __enter__(self):
-        try:
-            self.widget.blockSignals(True)
-            self._blocked = True
-        except Exception:
-            self._blocked = False
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._blocked:
-            try:
-                self.widget.blockSignals(False)
-            except Exception:
-                pass

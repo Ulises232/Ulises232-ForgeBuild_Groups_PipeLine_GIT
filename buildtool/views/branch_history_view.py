@@ -33,7 +33,7 @@ from ..core.branch_store import (
     save_index,
     save_nas_index,
 )
-from ..ui.widgets import combo_with_arrow
+from ..ui.widgets import SignalBlocker, combo_with_arrow
 
 
 @dataclass(frozen=True)
@@ -481,26 +481,3 @@ class BranchHistoryView(QWidget):
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
         except Exception:  # noqa: BLE001 - cualquier error produce guion largo
             return "—"
-
-
-class SignalBlocker:
-    """Context helper similar a QSignalBlocker pero apto para `with`."""
-
-    def __init__(self, widget):
-        self.widget = widget
-        self._blocked = False
-
-    def __enter__(self):
-        try:
-            self.widget.blockSignals(True)
-            self._blocked = True
-        except Exception:  # noqa: BLE001 - no interrumpir flujo de UI
-            self._blocked = False
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._blocked:
-            try:
-                self.widget.blockSignals(False)
-            except Exception:  # noqa: BLE001 - silencioso, solo UI
-                pass

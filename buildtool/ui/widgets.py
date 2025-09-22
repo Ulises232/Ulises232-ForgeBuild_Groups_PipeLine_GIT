@@ -74,4 +74,27 @@ def set_combo_enabled(combo: QComboBox, enabled: bool) -> None:
             arrow.setEnabled(enabled)
 
 
-__all__ = ["combo_with_arrow", "set_combo_enabled"]
+class SignalBlocker:
+    """Context helper similar to :class:`QSignalBlocker` but usable with ``with``."""
+
+    def __init__(self, widget: QObject) -> None:
+        self.widget = widget
+        self._blocked = False
+
+    def __enter__(self) -> "SignalBlocker":
+        try:
+            self.widget.blockSignals(True)
+            self._blocked = True
+        except Exception:  # noqa: BLE001 - no interrumpir flujo de UI
+            self._blocked = False
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[override]
+        if self._blocked:
+            try:
+                self.widget.blockSignals(False)
+            except Exception:  # noqa: BLE001 - silencioso, solo UI
+                pass
+
+
+__all__ = ["SignalBlocker", "combo_with_arrow", "set_combo_enabled"]

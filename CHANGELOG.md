@@ -4,6 +4,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.5] - 2025-10-04
+### Cambiado
+- El helper `SignalBlocker` vive en `buildtool/ui/widgets.py` para reutilizarlo entre vistas y
+  evitar definiciones duplicadas en los historiales.
+
 ## [1.4.4] - 2025-10-03
 ### Cambiado
 - Las vistas de historial local y NAS se consolidaron en un único widget configurable, eliminando
