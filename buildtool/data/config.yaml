@@ -7,11 +7,7 @@ environment: {}
 artifact_patterns:
 - '*.war'
 - '*.jar'
-projects: []
-profiles:
-- Desarrollo
 default_execution_mode: integrated
-deploy_targets: []
 groups:
 - key: PDF
   repos:

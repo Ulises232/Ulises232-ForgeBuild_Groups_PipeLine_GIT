@@ -115,12 +115,11 @@ class PipelineHistoryView(QWidget):
         self.txtLogs.setMinimumHeight(160)
         layout.addWidget(self.txtLogs, 1)
 
-        self._global_project_keys = {proj.key for proj in cfg.projects}
         self._group_project_keys = {
             grp.key: {proj.key for proj in (grp.projects or [])}
             for grp in cfg.groups
         }
-        all_projects = set(self._global_project_keys)
+        all_projects: set[str] = set()
         for keys in self._group_project_keys.values():
             all_projects.update(keys)
         self._all_project_keys = sorted(all_projects)
@@ -143,8 +142,6 @@ class PipelineHistoryView(QWidget):
 
             if group_key:
                 project_keys = sorted(self._group_project_keys.get(group_key, set()))
-                if not project_keys:
-                    project_keys = sorted(self._global_project_keys)
             else:
                 project_keys = list(self._all_project_keys)
 

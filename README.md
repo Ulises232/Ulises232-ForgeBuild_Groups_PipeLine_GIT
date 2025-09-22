@@ -97,7 +97,8 @@ build_exe.bat --deploy \\servidor\ruta\compartida
 ### 4.1 Ubicación y ciclo de vida del archivo
 - Al iniciar por primera vez, la aplicación copia `buildtool/data/config.yaml` a `%APPDATA%\ForgeBuild\config.yaml` (Windows) o `~/.forgebuild/config.yaml` (otros sistemas).
 - Cada arranque lee ese archivo, aplica las variables declaradas en `environment` al proceso y a los subprocesos Maven/Git.
-- Los cambios guardados desde el asistente se escriben en el mismo archivo y quedan disponibles para el siguiente inicio.
+- Los grupos, proyectos y targets declarados se migran automáticamente a la base SQLite `config.sqlite3` dentro de la misma carpeta (`%APPDATA%\ForgeBuild` o `~/.forgebuild`) y a partir de entonces se consultan únicamente desde ahí.
+- Los cambios guardados desde el asistente se escriben en el archivo YAML (sin secciones de grupos) y sincronizan el contenido de la base de datos en un solo paso.
 
 ### 4.2 Parámetros globales principales
 - `paths.workspaces`: mapa `alias → ruta` usado para localizar repositorios cuando un proyecto define `workspace` o `repo`.
@@ -116,8 +117,6 @@ Cada entrada en `groups` representa un cliente o línea de negocio con su propia
 - `profiles`: lista de entornos disponibles (Desarrollo, QA, Producción, etc.).
 - `projects`: proyectos Maven dentro del grupo. Cada proyecto puede sobreescribir `profiles`, `execution_mode`, `workspace` o `repo`.
 - `deploy_targets`: destinos de despliegue para copiar artefactos según perfil.
-
-Si necesitas definir un proyecto genérico fuera de un grupo, puedes utilizar las listas `projects`, `profiles` y `deploy_targets` de nivel global (modo legado).
 
 ### 4.4 Módulos Maven
 Dentro de cada `project.modules` defines las reglas de compilación y copia por módulo:
@@ -141,7 +140,7 @@ Dentro de cada `project.modules` defines las reglas de compilación y copia por 
   - `select_pattern` y `rename_jar_to`: permiten copiar un solo archivo que cumpla el patrón y renombrarlo al destino.
 
 ### 4.5 Targets de deploy
-Cada `deploy_targets` (por grupo o global) define adónde copiar los artefactos:
+Cada entrada en `deploy_targets` dentro de un grupo define adónde copiar los artefactos:
 
 - `name`: identificador que verás en la UI.
 - `project_key`: proyecto al que aplica.

@@ -13,6 +13,21 @@ from threading import Event
 _RUNONCE_DIR = pathlib.Path(tempfile.gettempdir()) / f"forgebuild_runonce_{os.getpid()}"
 _RUNONCE_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def _locate_project(cfg: Config, project_key: str, group_key: str | None):
+    if group_key:
+        grp = next((g for g in cfg.groups if g.key == group_key), None)
+        if grp:
+            project = next((p for p in grp.projects if p.key == project_key), None)
+            if project:
+                return grp, project
+    for grp in cfg.groups:
+        project = next((p for p in grp.projects if p.key == project_key), None)
+        if project:
+            return grp, project
+    return None, None
+
+
 def _resolve_repo_path(cfg: Config, project_key: str, group_key: str | None,
                        project_repo: str | None, project_workspace: str | None) -> pathlib.Path:
     if group_key:
@@ -54,13 +69,10 @@ def build_project_for_profile(
     cancel_event: Event | None = None,
 ) -> bool:
     # localizar proyecto
-    project = None
-    if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
-        if grp:
-            project = next((p for p in grp.projects if p.key == project_key), None)
+    grp, project = _locate_project(cfg, project_key, group_key)
     if not project:
-        project = next(p for p in cfg.projects if p.key == project_key)
+        raise KeyError(f"Proyecto '{project_key}' no encontrado en la configuración")
+    group_key = grp.key if grp else None
 
     repo_path = _resolve_repo_path(cfg, project_key, group_key,
                                    getattr(project, "repo", None), getattr(project, "workspace", None))
@@ -260,13 +272,10 @@ def build_project_scheduled(
     cancel_event: Event | None = None,
 ) -> bool:
     # localizar proyecto
-    project = None
-    if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
-        if grp:
-            project = next((p for p in grp.projects if p.key == project_key), None)
+    grp, project = _locate_project(cfg, project_key, group_key)
     if not project:
-        project = next(p for p in cfg.projects if p.key == project_key)
+        raise KeyError(f"Proyecto '{project_key}' no encontrado en la configuración")
+    group_key = grp.key if grp else None
 
     all_mods = [m for m in project.modules if (not modules_filter or m.name in modules_filter)]
     cancel_event = cancel_event or Event()
@@ -461,6 +470,11 @@ def deploy_profiles_scheduled(
 ) -> bool:
     cancel_event = cancel_event or Event()
 
+    grp, project = _locate_project(cfg, project_key, group_key)
+    if not project:
+        raise KeyError(f"Proyecto '{project_key}' no encontrado en la configuración")
+    group_key = grp.key if grp else group_key
+
     history = PipelineHistory()
     try:
         history_run_id = history.start_run(
@@ -591,13 +605,13 @@ def deploy_version(
 ) -> bool:
     """Copia los artefactos del build al target (normal u hotfix)."""
     # --- resolver target ---
+    grp, project = _locate_project(cfg, project_key, group_key)
+    if not project:
+        raise KeyError(f"Proyecto '{project_key}' no encontrado en la configuración")
+    group_key = grp.key if grp else group_key
     tgt = None
-    if group_key:
-        grp = next((g for g in (cfg.groups or []) if g.key == group_key), None)
-        if grp:
-            tgt = next((t for t in (grp.deploy_targets or []) if t.name == target_name), None)
-    if tgt is None:
-        tgt = next((t for t in (getattr(cfg, "deploy_targets", []) or []) if t.name == target_name), None)
+    if grp:
+        tgt = next((t for t in (grp.deploy_targets or []) if t.name == target_name), None)
     if tgt is None:
         raise ValueError(f"Target '{target_name}' no existe.")
 

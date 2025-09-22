@@ -4,6 +4,23 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.1] - 2025-09-30
+### Corregido
+- La persistencia del asistente de grupos ahora actualiza registros existentes en `config.sqlite3` en lugar de reinserciones masivas, preservando los identificadores y evitando el crecimiento artificial de claves.
+
+## [1.4.0] - 2025-09-29
+### Añadido
+- Migración automática de grupos, proyectos y targets desde `config.yaml` hacia la base `config.sqlite3`, con pruebas unitarias que validan la persistencia.
+
+### Cambiado
+- Las vistas de Build, Deploy, Git e historial consultan únicamente los proyectos declarados dentro de grupos; se eliminaron los combos y flujos que dependían del modo global legado.
+- `save_config` sincroniza los grupos en SQLite y genera un YAML sin secciones de grupos, evitando duplicidades.
+- La base `config.sqlite3` ahora normaliza grupos, proyectos, módulos, perfiles y targets en tablas dedicadas para facilitar futuras extensiones.
+
+### Eliminado
+- Compatibilidad con las listas globales `projects`, `profiles` y `deploy_targets` fuera de `groups`.
+- Tabla auxiliar `project_profiles`; ahora los perfiles de proyecto viven dentro del `config_json` del propio proyecto.
+
 ## [1.3.4] - 2025-09-28
 ### Corregido
 - La interfaz Git y la vista de ramas NAS ahora muestran advertencias claras y continúan en modo offline cuando la NAS no está disponible, evitando cierres inesperados.

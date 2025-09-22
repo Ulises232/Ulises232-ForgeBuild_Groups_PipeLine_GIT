@@ -213,8 +213,13 @@ class TargetRow(QWidget):
             for p in group.projects:
                 self.cboProject.addItem(p.key, p.key)
         else:
-            for p in cfg.projects:
-                self.cboProject.addItem(p.key, p.key)
+            added: set[str] = set()
+            for g in (cfg.groups or []):
+                for p in (g.projects or []):
+                    if p.key in added:
+                        continue
+                    added.add(p.key)
+                    self.cboProject.addItem(p.key, p.key)
 
         lay.addWidget(QLabel("Nombre:"), 0, 0); lay.addWidget(self.txtName, 0, 1, 1, 3)
         lay.addWidget(QLabel("Proyecto:"), 1, 0); lay.addWidget(combo_with_arrow(self.cboProject), 1, 1)
