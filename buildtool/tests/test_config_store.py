@@ -1,3 +1,4 @@
+import sqlite3
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -5,7 +6,16 @@ from unittest.mock import patch
 
 import yaml
 
-from buildtool.core.config import Config, Paths, Group, Project, Module, load_config, save_config
+from buildtool.core.config import (
+    Config,
+    Paths,
+    Group,
+    Project,
+    Module,
+    DeployTarget,
+    load_config,
+    save_config,
+)
 from buildtool.core.config_store import ConfigStore
 
 
@@ -89,6 +99,76 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 store = ConfigStore(state_dir / "config.sqlite3")
                 stored = store.list_groups()
                 self.assertEqual(["GX"], [g.key for g in stored])
+
+    def test_store_persists_modules_profiles_and_targets(self):
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            module = Module(
+                name="mod",
+                path="./module",
+                goals=["clean", "package"],
+                version_files=["pom.xml"],
+                optional=True,
+                copy_to_profile_war=True,
+                copy_to_profile_ui=False,
+                copy_to_root=True,
+            )
+            project = Project(
+                key="PX",
+                modules=[module],
+                profiles=["dev", "qa"],
+                execution_mode="integrated",
+            )
+            deploy = DeployTarget(
+                name="app",
+                project_key="PX",
+                profiles=["dev"],
+                path_template="/tmp/{profile}",
+            )
+            group = Group(
+                key="GX",
+                repos={"PX": "C:/repo"},
+                output_base="/tmp/out",
+                profiles=["dev", "qa"],
+                projects=[project],
+                deploy_targets=[deploy],
+            )
+
+            with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
+                "buildtool.core.config_store._state_dir", return_value=state_dir
+            ):
+                cfg = Config(
+                    paths=Paths(workspaces={}, output_base="/tmp/out", nas_dir=""),
+                    groups=[group],
+                )
+                save_config(cfg)
+
+                db_path = state_dir / "config.sqlite3"
+                with sqlite3.connect(db_path) as cx:
+                    cx.row_factory = sqlite3.Row
+                    groups = cx.execute("SELECT * FROM groups").fetchall()
+                    projects = cx.execute("SELECT * FROM projects").fetchall()
+                    modules = cx.execute("SELECT * FROM project_modules").fetchall()
+                    group_profiles = cx.execute("SELECT * FROM group_profiles").fetchall()
+                    project_profiles = cx.execute("SELECT * FROM project_profiles").fetchall()
+                    deploys = cx.execute("SELECT * FROM deploy_targets").fetchall()
+                    deploy_profiles = cx.execute(
+                        "SELECT * FROM deploy_target_profiles"
+                    ).fetchall()
+
+                self.assertEqual(1, len(groups))
+                self.assertEqual(1, len(projects))
+                self.assertEqual(1, len(modules))
+                self.assertEqual(2, len(group_profiles))
+                self.assertEqual(2, len(project_profiles))
+                self.assertEqual(1, len(deploys))
+                self.assertEqual(1, len(deploy_profiles))
+
+                store = ConfigStore(db_path)
+                stored = store.list_groups()
+                self.assertEqual(["GX"], [g.key for g in stored])
+                self.assertEqual(["PX"], [p.key for p in stored[0].projects])
+                self.assertEqual(["mod"], [m.name for m in stored[0].projects[0].modules])
 
 
 if __name__ == "__main__":  # pragma: no cover

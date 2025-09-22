@@ -11,6 +11,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - Las vistas de Build, Deploy, Git e historial consultan únicamente los proyectos declarados dentro de grupos; se eliminaron los combos y flujos que dependían del modo global legado.
 - `save_config` sincroniza los grupos en SQLite y genera un YAML sin secciones de grupos, evitando duplicidades.
+- La base `config.sqlite3` ahora normaliza grupos, proyectos, módulos, perfiles y targets en tablas dedicadas para facilitar futuras extensiones.
 
 ### Eliminado
 - Compatibilidad con las listas globales `projects`, `profiles` y `deploy_targets` fuera de `groups`.
