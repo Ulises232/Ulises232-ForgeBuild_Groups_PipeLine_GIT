@@ -13,6 +13,12 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Los combos de grupo y proyecto en las vistas de build y deploy usan `setup_quick_filter`
   compartido para tener filtrado consistente sin duplicar código.
 
+## [1.4.5] - 2025-10-04
+### Corregido
+- Se degrada automáticamente el `journal_mode` a `DELETE` cuando SQLite no permite `WAL`, evitando
+  bloqueos al compartir la base de historial entre sesiones concurrentes.
+
+
 ## [1.4.4] - 2025-10-03
 ### Cambiado
 - Las vistas de historial local y NAS se consolidaron en un único widget configurable, eliminando
