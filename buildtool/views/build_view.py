@@ -22,7 +22,7 @@ from qfluentwidgets import (
 )
 
 from ..core.bg import run_in_thread
-from ..core.config import Config, PipelinePreset, save_config
+from ..core.config import Config, PipelinePreset, save_config, find_project, get_group
 from ..core.tasks import build_project_scheduled
 from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker, build_worker
@@ -149,14 +149,8 @@ class BuildView(QWidget):
     def _get_current_project(self):
         gkey = self._current_group()
         pkey = self.cboProject.currentData()
-        proj = None
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            if grp:
-                proj = next((p for p in grp.projects if p.key == pkey), None)
-        if not proj:
-            proj = next((p for p in self.cfg.projects if p.key == pkey), None)
-        return proj, gkey
+        group, proj = find_project(self.cfg, pkey, gkey)
+        return proj, (group.key if group else gkey)
 
     def _setup_quick_filter(self, combo: EditableComboBox) -> None:
         completer = QCompleter(combo)
@@ -282,20 +276,14 @@ class BuildView(QWidget):
         self.cboProject.clear()
         gkey = self._current_group()
 
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            projects = [p.key for p in (grp.projects if grp else [])]
-            for k in projects:
-                self.cboProject.addItem(k, k)
-            show_proj = len(projects) > 1
-            self.lblProject.setVisible(show_proj)
-            self.cboProject.setVisible(show_proj)
-        else:
-            projects = [p.key for p in self.cfg.projects]
-            for k in projects:
-                self.cboProject.addItem(k, k)
-            self.lblProject.setVisible(True)
-            self.cboProject.setVisible(True)
+        grp = get_group(self.cfg, gkey)
+        projects = [p.key for p in (grp.projects if grp else [])]
+        for k in projects:
+            self.cboProject.addItem(k, k)
+
+        show_proj = len(projects) > 1
+        self.lblProject.setVisible(show_proj)
+        self.cboProject.setVisible(show_proj)
 
         self._update_completer_model(self.cboProject)
         self.refresh_project_data()
@@ -307,27 +295,19 @@ class BuildView(QWidget):
         profiles: list[str] = []
         modules: list[str] = []
 
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            if grp:
-                if self.cboProject.isVisible():
-                    proj = next((p for p in grp.projects if p.key == pkey), None)
-                else:
-                    proj = grp.projects[0] if grp.projects else None
-                if proj:
-                    modules = [m.name for m in proj.modules]
-                    if getattr(proj, "profiles", None):
-                        profiles = proj.profiles
-                if not profiles and grp.profiles:
-                    profiles = grp.profiles
-        if not modules:
-            proj = next((p for p in self.cfg.projects if p.key == pkey), None)
+        grp = get_group(self.cfg, gkey)
+        proj = None
+        if grp:
+            if self.cboProject.isVisible():
+                proj = next((p for p in grp.projects if p.key == pkey), None)
+            else:
+                proj = grp.projects[0] if grp and grp.projects else None
             if proj:
                 modules = [m.name for m in proj.modules]
                 if getattr(proj, "profiles", None):
-                    profiles = proj.profiles
-        if not profiles and self.cfg.profiles:
-            profiles = self.cfg.profiles
+                    profiles = list(proj.profiles)
+            if not profiles and grp.profiles:
+                profiles = list(grp.profiles)
 
         self.cboProfiles.set_items(profiles or [])
         self.cboModules.set_items(modules or [], checked_all=True)

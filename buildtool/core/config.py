@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Literal
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Literal
 import yaml, pathlib, os, sys
 class PipelinePreset(BaseModel):
     name: str
@@ -160,4 +160,67 @@ def save_config(cfg: Config) -> str:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
     apply_environment(cfg)
     return str(cfg_path)
+
+
+def iter_groups(cfg: Config) -> Iterator[Group]:
+    """Itera los grupos configurados, tolerando configuraciones vacías."""
+
+    for group in getattr(cfg, "groups", None) or []:
+        if group is not None:
+            yield group
+
+
+def get_group(cfg: Config, group_key: str | None) -> Optional[Group]:
+    """Obtiene un grupo por clave, si existe."""
+
+    if not group_key:
+        return None
+    return next((g for g in iter_groups(cfg) if g.key == group_key), None)
+
+
+def iter_group_projects(cfg: Config) -> Iterator[Tuple[Group, Project]]:
+    """Itera pares (grupo, proyecto) declarados en la configuración."""
+
+    for group in iter_groups(cfg):
+        for project in getattr(group, "projects", None) or []:
+            if project is not None:
+                yield group, project
+
+
+def find_project(
+    cfg: Config, project_key: str | None, group_key: str | None = None
+) -> Tuple[Optional[Group], Optional[Project]]:
+    """Localiza un proyecto por clave, priorizando el grupo indicado."""
+
+    if not project_key:
+        return None, None
+
+    group = get_group(cfg, group_key)
+    if group:
+        project = next(
+            (p for p in getattr(group, "projects", None) or [] if p.key == project_key),
+            None,
+        )
+        if project:
+            return group, project
+
+    for grp, project in iter_group_projects(cfg):
+        if project.key == project_key:
+            return grp, project
+
+    return None, None
+
+
+def iter_deploy_targets(
+    cfg: Config, group_key: str | None = None, project_key: str | None = None
+) -> Iterator[Tuple[Group, DeployTarget]]:
+    """Itera objetivos de despliegue aplicando filtros opcionales."""
+
+    for group in iter_groups(cfg):
+        if group_key and group.key != group_key:
+            continue
+        for target in getattr(group, "deploy_targets", None) or []:
+            if project_key and target.project_key != project_key:
+                continue
+            yield group, target
 

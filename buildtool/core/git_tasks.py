@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from typing import Dict, List, Iterable, Optional, Tuple, Set
-from .config import Config
+from .config import Config, get_group, iter_groups
 from .tasks import _resolve_repo_path
 from .gitwrap import (
     fetch, current_branch, checkout, create_branch, delete_branch,
@@ -12,31 +12,38 @@ from .git_history import add_branch as hist_add, remove_branch as hist_remove
 from pathlib import Path
 import re
 
-def _iter_modules(cfg: Config, group_key: Optional[str], project_key: Optional[str], only: Optional[Set[str]] = None):
-    if cfg.groups:
-        groups = [g for g in cfg.groups if (group_key is None or g.key == group_key)]
-        for g in groups:
-            projs = [p for p in g.projects if (project_key is None or p.key == project_key)]
-            for p in projs:
-                repo_base = _resolve_repo_path(cfg, p.key, g.key, getattr(p, "repo", None), getattr(p, "workspace", None))
-                for m in (p.modules or []):
-                    if only and m.name not in only: 
-                        continue
-                    module_path = repo_base / m.path
-                    yield g, p, m, module_path
+def _iter_modules(
+    cfg: Config,
+    group_key: Optional[str],
+    project_key: Optional[str],
+    only: Optional[Set[str]] = None,
+):
+    groups = []
+    if group_key:
+        grp = get_group(cfg, group_key)
+        if grp:
+            groups.append(grp)
     else:
-        for p in cfg.projects:
-            if project_key and p.key != project_key: continue
-            repo_base = _resolve_repo_path(cfg, p.key, None, getattr(p, "repo", None), getattr(p, "workspace", None))
+        groups.extend(iter_groups(cfg))
+
+    for g in groups:
+        projects = [p for p in (g.projects or []) if (project_key is None or p.key == project_key)]
+        for p in projects:
+            repo_base = _resolve_repo_path(
+                cfg,
+                p.key,
+                g.key,
+                getattr(p, "repo", None),
+                getattr(p, "workspace", None),
+            )
             for m in (p.modules or []):
-                if only and m.name not in only: 
+                if only and m.name not in only:
                     continue
                 module_path = repo_base / m.path
-                yield None, p, m, module_path
+                yield g, p, m, module_path
 
 def _scope_keys(cfg: Config, group_key: Optional[str], project_key: Optional[str]):
-    if cfg.groups: return group_key, project_key
-    return None, project_key
+    return group_key, project_key
 
 def discover_status(cfg: Config, group_key: Optional[str], project_key: Optional[str]):
     out = []

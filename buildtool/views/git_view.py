@@ -33,7 +33,7 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
 )
-from ..core.config import Config
+from ..core.config import Config, find_project, get_group, iter_group_projects
 # Import our local-only shim
 from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
@@ -425,15 +425,13 @@ class GitView(QWidget):
             self.cboProject.blockSignals(True)
             self.cboProject.clear()
             count = 0
-            if getattr(self.cfg, "groups", None):
-                seen=set()
-                for g in self.cfg.groups:
-                    for p in (g.projects or []):
-                        if p.key not in seen:
-                            seen.add(p.key); self.cboProject.addItem(p.key, userData=g.key); count += 1
-            else:
-                for p in (self.cfg.projects or []):
-                    self.cboProject.addItem(p.key, userData=None); count += 1
+            seen: set[str] = set()
+            for group, project in iter_group_projects(self.cfg):
+                if project.key in seen:
+                    continue
+                seen.add(project.key)
+                self.cboProject.addItem(project.key, userData=group.key)
+                count += 1
             self._dbg(f"load_projects_flat: added {count} projects")
         finally:
             self.cboProject.blockSignals(False)
@@ -457,18 +455,8 @@ class GitView(QWidget):
         self._dbg("post_init: end")
 
     def _get_project_obj(self, gkey: str | None, pkey: str | None):
-        # Busca el proyecto por claves (soporta cfg.groups y cfg.projects)
-        if getattr(self.cfg, "groups", None):
-            for g in self.cfg.groups:
-                if gkey and getattr(g, "key", None) != gkey:
-                    continue
-                for p in (getattr(g, "projects", None) or []):
-                    if getattr(p, "key", None) == pkey:
-                        return p
-        for p in (getattr(self.cfg, "projects", None) or []):
-            if getattr(p, "key", None) == pkey:
-                return p
-        return None
+        _group, project = find_project(self.cfg, pkey, gkey)
+        return project
 
     @Slot()
     def _post_project_change(self):
@@ -488,11 +476,7 @@ class GitView(QWidget):
 
             # 2.1) Fallback por groups.repos cuando no hay workspaces[gkey]
             try:
-                grp = None
-                for g in (getattr(self.cfg, "groups", None) or []):
-                    if getattr(g, "key", None) == gkey:
-                        grp = g
-                        break
+                grp = get_group(self.cfg, gkey)
 
                 repo_path = None
                 if grp:

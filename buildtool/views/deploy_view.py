@@ -23,7 +23,7 @@ from qfluentwidgets import (
 )
 
 from ..core.bg import run_in_thread
-from ..core.config import Config, PipelinePreset, save_config
+from ..core.config import Config, PipelinePreset, save_config, get_group, find_project
 from ..core.tasks import deploy_profiles_scheduled
 from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker
@@ -268,20 +268,14 @@ class DeployView(QWidget):
         self.cboProject.clear()
         gkey = self._current_group()
 
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            projects = [p.key for p in (grp.projects if grp else [])]
-            for k in projects:
-                self.cboProject.addItem(k, k)
-            show_proj = len(projects) > 1
-            self.lblProject.setVisible(show_proj)
-            self.cboProject.setVisible(show_proj)
-        else:
-            projects = [p.key for p in self.cfg.projects]
-            for k in projects:
-                self.cboProject.addItem(k, k)
-            self.lblProject.setVisible(True)
-            self.cboProject.setVisible(True)
+        grp = get_group(self.cfg, gkey)
+        projects = [p.key for p in (grp.projects if grp else [])]
+        for k in projects:
+            self.cboProject.addItem(k, k)
+
+        show_proj = len(projects) > 1
+        self.lblProject.setVisible(show_proj)
+        self.cboProject.setVisible(show_proj)
 
         self._update_completer_model(self.cboProject)
         self.refresh_project()
@@ -296,30 +290,18 @@ class DeployView(QWidget):
 
         profiles: list[str] = []
         proj = None
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            if grp:
-                if self.cboProject.isVisible():
-                    proj = next((p for p in grp.projects if p.key == pkey), None)
-                else:
-                    proj = grp.projects[0] if grp.projects else None
-                if proj and getattr(proj, "profiles", None):
-                    profiles = proj.profiles
-                elif grp and grp.profiles:
-                    profiles = grp.profiles
-                for t in (grp.deploy_targets or []):
-                    if proj and t.project_key != proj.key:
-                        continue
-                    for prof in t.profiles:
-                        self._profile_to_target.setdefault(prof, t.name)
-        else:
-            proj = next((p for p in self.cfg.projects if p.key == pkey), None)
+        grp = get_group(self.cfg, gkey)
+        if grp:
+            if self.cboProject.isVisible():
+                proj = next((p for p in grp.projects if p.key == pkey), None)
+            else:
+                proj = grp.projects[0] if grp.projects else None
             if proj and getattr(proj, "profiles", None):
-                profiles = proj.profiles
-            elif self.cfg.profiles:
-                profiles = self.cfg.profiles
-            for t in (self.cfg.deploy_targets or []):
-                if proj and t.project_key != proj.key:
+                profiles = list(proj.profiles)
+            elif grp.profiles:
+                profiles = list(grp.profiles)
+            for t in (grp.deploy_targets or []):
+                if proj and t.project_key and t.project_key != proj.key:
                     continue
                 for prof in t.profiles:
                     self._profile_to_target.setdefault(prof, t.name)
@@ -348,11 +330,18 @@ class DeployView(QWidget):
         if self.cboProject.isVisible():
             pkey = self.cboProject.currentData()
         else:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None) if gkey else None
+            grp = get_group(self.cfg, gkey)
             pkey = grp.projects[0].key if (grp and grp.projects) else None
 
         if not pkey:
             self.log.append("<< No hay proyecto configurado.")
+            return
+
+        group, proj = find_project(self.cfg, pkey, gkey)
+        if group:
+            gkey = group.key
+        if not proj:
+            self.log.append("<< No se encontró el proyecto seleccionado en la configuración de grupos.")
             return
 
         version = self.txtVersion.text().strip()

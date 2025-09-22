@@ -18,6 +18,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Se retiraron los archivos QSS y los iconos redundantes, sustituyéndolos por el helper `ForgeLogTextEdit` y fuentes monoespaciadas aplicadas desde componentes Fluent sin estilos en línea.
 
 ### Corregido
+- Las vistas Build/Deploy/Git/Historial y los workers de pipeline vuelven a tomar proyectos, perfiles y deploy targets desde los grupos configurados, eliminando las referencias al bloque global y evitando listas vacías al cargar `config.yaml` como el del grupo PDF.
 - El README documenta la nueva dependencia, manteniendo actualizada la lista de prerrequisitos.
 - Los combos editables de la vista Git utilizan `EditableComboBox` de QFluentWidgets para evitar errores al crear ramas o merges.
 - El `MultiSelectComboBox` ahora delega en `ComboBoxMenu.exec()` para aplicar la animación Fluent con la firma correcta, eliminando los fallos `aniType`/`TypeError` al desplegar opciones en PySide6 6.8.1.

@@ -10,7 +10,13 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import ComboBox, CheckBox, PushButton, PrimaryPushButton
 import yaml
 from ..core.config import (
-    Config, Group, Project, Module, DeployTarget, save_config
+    Config,
+    Group,
+    Project,
+    Module,
+    DeployTarget,
+    iter_group_projects,
+    save_config,
 )
 
 # ----------------------------- Helpers -----------------------------
@@ -210,12 +216,18 @@ class TargetRow(QWidget):
         self.txtHotfix = QLineEdit(); self.txtHotfix.setPlaceholderText(r"(opcional) \\server\...\hotfix\{version}\ ")
 
         # Proyectos válidos
+        project_keys: list[str] = []
         if group and group.projects:
-            for p in group.projects:
-                self.cboProject.addItem(p.key, p.key)
+            project_keys = [p.key for p in group.projects]
         else:
-            for p in cfg.projects:
-                self.cboProject.addItem(p.key, p.key)
+            seen: set[str] = set()
+            for _grp, proj in iter_group_projects(cfg):
+                if proj.key in seen:
+                    continue
+                seen.add(proj.key)
+                project_keys.append(proj.key)
+        for key in project_keys:
+            self.cboProject.addItem(key, key)
 
         lay.addWidget(QLabel("Nombre:"), 0, 0); lay.addWidget(self.txtName, 0, 1, 1, 3)
         lay.addWidget(QLabel("Proyecto:"), 1, 0); lay.addWidget(self.cboProject, 1, 1)

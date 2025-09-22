@@ -41,8 +41,14 @@ class BuildProjectCleaningTests(unittest.TestCase):
                 workspace=None,
             )
             cfg = SimpleNamespace(
-                groups=[],
-                projects=[project],
+                groups=[
+                    SimpleNamespace(
+                        key="grp",
+                        projects=[project],
+                        repos={"repo": str(repo_dir)},
+                        output_base=str(output_dir),
+                    )
+                ],
                 paths=SimpleNamespace(
                     workspaces={"repo": str(repo_dir)},
                     output_base=str(output_dir),

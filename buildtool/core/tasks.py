@@ -1,6 +1,6 @@
 # buildtool/core/tasks.py
 from __future__ import annotations
-from .config import Config
+from .config import Config, find_project, get_group, iter_deploy_targets
 from .maven import run_maven
 from .copier import copy_artifacts
 from .pipeline_history import PipelineHistory
@@ -13,23 +13,28 @@ from threading import Event
 _RUNONCE_DIR = pathlib.Path(tempfile.gettempdir()) / f"forgebuild_runonce_{os.getpid()}"
 _RUNONCE_DIR.mkdir(parents=True, exist_ok=True)
 
-def _resolve_repo_path(cfg: Config, project_key: str, group_key: str | None,
-                       project_repo: str | None, project_workspace: str | None) -> pathlib.Path:
-    if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
-        if grp and project_repo and project_repo in grp.repos:
-            return pathlib.Path(grp.repos[project_repo])
+def _resolve_repo_path(
+    cfg: Config,
+    project_key: str,
+    group_key: str | None,
+    project_repo: str | None,
+    project_workspace: str | None,
+) -> pathlib.Path:
+    grp = get_group(cfg, group_key)
+    if grp and project_repo and project_repo in grp.repos:
+        return pathlib.Path(grp.repos[project_repo])
     if project_workspace and project_workspace in cfg.paths.workspaces:
         return pathlib.Path(cfg.paths.workspaces[project_workspace])
     if project_repo and project_repo in cfg.paths.workspaces:
         return pathlib.Path(cfg.paths.workspaces[project_repo])
     return pathlib.Path(project_workspace or project_repo or ".")
 
-def _resolve_output_base(cfg: Config, project_key: str, profile: str, group_key: str | None) -> pathlib.Path:
-    if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
-        if grp and grp.output_base:
-            return pathlib.Path(grp.output_base) / project_key / profile
+def _resolve_output_base(
+    cfg: Config, project_key: str, profile: str, group_key: str | None
+) -> pathlib.Path:
+    grp = get_group(cfg, group_key)
+    if grp and grp.output_base:
+        return pathlib.Path(grp.output_base) / project_key / profile
     return pathlib.Path(cfg.paths.output_base) / project_key / profile
 
 def _ensure(dir_path: pathlib.Path) -> pathlib.Path:
@@ -54,13 +59,10 @@ def build_project_for_profile(
     cancel_event: Event | None = None,
 ) -> bool:
     # localizar proyecto
-    project = None
-    if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
-        if grp:
-            project = next((p for p in grp.projects if p.key == project_key), None)
+    group, project = find_project(cfg, project_key, group_key)
     if not project:
-        project = next(p for p in cfg.projects if p.key == project_key)
+        raise ValueError(f"Proyecto '{project_key}' no configurado en grupos.")
+    group_key = (group.key if group else None) or group_key
 
     repo_path = _resolve_repo_path(cfg, project_key, group_key,
                                    getattr(project, "repo", None), getattr(project, "workspace", None))
@@ -260,13 +262,10 @@ def build_project_scheduled(
     cancel_event: Event | None = None,
 ) -> bool:
     # localizar proyecto
-    project = None
-    if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
-        if grp:
-            project = next((p for p in grp.projects if p.key == project_key), None)
+    group, project = find_project(cfg, project_key, group_key)
     if not project:
-        project = next(p for p in cfg.projects if p.key == project_key)
+        raise ValueError(f"Proyecto '{project_key}' no configurado en grupos.")
+    resolved_group_key = (group.key if group else None) or group_key
 
     all_mods = [m for m in project.modules if (not modules_filter or m.name in modules_filter)]
     cancel_event = cancel_event or Event()
@@ -276,7 +275,7 @@ def build_project_scheduled(
         history_run_id = history.start_run(
             "build",
             user=getpass.getuser(),
-            group_key=group_key,
+            group_key=resolved_group_key,
             project_key=project_key,
             profiles=profiles,
             modules=[m.name for m in all_mods],
@@ -315,7 +314,7 @@ def build_project_scheduled(
             first,
             True,
             log_cb=_log,
-            group_key=group_key,
+            group_key=resolved_group_key,
             modules_filter=set(commons),
             cancel_event=cancel_event,
         )
@@ -367,7 +366,7 @@ def build_project_scheduled(
                     profile,
                     True,
                     log_cb=_log,
-                    group_key=group_key,
+                    group_key=resolved_group_key,
                     modules_filter={mod_name},
                     cancel_event=cancel_event,
                 )
@@ -378,7 +377,7 @@ def build_project_scheduled(
                 profile,
                 True,
                 log_cb=_log,
-                group_key=group_key,
+                group_key=resolved_group_key,
                 modules_filter={mod_name},
                 cancel_event=cancel_event,
             )
@@ -460,13 +459,15 @@ def deploy_profiles_scheduled(
     cancel_event: Event | None = None,
 ) -> bool:
     cancel_event = cancel_event or Event()
+    group, _project = find_project(cfg, project_key, group_key)
+    resolved_group_key = (group.key if group else None) or group_key
 
     history = PipelineHistory()
     try:
         history_run_id = history.start_run(
             "deploy",
             user=getpass.getuser(),
-            group_key=group_key,
+            group_key=resolved_group_key,
             project_key=project_key,
             profiles=profiles,
             modules=[],
@@ -522,7 +523,7 @@ def deploy_profiles_scheduled(
                 version,
                 target_name,
                 log_cb=_log,
-                group_key=group_key,
+                group_key=resolved_group_key,
                 hotfix=hotfix,
                 cancel_event=cancel_event,
             )
@@ -592,14 +593,23 @@ def deploy_version(
     """Copia los artefactos del build al target (normal u hotfix)."""
     # --- resolver target ---
     tgt = None
-    if group_key:
-        grp = next((g for g in (cfg.groups or []) if g.key == group_key), None)
-        if grp:
-            tgt = next((t for t in (grp.deploy_targets or []) if t.name == target_name), None)
+    tgt_group = None
+    for grp, candidate in iter_deploy_targets(cfg, group_key):
+        if candidate.name == target_name:
+            tgt = candidate
+            tgt_group = grp
+            break
     if tgt is None:
-        tgt = next((t for t in (getattr(cfg, "deploy_targets", []) or []) if t.name == target_name), None)
+        for grp, candidate in iter_deploy_targets(cfg):
+            if candidate.name == target_name:
+                tgt = candidate
+                tgt_group = grp
+                break
     if tgt is None:
         raise ValueError(f"Target '{target_name}' no existe.")
+
+    if tgt_group:
+        group_key = tgt_group.key
 
     if tgt.project_key != project_key:
         raise ValueError(f"Target '{target_name}' es para proyecto '{tgt.project_key}', no '{project_key}'.")
