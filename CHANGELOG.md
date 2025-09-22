@@ -15,6 +15,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ### Eliminado
 - Compatibilidad con las listas globales `projects`, `profiles` y `deploy_targets` fuera de `groups`.
+- Tabla auxiliar `project_profiles`; ahora los perfiles de proyecto viven dentro del `config_json` del propio proyecto.
 
 ## [1.3.4] - 2025-09-28
 ### Corregido

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import unittest
 from pathlib import Path
@@ -150,7 +151,6 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                     projects = cx.execute("SELECT * FROM projects").fetchall()
                     modules = cx.execute("SELECT * FROM project_modules").fetchall()
                     group_profiles = cx.execute("SELECT * FROM group_profiles").fetchall()
-                    project_profiles = cx.execute("SELECT * FROM project_profiles").fetchall()
                     deploys = cx.execute("SELECT * FROM deploy_targets").fetchall()
                     deploy_profiles = cx.execute(
                         "SELECT * FROM deploy_target_profiles"
@@ -160,14 +160,17 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 self.assertEqual(1, len(projects))
                 self.assertEqual(1, len(modules))
                 self.assertEqual(2, len(group_profiles))
-                self.assertEqual(2, len(project_profiles))
                 self.assertEqual(1, len(deploys))
                 self.assertEqual(1, len(deploy_profiles))
+
+                project_config = json.loads(projects[0]["config_json"])
+                self.assertEqual(["dev", "qa"], project_config.get("profiles"))
 
                 store = ConfigStore(db_path)
                 stored = store.list_groups()
                 self.assertEqual(["GX"], [g.key for g in stored])
                 self.assertEqual(["PX"], [p.key for p in stored[0].projects])
+                self.assertEqual(["dev", "qa"], stored[0].projects[0].profiles)
                 self.assertEqual(["mod"], [m.name for m in stored[0].projects[0].modules])
 
 

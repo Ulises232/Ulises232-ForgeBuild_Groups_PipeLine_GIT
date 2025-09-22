@@ -52,13 +52,6 @@ CREATE TABLE IF NOT EXISTS projects (
     FOREIGN KEY(group_key) REFERENCES groups(key) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_group_key ON projects(group_key, project_key);
-CREATE TABLE IF NOT EXISTS project_profiles (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL,
-    position INTEGER NOT NULL,
-    profile TEXT NOT NULL,
-    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
-);
 CREATE TABLE IF NOT EXISTS project_modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL,
@@ -144,6 +137,7 @@ class ConfigStore:
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             legacy_groups = self._extract_legacy_groups(cx)
+            self._inline_project_profiles(cx)
             cx.executescript(SCHEMA)
             if legacy_groups:
                 self._replace_groups_with_connection(cx, legacy_groups)
@@ -174,6 +168,37 @@ DROP TABLE IF EXISTS groups;
 """
         )
         return legacy_data
+
+    # ------------------------------------------------------------------
+    def _inline_project_profiles(self, cx: sqlite3.Connection) -> None:
+        cursor = cx.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='project_profiles'"
+        )
+        if not cursor.fetchone():
+            return
+
+        rows = cx.execute(
+            "SELECT project_id, profile FROM project_profiles ORDER BY project_id, position"
+        ).fetchall()
+        profiles_by_project: Dict[int, List[str]] = {}
+        for project_id, profile in rows:
+            profiles_by_project.setdefault(int(project_id), []).append(str(profile))
+
+        for project_id, profiles in profiles_by_project.items():
+            current = cx.execute(
+                "SELECT config_json FROM projects WHERE id = ?",
+                (int(project_id),),
+            ).fetchone()
+            if not current:
+                continue
+            config = _json_loads(current[0], {})
+            config["profiles"] = profiles
+            cx.execute(
+                "UPDATE projects SET config_json = ? WHERE id = ?",
+                (_json_dumps(config), int(project_id)),
+            )
+
+        cx.execute("DROP TABLE IF EXISTS project_profiles")
 
     # ------------------------------------------------------------------
     def _replace_groups_with_connection(
@@ -266,13 +291,12 @@ DROP TABLE IF EXISTS groups;
         key = data.get("key")
         if not key:
             return None
-        profiles = list(data.get("profiles") or [])
         modules = list(data.get("modules") or [])
         extras = {
             k: v
             for k, v in data.items()
             if k
-            not in {"key", "modules", "profiles", "execution_mode", "workspace", "repo"}
+            not in {"key", "modules", "execution_mode", "workspace", "repo"}
         }
 
         cursor = cx.execute(
@@ -290,12 +314,6 @@ DROP TABLE IF EXISTS groups;
             ),
         )
         project_id = int(cursor.lastrowid)
-
-        for idx, profile in enumerate(profiles):
-            cx.execute(
-                "INSERT INTO project_profiles(project_id, position, profile) VALUES(?, ?, ?)",
-                (project_id, int(idx), str(profile)),
-            )
 
         for mod_idx, module in enumerate(modules):
             self._insert_module(cx, project_id, module, mod_idx)
@@ -458,9 +476,6 @@ DROP TABLE IF EXISTS groups;
                 "SELECT id, group_key, project_key, position, execution_mode, "
                 "workspace, repo, config_json FROM projects ORDER BY position"
             ).fetchall()
-            project_profiles = cx.execute(
-                "SELECT project_id, position, profile FROM project_profiles ORDER BY position"
-            ).fetchall()
             module_rows = cx.execute(
                 "SELECT project_id, position, name, path, version_files, goals, optional, "
                 "profile_override, only_if_profile_equals, copy_to_profile_war, "
@@ -487,10 +502,6 @@ DROP TABLE IF EXISTS groups;
         projects_by_group: Dict[str, List[sqlite3.Row]] = {}
         for row in project_rows:
             projects_by_group.setdefault(row[1], []).append(row)
-
-        project_profiles_map: Dict[int, List[str]] = {}
-        for row in project_profiles:
-            project_profiles_map.setdefault(row[0], []).append(str(row[2]))
 
         modules_by_project: Dict[int, List[sqlite3.Row]] = {}
         for row in module_rows:
@@ -519,17 +530,17 @@ DROP TABLE IF EXISTS groups;
 
             for project_row in projects_by_group.get(key, []):
                 project_id = int(project_row["id"])
+                project_extras = _json_loads(project_row["config_json"], {})
+                project_profiles = project_extras.pop("profiles", None)
                 project_payload: Dict[str, Any] = {
                     "key": str(project_row["project_key"]),
                     "execution_mode": project_row["execution_mode"],
                     "workspace": project_row["workspace"],
                     "repo": project_row["repo"],
-                    "profiles": project_profiles_map.get(project_id, []),
+                    "profiles": project_profiles,
                     "modules": [],
                 }
-                project_payload.update(
-                    _json_loads(project_row["config_json"], {})
-                )
+                project_payload.update(project_extras)
 
                 for module_row in modules_by_project.get(project_id, []):
                     module_payload: Dict[str, Any] = {
