@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QWidget,
 )
+from PySide6.QtGui import QCompleter
 
 from .icons import get_icon
 
@@ -74,6 +75,19 @@ def set_combo_enabled(combo: QComboBox, enabled: bool) -> None:
             arrow.setEnabled(enabled)
 
 
+def setup_quick_filter(combo: QComboBox) -> None:
+    """Enable case-insensitive quick filtering for editable combos."""
+
+    combo.setEditable(True)
+    combo.setInsertPolicy(QComboBox.NoInsert)
+    completer: QCompleter = combo.completer()
+    completer.setCompletionMode(QCompleter.PopupCompletion)
+    completer.setFilterMode(Qt.MatchContains)
+    line_edit = combo.lineEdit()
+    if line_edit is not None:
+        line_edit.setReadOnly(False)
+
+
 class SignalBlocker:
     """Context helper similar to :class:`QSignalBlocker` but usable with ``with``."""
 
@@ -97,4 +111,9 @@ class SignalBlocker:
                 pass
 
 
-__all__ = ["SignalBlocker", "combo_with_arrow", "set_combo_enabled"]
+__all__ = [
+    "SignalBlocker",
+    "combo_with_arrow",
+    "set_combo_enabled",
+    "setup_quick_filter",
+]

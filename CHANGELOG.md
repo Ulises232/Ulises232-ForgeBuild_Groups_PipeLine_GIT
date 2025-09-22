@@ -10,6 +10,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   evitar definiciones duplicadas en los historiales.
 - Los historiales de ramas y actividad NAS comparten helpers de filtros y búsqueda para
   eliminar duplicaciones y mantener una experiencia consistente.
+- Los combos de grupo y proyecto en las vistas de build y deploy usan `setup_quick_filter`
+  compartido para tener filtrado consistente sin duplicar código.
 
 ## [1.4.4] - 2025-10-03
 ### Cambiado

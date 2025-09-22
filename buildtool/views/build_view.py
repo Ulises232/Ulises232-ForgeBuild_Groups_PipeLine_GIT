@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QInputDialog,
     QMessageBox,
-    QCompleter,
     QSpinBox,
 )
 
@@ -33,7 +32,7 @@ from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker, build_worker
 
 from ..ui.multi_select import MultiSelectComboBox
-from ..ui.widgets import combo_with_arrow
+from ..ui.widgets import combo_with_arrow, setup_quick_filter
 from .preset_manager import PresetManagerDialog
 
 
@@ -147,8 +146,8 @@ class BuildView(QWidget):
         self.spinMaxWorkers.valueChanged.connect(self._on_max_workers_changed)
 
         self._worker_records: dict[PipelineWorker, dict] = {}
-        self._setup_quick_filter(self.cboGroup)
-        self._setup_quick_filter(self.cboProject)
+        setup_quick_filter(self.cboGroup)
+        setup_quick_filter(self.cboProject)
         self._refresh_presets()
         if hasattr(self.preset_notifier, "changed"):
             self.preset_notifier.changed.connect(self._refresh_presets)
@@ -175,14 +174,6 @@ class BuildView(QWidget):
             pkey = default_project_key(self.cfg, gkey)
         _, proj = find_project(self.cfg, pkey, gkey)
         return proj, gkey
-
-    def _setup_quick_filter(self, combo: QComboBox) -> None:
-        combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.NoInsert)
-        completer: QCompleter = combo.completer()
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        completer.setFilterMode(Qt.MatchContains)
-        combo.lineEdit().setReadOnly(False)
 
     @Slot()
     def _refresh_presets(self) -> None:
