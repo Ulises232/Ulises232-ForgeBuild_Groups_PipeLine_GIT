@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QObject, QTimer, QSize, Slot
 from ..core.config import Config
+from ..core.config_queries import find_project, get_group, iter_group_projects
 # Import our local-only shim
 from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
@@ -374,12 +375,12 @@ class GitView(QWidget):
             self.cboProject.clear()
             count = 0
             seen = set()
-            for g in (self.cfg.groups or []):
-                for p in (g.projects or []):
-                    if p.key not in seen:
-                        seen.add(p.key)
-                        self.cboProject.addItem(p.key, userData=g.key)
-                        count += 1
+            for group, project in iter_group_projects(self.cfg):
+                if project.key in seen:
+                    continue
+                seen.add(project.key)
+                self.cboProject.addItem(project.key, userData=group.key)
+                count += 1
             if count == 0:
                 self.cboProject.addItem("Sin proyectos", userData=None)
                 self.cboProject.setEnabled(False)
@@ -408,14 +409,8 @@ class GitView(QWidget):
         self._dbg("post_init: end")
 
     def _get_project_obj(self, gkey: str | None, pkey: str | None):
-        # Busca el proyecto por claves dentro de los grupos configurados
-        for g in (self.cfg.groups or []):
-            if gkey and getattr(g, "key", None) != gkey:
-                continue
-            for p in (getattr(g, "projects", None) or []):
-                if getattr(p, "key", None) == pkey:
-                    return p
-        return None
+        _, project = find_project(self.cfg, pkey, gkey)
+        return project
 
     @Slot()
     def _post_project_change(self):
@@ -435,11 +430,7 @@ class GitView(QWidget):
 
             # 2.1) Fallback por groups.repos cuando no hay workspaces[gkey]
             try:
-                grp = None
-                for g in (getattr(self.cfg, "groups", None) or []):
-                    if getattr(g, "key", None) == gkey:
-                        grp = g
-                        break
+                grp = get_group(self.cfg, gkey)
 
                 repo_path = None
                 if grp:

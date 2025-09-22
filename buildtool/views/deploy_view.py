@@ -19,6 +19,14 @@ from PySide6.QtWidgets import (
 
 from ..core.bg import run_in_thread
 from ..core.config import Config, PipelinePreset, save_config
+from ..core.config_queries import (
+    default_project_key,
+    first_group_key,
+    iter_group_projects,
+    iter_groups,
+    profile_target_map,
+    project_profiles,
+)
 from ..core.tasks import deploy_profiles_scheduled
 from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker
@@ -43,10 +51,10 @@ class DeployView(QWidget):
 
         row.addWidget(QLabel("Grupo:"))
         self.cboGroup = QComboBox()
-        groups = [g.key for g in (cfg.groups or [])]
-        if groups:
-            for g in groups:
-                self.cboGroup.addItem(g, g)
+        group_keys = [grp.key for grp in iter_groups(cfg)]
+        if group_keys:
+            for key in group_keys:
+                self.cboGroup.addItem(key, key)
         else:
             self.cboGroup.addItem("Sin grupos", None)
             self.cboGroup.setEnabled(False)
@@ -134,7 +142,7 @@ class DeployView(QWidget):
         if hasattr(self.preset_notifier, "changed"):
             self.preset_notifier.changed.connect(self._refresh_presets)
         self.refresh_group()
-        if not groups:
+        if not group_keys:
             self.cboProfiles.setEnabled(False)
             self.btnDeploySel.setEnabled(False)
             self.btnDeployAll.setEnabled(False)
@@ -184,7 +192,7 @@ class DeployView(QWidget):
             self._apply_preset(preset)
 
     def _apply_preset(self, preset: PipelinePreset) -> None:
-        target_group = preset.group_key or (self.cfg.groups[0].key if self.cfg.groups else None)
+        target_group = preset.group_key or first_group_key(self.cfg)
         idx = self.cboGroup.findData(target_group)
         if idx == -1:
             self.log.append(
@@ -268,8 +276,7 @@ class DeployView(QWidget):
         self.cboProject.clear()
         gkey = self._current_group()
 
-        grp = next((g for g in self.cfg.groups if g.key == gkey), None) if gkey else None
-        projects = [p.key for p in (grp.projects if grp else [])]
+        projects = [p.key for _, p in iter_group_projects(self.cfg, gkey)]
         for k in projects:
             self.cboProject.addItem(k, k)
 
@@ -283,29 +290,14 @@ class DeployView(QWidget):
 
     @Slot(int)
     def refresh_project(self, _index: Optional[int] = None) -> None:
-        self._profile_to_target.clear()
-        self.cboProfiles.set_items([])
-
         gkey = self._current_group()
+        if self.cboProject.isVisible():
+            pkey = self.cboProject.currentData()
+        else:
+            pkey = default_project_key(self.cfg, gkey)
 
-        profiles: list[str] = []
-        grp = next((g for g in self.cfg.groups if g.key == gkey), None) if gkey else None
-        proj = None
-        if grp:
-            if self.cboProject.isVisible():
-                pkey = self.cboProject.currentData()
-                proj = next((p for p in grp.projects if p.key == pkey), None)
-            else:
-                proj = grp.projects[0] if grp.projects else None
-            if proj and getattr(proj, "profiles", None):
-                profiles = list(proj.profiles)
-            elif grp.profiles:
-                profiles = list(grp.profiles)
-            for t in (grp.deploy_targets or []):
-                if proj and t.project_key != proj.key:
-                    continue
-                for prof in t.profiles:
-                    self._profile_to_target.setdefault(prof, t.name)
+        self._profile_to_target = profile_target_map(self.cfg, gkey, pkey)
+        profiles = project_profiles(self.cfg, gkey, pkey)
 
         self.cboProfiles.set_items(profiles or [])
 
@@ -331,8 +323,7 @@ class DeployView(QWidget):
         if self.cboProject.isVisible():
             pkey = self.cboProject.currentData()
         else:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None) if gkey else None
-            pkey = grp.projects[0].key if (grp and grp.projects) else None
+            pkey = default_project_key(self.cfg, gkey)
 
         if not pkey:
             self.log.append("<< No hay proyecto configurado.")
