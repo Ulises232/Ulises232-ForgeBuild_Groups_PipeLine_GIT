@@ -4,6 +4,10 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.1] - 2025-09-30
+### Corregido
+- La persistencia del asistente de grupos ahora actualiza registros existentes en `config.sqlite3` en lugar de reinserciones masivas, preservando los identificadores y evitando el crecimiento artificial de claves.
+
 ## [1.4.0] - 2025-09-29
 ### Añadido
 - Migración automática de grupos, proyectos y targets desde `config.yaml` hacia la base `config.sqlite3`, con pruebas unitarias que validan la persistencia.

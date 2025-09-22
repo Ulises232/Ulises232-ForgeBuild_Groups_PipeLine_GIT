@@ -173,6 +173,99 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 self.assertEqual(["dev", "qa"], stored[0].projects[0].profiles)
                 self.assertEqual(["mod"], [m.name for m in stored[0].projects[0].modules])
 
+    def test_replace_groups_updates_existing_rows(self):
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            initial_group = Group(
+                key="GX",
+                repos={"PX": "C:/repo"},
+                output_base="/tmp/out",
+                profiles=["dev"],
+                projects=[
+                    Project(
+                        key="PX",
+                        modules=[Module(name="mod", path="./module")],
+                        profiles=["dev"],
+                    )
+                ],
+                deploy_targets=[
+                    DeployTarget(
+                        name="deploy",
+                        project_key="PX",
+                        profiles=["dev"],
+                        path_template="/tmp/{profile}",
+                    )
+                ],
+            )
+
+            updated_group = Group(
+                key="GX",
+                repos={"PX": "D:/repo"},
+                output_base="/tmp/new",
+                profiles=["dev", "qa"],
+                projects=[
+                    Project(
+                        key="PX",
+                        modules=[
+                            Module(
+                                name="mod",
+                                path="./module",
+                                goals=["clean", "package"],
+                            )
+                        ],
+                        profiles=["dev", "qa"],
+                    )
+                ],
+                deploy_targets=[
+                    DeployTarget(
+                        name="deploy",
+                        project_key="PX",
+                        profiles=["qa", "dev"],
+                        path_template="/tmp/{profile}",
+                    )
+                ],
+            )
+
+            with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
+                "buildtool.core.config_store._state_dir", return_value=state_dir
+            ):
+                cfg = Config(
+                    paths=Paths(workspaces={}, output_base="/tmp/out", nas_dir=""),
+                    groups=[initial_group],
+                )
+                save_config(cfg)
+
+                db_path = state_dir / "config.sqlite3"
+                with sqlite3.connect(db_path) as cx:
+                    project_id = cx.execute("SELECT id FROM projects").fetchone()[0]
+                    module_id = cx.execute(
+                        "SELECT id FROM project_modules"
+                    ).fetchone()[0]
+                    deploy_id = cx.execute("SELECT id FROM deploy_targets").fetchone()[0]
+
+                cfg.groups = [updated_group]
+                save_config(cfg)
+
+                with sqlite3.connect(db_path) as cx:
+                    project_row = cx.execute("SELECT id, config_json FROM projects").fetchone()
+                    module_row = cx.execute(
+                        "SELECT id, goals FROM project_modules"
+                    ).fetchone()
+                    deploy_row = cx.execute(
+                        "SELECT id FROM deploy_targets"
+                    ).fetchone()
+                    profiles = cx.execute(
+                        "SELECT profile FROM group_profiles ORDER BY position"
+                    ).fetchall()
+
+                self.assertEqual(project_id, project_row[0])
+                self.assertEqual(module_id, module_row[0])
+                self.assertEqual(deploy_id, deploy_row[0])
+                self.assertEqual(["dev", "qa"], [p[0] for p in profiles])
+                project_config = json.loads(project_row[1])
+                self.assertEqual(["dev", "qa"], project_config.get("profiles"))
+                self.assertEqual(["clean", "package"], json.loads(module_row[1]))
+
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
