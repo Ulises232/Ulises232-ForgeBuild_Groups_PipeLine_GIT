@@ -43,9 +43,13 @@ class DeployView(QWidget):
 
         row.addWidget(QLabel("Grupo:"))
         self.cboGroup = QComboBox()
-        groups = [g.key for g in (cfg.groups or [])] or ["GLOBAL"]
-        for g in groups:
-            self.cboGroup.addItem(g, g)
+        groups = [g.key for g in (cfg.groups or [])]
+        if groups:
+            for g in groups:
+                self.cboGroup.addItem(g, g)
+        else:
+            self.cboGroup.addItem("Sin grupos", None)
+            self.cboGroup.setEnabled(False)
         self.cboGroupContainer = combo_with_arrow(self.cboGroup)
         row.addWidget(self.cboGroupContainer)
 
@@ -130,10 +134,15 @@ class DeployView(QWidget):
         if hasattr(self.preset_notifier, "changed"):
             self.preset_notifier.changed.connect(self._refresh_presets)
         self.refresh_group()
+        if not groups:
+            self.cboProfiles.setEnabled(False)
+            self.btnDeploySel.setEnabled(False)
+            self.btnDeployAll.setEnabled(False)
+            self.chkHotfix.setEnabled(False)
+            self.txtVersion.setEnabled(False)
 
     def _current_group(self) -> Optional[str]:
-        val = self.cboGroup.currentData()
-        return None if val == "GLOBAL" else val
+        return self.cboGroup.currentData()
 
     def _setup_quick_filter(self, combo: QComboBox) -> None:
         combo.setEditable(True)
@@ -175,14 +184,15 @@ class DeployView(QWidget):
             self._apply_preset(preset)
 
     def _apply_preset(self, preset: PipelinePreset) -> None:
-        target_group = preset.group_key or "GLOBAL"
+        target_group = preset.group_key or (self.cfg.groups[0].key if self.cfg.groups else None)
         idx = self.cboGroup.findData(target_group)
         if idx == -1:
             self.log.append(
                 f"<< El grupo '{target_group}' no existe en la configuración actual."
             )
             return
-        self.cboGroup.setCurrentIndex(idx)
+        if target_group is not None:
+            self.cboGroup.setCurrentIndex(idx)
 
         if preset.project_key:
             proj_idx = self.cboProject.findData(preset.project_key)
@@ -258,22 +268,16 @@ class DeployView(QWidget):
         self.cboProject.clear()
         gkey = self._current_group()
 
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            projects = [p.key for p in (grp.projects if grp else [])]
-            for k in projects:
-                self.cboProject.addItem(k, k)
-            show_proj = len(projects) > 1
-            self.lblProject.setVisible(show_proj)
-            self.cboProjectContainer.setVisible(show_proj)
-            self.cboProject.setVisible(show_proj)
-        else:
-            projects = [p.key for p in self.cfg.projects]
-            for k in projects:
-                self.cboProject.addItem(k, k)
-            self.lblProject.setVisible(True)
-            self.cboProjectContainer.setVisible(True)
-            self.cboProject.setVisible(True)
+        grp = next((g for g in self.cfg.groups if g.key == gkey), None) if gkey else None
+        projects = [p.key for p in (grp.projects if grp else [])]
+        for k in projects:
+            self.cboProject.addItem(k, k)
+
+        show_proj = len(projects) > 1
+        self.lblProject.setVisible(show_proj)
+        self.cboProjectContainer.setVisible(show_proj)
+        self.cboProject.setVisible(show_proj)
+        self.cboProject.setEnabled(bool(projects))
 
         self.refresh_project()
 
@@ -283,33 +287,21 @@ class DeployView(QWidget):
         self.cboProfiles.set_items([])
 
         gkey = self._current_group()
-        pkey = self.cboProject.currentData()
 
         profiles: list[str] = []
+        grp = next((g for g in self.cfg.groups if g.key == gkey), None) if gkey else None
         proj = None
-        if gkey:
-            grp = next((g for g in self.cfg.groups if g.key == gkey), None)
-            if grp:
-                if self.cboProject.isVisible():
-                    proj = next((p for p in grp.projects if p.key == pkey), None)
-                else:
-                    proj = grp.projects[0] if grp.projects else None
-                if proj and getattr(proj, "profiles", None):
-                    profiles = proj.profiles
-                elif grp and grp.profiles:
-                    profiles = grp.profiles
-                for t in (grp.deploy_targets or []):
-                    if proj and t.project_key != proj.key:
-                        continue
-                    for prof in t.profiles:
-                        self._profile_to_target.setdefault(prof, t.name)
-        else:
-            proj = next((p for p in self.cfg.projects if p.key == pkey), None)
+        if grp:
+            if self.cboProject.isVisible():
+                pkey = self.cboProject.currentData()
+                proj = next((p for p in grp.projects if p.key == pkey), None)
+            else:
+                proj = grp.projects[0] if grp.projects else None
             if proj and getattr(proj, "profiles", None):
-                profiles = proj.profiles
-            elif self.cfg.profiles:
-                profiles = self.cfg.profiles
-            for t in (self.cfg.deploy_targets or []):
+                profiles = list(proj.profiles)
+            elif grp.profiles:
+                profiles = list(grp.profiles)
+            for t in (grp.deploy_targets or []):
                 if proj and t.project_key != proj.key:
                     continue
                 for prof in t.profiles:
