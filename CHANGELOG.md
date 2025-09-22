@@ -4,6 +4,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.3] - 2025-10-02
+### Corregido
+- Al cambiar a ramas creadas por otro usuario, la vista de historial conserva al autor
+  original y registra al editor únicamente en el historial de actividad.
+
 ## [1.4.2] - 2025-10-01
 ### Cambiado
 - Funciones compartidas en `core.config_queries` centralizan la lectura de grupos, proyectos, módulos, perfiles y targets,

@@ -283,7 +283,9 @@ class NasBranchesView(QWidget):
         self.chkLocal.setChecked(bool(rec.exists_local))
         self.chkOrigin.setChecked(bool(rec.exists_origin))
         self.txtMerge.setText(rec.merge_status or "")
-        self.txtUser.setText(rec.last_updated_by or rec.created_by or "")
+        # Mostrar el autor original de la rama y sólo caer al último editor si
+        # no se cuenta con esa información.
+        self.txtUser.setText(rec.created_by or rec.last_updated_by or "")
         created = self._fmt_ts(rec.created_at)
         updated = self._fmt_ts(rec.last_updated_at or rec.created_at)
         self.lblCreated.setText(created)
