@@ -175,6 +175,11 @@ class MultiSelectComboBox(ComboBox):
     def _on_menu_closed(self) -> None:
         if self._search_input:
             self._filter_text = self._search_input.text()
+
+        menu = self._active_menu
+        if menu is not None:
+            menu.deleteLater()
+
         self._active_menu = None
         self._menu_actions = []
         self._search_input = None
@@ -215,7 +220,6 @@ class MultiSelectComboBox(ComboBox):
             menu.adjustSize()
 
         menu.setMaxVisibleItems(self.maxVisibleItems())
-        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         menu.closedSignal.connect(self._on_menu_closed)
         self.dropMenu = menu
 
