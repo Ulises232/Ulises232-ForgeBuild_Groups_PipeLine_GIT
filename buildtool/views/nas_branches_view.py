@@ -230,7 +230,13 @@ class NasBranchesView(QWidget):
                 haystack = " ".join(
                     filter(
                         None,
-                        [rec.branch, rec.group or "", rec.project or "", rec.last_updated_by or rec.created_by or ""],
+                        [
+                            rec.branch,
+                            rec.group or "",
+                            rec.project or "",
+                            rec.created_by or "",
+                            rec.last_updated_by or "",
+                        ],
                     )
                 ).lower()
                 if search not in haystack:
@@ -243,7 +249,7 @@ class NasBranchesView(QWidget):
                 "Sí" if rec.exists_origin else "No",
                 rec.merge_status or "",
                 self._fmt_ts(rec.last_updated_at or rec.created_at),
-                rec.last_updated_by or rec.created_by or "",
+                self._format_user(rec),
             ])
             item.setData(0, Qt.UserRole, rec.key())
             self.tree.addTopLevelItem(item)
@@ -283,7 +289,9 @@ class NasBranchesView(QWidget):
         self.chkLocal.setChecked(bool(rec.exists_local))
         self.chkOrigin.setChecked(bool(rec.exists_origin))
         self.txtMerge.setText(rec.merge_status or "")
-        self.txtUser.setText(rec.last_updated_by or rec.created_by or "")
+        # Mostrar el autor original de la rama y sólo caer al último editor si
+        # no se cuenta con esa información.
+        self.txtUser.setText(rec.created_by or rec.last_updated_by or "")
         created = self._fmt_ts(rec.created_at)
         updated = self._fmt_ts(rec.last_updated_at or rec.created_at)
         self.lblCreated.setText(created)
@@ -369,6 +377,18 @@ class NasBranchesView(QWidget):
             if item.data(0, Qt.UserRole) == self._current_key:
                 self.tree.setCurrentItem(item)
                 break
+
+    def _format_user(self, rec: BranchRecord) -> str:
+        creator = (rec.created_by or "").strip()
+        editor = (rec.last_updated_by or "").strip()
+        parts = []
+        if creator:
+            parts.append(creator)
+        if editor and editor != creator:
+            parts.append(editor)
+        if not parts and editor:
+            parts.append(editor)
+        return " / ".join(parts)
 
     @Slot()
     @Slot(bool)
