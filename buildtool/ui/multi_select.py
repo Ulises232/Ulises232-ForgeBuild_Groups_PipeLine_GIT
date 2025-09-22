@@ -227,7 +227,7 @@ class MultiSelectComboBox(ComboBox):
 
         if hd >= hu:
             menu.view.adjustSize(pd, MenuAnimationType.DROP_DOWN)
-            menu.exec(pd, aniType=MenuAnimationType.DROP_DOWN)
+            menu.exec(pd)
         else:
             menu.view.adjustSize(pu, MenuAnimationType.PULL_UP)
-            menu.exec(pu, aniType=MenuAnimationType.PULL_UP)
+            menu.exec(pu)

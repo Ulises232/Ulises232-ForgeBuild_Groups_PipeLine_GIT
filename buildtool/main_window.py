@@ -38,30 +38,29 @@ class MainWindow(FluentWindow):
 
         self.cfg: Config = load_config()
         self._groups_win: Optional[GroupsWizard] = None
+        self._routes: dict[str, QWidget] = {}
         self._ensure_theme()
 
         self._setup_title_bar()
         self._setup_navigation()
+        self.stackedWidget.currentChanged.connect(self._on_stack_changed)
         self._load_interfaces()
         self.btnGroups.clicked.connect(self.open_groups)
 
     def reload_config(self):
-        current_widget = self.stackedWidget.currentWidget()
-        current_route = current_widget.objectName() if current_widget else _PIPELINE_ROUTE
+        current_route = self._current_route() or _PIPELINE_ROUTE
 
         self.cfg = load_config()
 
-        self._remove_interface(self.pipeline)
-        self._remove_interface(self.git)
+        self._clear_interfaces()
 
         self.pipeline = self._create_pipeline_view()
         self.git = self._create_git_view()
         self._register_interfaces()
 
-        target_route = current_route if current_route in (self.pipeline.objectName(), self.git.objectName()) else _PIPELINE_ROUTE
-        target_widget = self._route_to_widget(target_route)
-        if target_widget is not None:
-            self.switchTo(target_widget)
+        if self._route_to_widget(current_route) is None:
+            current_route = _PIPELINE_ROUTE
+        self._switch_to_route(current_route)
 
     def open_groups(self):
         if self._groups_win is None:
@@ -120,23 +119,23 @@ class MainWindow(FluentWindow):
         self.navigationInterface.setCollapsible(True)
 
     def _load_interfaces(self) -> None:
+        self._clear_interfaces()
         self.pipeline = self._create_pipeline_view()
         self.git = self._create_git_view()
         self._register_interfaces()
 
     def _register_interfaces(self) -> None:
-        self._routes = {}
-
-        for widget, icon_name, label in (
-            (self.pipeline, "pipeline", TAB_PIPELINE),
-            (self.git, "git", TAB_GIT),
+        for widget, icon_name, label, route in (
+            (self.pipeline, "pipeline", TAB_PIPELINE, _PIPELINE_ROUTE),
+            (self.git, "git", TAB_GIT, _GIT_ROUTE),
         ):
             if widget is None:
                 continue
+            self._add_interface(widget, icon_name, label, route)
 
-            widget.setObjectName(_PIPELINE_ROUTE if widget is self.pipeline else _GIT_ROUTE)
-            self.addSubInterface(widget, get_icon(icon_name), label, position=NavigationItemPosition.TOP)
-            self._routes[widget.objectName()] = widget
+        if self._routes:
+            first_route = next(iter(self._routes))
+            self._switch_to_route(first_route)
 
     def _create_pipeline_view(self) -> PipelineView:
         return PipelineView(self.cfg, self.reload_config)
@@ -144,18 +143,55 @@ class MainWindow(FluentWindow):
     def _create_git_view(self) -> GitView:
         return GitView(self.cfg, self)
 
-    def _remove_interface(self, widget: Optional[QWidget]) -> None:
+    def _route_to_widget(self, route: str) -> Optional[QWidget]:
+        return self._routes.get(route)
+
+    def _add_interface(self, widget: QWidget, icon_name: str, label: str, route: str) -> None:
+        widget.setObjectName(route)
+        self.stackedWidget.addWidget(widget)
+        self._routes[route] = widget
+        self.navigationInterface.addItem(
+            routeKey=route,
+            icon=get_icon(icon_name),
+            text=label,
+            onClick=lambda r=route: self._switch_to_route(r),
+            position=NavigationItemPosition.TOP,
+            tooltip=label,
+        )
+
+    def _switch_to_route(self, route: str) -> None:
+        widget = self._route_to_widget(route)
         if widget is None:
             return
-        try:
-            widget.close()
-        except Exception:
-            pass
-        try:
-            self.removeInterface(widget, isDelete=True)
-        except Exception:
+        super().switchTo(widget)
+        self.navigationInterface.setCurrentItem(route)
+
+    def _clear_interfaces(self) -> None:
+        nav = getattr(self, "navigationInterface", None)
+        for route, widget in list(self._routes.items()):
+            try:
+                widget.close()
+            except Exception:
+                pass
+            self.stackedWidget.removeWidget(widget)
+            if nav is not None:
+                nav.removeWidget(route)
             widget.setParent(None)
             widget.deleteLater()
+        self._routes.clear()
+        self.pipeline = None
+        self.git = None
 
-    def _route_to_widget(self, route: str) -> Optional[QWidget]:
-        return getattr(self, "_routes", {}).get(route)
+    def _current_route(self) -> Optional[str]:
+        current_widget = self.stackedWidget.currentWidget()
+        for route, widget in self._routes.items():
+            if widget is current_widget:
+                return route
+        return None
+
+    def _on_stack_changed(self, index: int) -> None:
+        widget = self.stackedWidget.widget(index)
+        for route, candidate in self._routes.items():
+            if candidate is widget:
+                self.navigationInterface.setCurrentItem(route)
+                break
