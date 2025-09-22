@@ -49,8 +49,7 @@ from ..core.branch_store import (
     recover_from_nas,
 )
 from .nas_activity_log_view import NasActivityLogView
-from .local_branches_view import LocalBranchesView
-from .nas_branches_view import NasBranchesView
+from .branch_history_view import BranchHistoryView
 from ..ui.icons import get_icon
 from ..ui.widgets import combo_with_arrow, set_combo_enabled
 
@@ -341,9 +340,9 @@ class GitView(QWidget):
         clog_layout.addLayout(hcl)
         bottom_tabs.addTab(console, get_icon("log"), "Consola")
 
-        self.localBranchesView = LocalBranchesView(self)
+        self.localBranchesView = BranchHistoryView("local", self)
         bottom_tabs.addTab(self.localBranchesView, get_icon("branch"), "Historial local")
-        self.nasBranchesView = NasBranchesView(self)
+        self.nasBranchesView = BranchHistoryView("nas", self)
         bottom_tabs.addTab(self.nasBranchesView, get_icon("branch"), "Historial NAS")
         self.nasActivityView = NasActivityLogView(self)
         bottom_tabs.addTab(self.nasActivityView, get_icon("history"), "Activity NAS")
