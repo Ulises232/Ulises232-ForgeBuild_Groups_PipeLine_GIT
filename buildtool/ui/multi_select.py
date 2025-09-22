@@ -173,9 +173,6 @@ class MultiSelectComboBox(ComboBox):
         self._apply_filter_to_menu(text)
 
     def _on_menu_closed(self) -> None:
-        if self._search_input:
-            self._filter_text = self._search_input.text()
-
         self._active_menu = None
         self._menu_actions = []
         self._search_input = None
