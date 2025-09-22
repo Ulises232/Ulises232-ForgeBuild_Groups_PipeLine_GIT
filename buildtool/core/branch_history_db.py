@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -54,9 +55,22 @@ class BranchHistoryDB:
 
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
+            wal_enabled = False
+            try:
+                result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+                wal_enabled = bool(result and str(result[0]).lower() == "wal")
+            except sqlite3.OperationalError:
+                wal_enabled = False
+
+            if not wal_enabled:
+                conn.execute("PRAGMA journal_mode=DELETE")
+                logging.warning(
+                    "BranchHistoryDB journal_mode WAL unavailable for %s; falling back to DELETE",
+                    self.path,
+                )
+
             conn.executescript(
                 """
-                PRAGMA journal_mode = WAL;
                 CREATE TABLE IF NOT EXISTS branches (
                     key TEXT PRIMARY KEY,
                     branch TEXT NOT NULL,

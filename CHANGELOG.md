@@ -4,6 +4,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.5] - 2025-10-04
+### Corregido
+- Se degrada automáticamente el `journal_mode` a `DELETE` cuando SQLite no permite `WAL`, evitando
+  bloqueos al compartir la base de historial entre sesiones concurrentes.
+
 ## [1.4.4] - 2025-10-03
 ### Cambiado
 - Las vistas de historial local y NAS se consolidaron en un único widget configurable, eliminando
