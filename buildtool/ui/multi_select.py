@@ -210,6 +210,10 @@ class MultiSelectComboBox(ComboBox):
             menu.addAction(action)
             self._menu_actions.append((action, index))
 
+        if menu.view.width() < self.width():
+            menu.view.setMinimumWidth(self.width())
+            menu.adjustSize()
+
         menu.setMaxVisibleItems(self.maxVisibleItems())
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         menu.closedSignal.connect(self._on_menu_closed)
@@ -227,7 +231,7 @@ class MultiSelectComboBox(ComboBox):
 
         if hd >= hu:
             menu.view.adjustSize(pd, MenuAnimationType.DROP_DOWN)
-            menu.exec(pd)
+            menu.exec(pd, True, MenuAnimationType.DROP_DOWN)
         else:
             menu.view.adjustSize(pu, MenuAnimationType.PULL_UP)
-            menu.exec(pu)
+            menu.exec(pu, True, MenuAnimationType.PULL_UP)
