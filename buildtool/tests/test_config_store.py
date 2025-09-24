@@ -72,6 +72,31 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 self.assertEqual(1, len(stored))
                 self.assertEqual("G1", stored[0].key)
 
+    def test_upgrades_legacy_sprints_table_without_branch_key(self):
+        with TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "config.sqlite3"
+            with sqlite3.connect(db_path) as cx:
+                cx.executescript(
+                    """
+                    CREATE TABLE sprints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        version TEXT NOT NULL
+                    );
+                    INSERT INTO sprints (name, version) VALUES ('Sprint 1', '1.0');
+                    """
+                )
+
+            store = ConfigStore(db_path)
+            sprints = store.list_sprints()
+
+            self.assertEqual(1, len(sprints))
+
+            with sqlite3.connect(db_path) as cx:
+                columns = {row[1] for row in cx.execute("PRAGMA table_info(sprints)")}
+                self.assertIn("branch_key", columns)
+                self.assertIn("metadata", columns)
+
     def test_save_config_persists_groups_into_store(self):
         with TemporaryDirectory() as tmp:
             state_dir = Path(tmp) / "state"

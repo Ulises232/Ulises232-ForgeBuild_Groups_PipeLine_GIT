@@ -164,6 +164,7 @@ class ConfigStore:
             cx.execute("PRAGMA foreign_keys = ON")
             legacy_groups = self._extract_legacy_groups(cx)
             self._inline_project_profiles(cx)
+            self._migrate_sprint_tables(cx)
             cx.executescript(SCHEMA)
             if legacy_groups:
                 self._replace_groups_with_connection(cx, legacy_groups)
@@ -194,6 +195,32 @@ DROP TABLE IF EXISTS groups;
 """
         )
         return legacy_data
+
+    # ------------------------------------------------------------------
+    def _migrate_sprint_tables(self, cx: sqlite3.Connection) -> None:
+        """Ensure legacy sprint/card tables expose the new columns used by the app."""
+
+        sprint_exists = cx.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sprints'"
+        ).fetchone()
+        if sprint_exists:
+            columns = {row[1] for row in cx.execute("PRAGMA table_info(sprints)")}
+            if "branch_key" not in columns:
+                cx.execute("ALTER TABLE sprints ADD COLUMN branch_key TEXT")
+            if "metadata" not in columns:
+                cx.execute(
+                    "ALTER TABLE sprints ADD COLUMN metadata TEXT DEFAULT '{}'"
+                )
+
+        cards_exists = cx.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cards'"
+        ).fetchone()
+        if cards_exists:
+            columns = {row[1] for row in cx.execute("PRAGMA table_info(cards)")}
+            if "metadata" not in columns:
+                cx.execute(
+                    "ALTER TABLE cards ADD COLUMN metadata TEXT DEFAULT '{}'"
+                )
 
     # ------------------------------------------------------------------
     def _inline_project_profiles(self, cx: sqlite3.Connection) -> None:

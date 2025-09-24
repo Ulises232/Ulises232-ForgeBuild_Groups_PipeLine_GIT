@@ -11,6 +11,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   `no such column: branch_key` al abrir el diálogo de autenticación en instalaciones antiguas.
 - La utilería de widgets importa `QCompleter` desde `QtWidgets`, restaurando el arranque en entornos
   con PySide6 6.8 donde la clase ya no está disponible en `QtGui`.
+- La migración de `config.sqlite3` añade las columnas `branch_key`/`metadata` a `sprints`
+  antes de recrear índices, evitando fallos al cargar la ventana principal con bases antiguas.
 
 ## [1.5.0] - 2025-10-05
 ### Añadido
