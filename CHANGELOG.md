@@ -4,6 +4,22 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.5.0] - 2025-10-05
+### Añadido
+- Módulo `buildtool.core.sprint_planner` que centraliza la creación de sprints, tarjetas y flujos de
+  aprobación (pruebas unitarias y QA) con control de roles/usuarios y reglas de merge ligadas a la
+  rama base de cada versión.
+
+### Cambiado
+- `BranchHistoryDB` amplía su esquema en SQLite con tablas de roles, usuarios, sprints y tickets,
+  junto con operaciones de lectura/escritura para habilitar la nueva experiencia de planeación.
+- `buildtool.core.branch_store` expone `history_db_for`/`history_db_at` para reutilizar la misma
+  conexión de base de historial desde nuevos módulos.
+
+### Pruebas
+- Cobertura unitaria para el planificador de sprints validando permisos, validación de ramas y el
+  desbloqueo de merges según los checks registrados.
+
 ## [1.4.5] - 2025-10-04
 ### Corregido
 - Se degrada automáticamente el `journal_mode` a `DELETE` cuando SQLite no permite `WAL`, evitando

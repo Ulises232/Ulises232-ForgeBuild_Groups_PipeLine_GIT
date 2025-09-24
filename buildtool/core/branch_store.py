@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Dict, Optional, List, Any, Iterable
+from typing import Dict, Optional, List, Any, Iterable, Literal
 import os
 import time
 import json
@@ -261,6 +261,34 @@ def _resolve_base(path: Optional[Path]) -> Path:
     if path.is_dir():
         return path
     return path.parent
+
+
+def history_db_for(storage: Literal["local", "nas"] = "local") -> BranchHistoryDB:
+    """Return the branch history database bound to *storage*.
+
+    Parameters
+    ----------
+    storage:
+        ``"local"`` (predeterminado) usa la base del usuario. ``"nas"``
+        apunta a la base compartida en la NAS y propagará
+        :class:`NasUnavailableError` si no puede alcanzarse.
+    """
+
+    if storage == "nas":
+        base = _nas_dir()
+    else:
+        base = _state_dir()
+    return _get_db(base)
+
+
+def history_db_at(path: Optional[Path] = None) -> BranchHistoryDB:
+    """Return the branch history database stored near *path*.
+
+    Cuando ``path`` es ``None`` equivale a ``history_db_for('local')``.
+    """
+
+    base = _resolve_base(path)
+    return _get_db(base)
 
 
 def load_index(path: Optional[Path] = None, *, filter_origin: bool = False) -> Index:
