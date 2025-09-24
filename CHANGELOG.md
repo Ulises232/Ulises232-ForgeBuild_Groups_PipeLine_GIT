@@ -14,6 +14,10 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - El flujo de merge en la vista Git valida las aprobaciones registradas en las tarjetas y documenta el resultado en la historia.
 - La vista de historial de pipelines muestra información de QA/pruebas y permite filtrar por estado o tarjeta asociada.
 
+### Corregido
+- La inicialización de la base `branch_history_db.sqlite3` migra `activity_log` heredado añadiendo `branch_key` antes de crear los
+  índices, evitando fallos al abrir el diálogo de autenticación en instalaciones existentes.
+
 ## [1.4.6] - 2025-10-04
 ### Cambiado
 - El helper `SignalBlocker` vive en `buildtool/ui/widgets.py` para reutilizarlo entre vistas y

@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 from pathlib import Path
 import unittest
@@ -111,6 +112,36 @@ class LoadIndexTest(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["action"], "create")
         self.assertEqual(entries[0]["user"], "bob")
+
+    def test_migrates_activity_log_branch_key(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            db_path = base / "branches_history.sqlite3"
+            with sqlite3.connect(db_path) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE activity_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ts INTEGER NOT NULL,
+                        user TEXT,
+                        group_name TEXT,
+                        project TEXT,
+                        branch TEXT,
+                        action TEXT,
+                        result TEXT,
+                        message TEXT
+                    );
+                    INSERT INTO activity_log (
+                        ts, user, group_name, project, branch, action, result, message
+                    ) VALUES (1700000002, 'carol', 'g', 'p', 'feature/old', 'merge', 'ok', 'done');
+                    """
+                )
+            BranchHistoryDB(db_path)
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(activity_log)")}
+                self.assertIn("branch_key", columns)
+                row = conn.execute("SELECT branch_key FROM activity_log").fetchone()
+        self.assertEqual(row[0], "g/p/feature/old")
 
 
 if __name__ == "__main__":

@@ -126,6 +126,8 @@ class BranchHistoryDB:
                     self.path,
                 )
 
+            self._apply_migrations(conn)
+
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS branches (
@@ -226,6 +228,35 @@ class BranchHistoryDB:
                 );
                 """
             )
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        self._ensure_activity_log_branch_key(conn)
+
+    def _ensure_activity_log_branch_key(self, conn: sqlite3.Connection) -> None:
+        columns = self._table_columns(conn, "activity_log")
+        if not columns:
+            return
+        if "branch_key" in columns:
+            return
+        conn.execute("ALTER TABLE activity_log ADD COLUMN branch_key TEXT")
+        conn.execute(
+            """
+            UPDATE activity_log
+               SET branch_key = CASE
+                   WHEN COALESCE(group_name, '') || COALESCE(project, '') || COALESCE(branch, '') = ''
+                       THEN ''
+                   ELSE COALESCE(group_name, '') || '/' || COALESCE(project, '') || '/' || COALESCE(branch, '')
+               END
+             WHERE branch_key IS NULL OR branch_key = ''
+            """
+        )
+
+    def _table_columns(self, conn: sqlite3.Connection, table: str) -> set[str]:
+        try:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        except sqlite3.OperationalError:
+            return set()
+        return {str(row[1]) for row in rows}
 
     # ------------------------------------------------------------------
     # branches

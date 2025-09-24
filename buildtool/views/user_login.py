@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -119,6 +119,7 @@ class UserLoginDialog(QDialog):
                 self.layout().insertWidget(self.layout().count() - 1, chk)
 
     # ------------------------------------------------------------------
+    @Slot()
     def _create_user(self) -> None:
         username = self.txtNewUser.text().strip()
         display = self.txtNewDisplay.text().strip() or username
@@ -135,6 +136,7 @@ class UserLoginDialog(QDialog):
             self.cboUser.setCurrentIndex(index)
 
     # ------------------------------------------------------------------
+    @Slot(int)
     def _on_user_changed(self, index: int) -> None:
         username = self.cboUser.itemData(index)
         assigned = set()
@@ -145,6 +147,7 @@ class UserLoginDialog(QDialog):
             chk.setChecked(key in assigned)
 
     # ------------------------------------------------------------------
+    @Slot()
     def accept(self) -> None:
         index = self.cboUser.currentIndex()
         username = self.cboUser.itemData(index)
