@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,6 +55,55 @@ class PipelineHistoryTest(unittest.TestCase):
 
         self.history.clear()
         self.assertEqual(self.history.list_runs(), [])
+
+    def test_legacy_database_adds_card_columns_and_indexes(self) -> None:
+        legacy_db = Path(self.tmp.name) / "legacy.sqlite3"
+        with sqlite3.connect(legacy_db) as cx:
+            cx.executescript(
+                """
+                CREATE TABLE pipeline_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pipeline TEXT NOT NULL,
+                    user TEXT,
+                    group_key TEXT,
+                    project_key TEXT,
+                    profiles TEXT,
+                    modules TEXT,
+                    version TEXT,
+                    hotfix INTEGER,
+                    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    finished_at DATETIME,
+                    status TEXT,
+                    message TEXT
+                );
+                CREATE TABLE pipeline_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+                    ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    message TEXT NOT NULL
+                );
+                """
+            )
+
+        history = PipelineHistory(legacy_db)
+
+        with sqlite3.connect(legacy_db) as cx:
+            columns = {
+                row[1]
+                for row in cx.execute("PRAGMA table_info(pipeline_runs)").fetchall()
+            }
+            self.assertIn("card_id", columns)
+            self.assertIn("unit_tests_status", columns)
+            self.assertIn("qa_status", columns)
+            self.assertIn("approved_by", columns)
+
+            indexes = {
+                row[1]
+                for row in cx.execute("PRAGMA index_list('pipeline_runs')").fetchall()
+            }
+            self.assertIn("ix_pipeline_runs_card", indexes)
+
+        history.clear()
 
 
 if __name__ == "__main__":

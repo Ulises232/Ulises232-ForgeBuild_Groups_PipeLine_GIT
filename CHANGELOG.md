@@ -13,6 +13,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   con PySide6 6.8 donde la clase ya no está disponible en `QtGui`.
 - La migración de `config.sqlite3` añade las columnas `branch_key`/`metadata` a `sprints`
   antes de recrear índices, evitando fallos al cargar la ventana principal con bases antiguas.
+- El historial de pipelines migra primero las columnas nuevas y crea los índices al final,
+  evitando el error `no such column: card_id` en bases existentes sin los campos recientes.
 
 ## [1.5.0] - 2025-10-05
 ### Añadido

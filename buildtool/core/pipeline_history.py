@@ -35,11 +35,6 @@ CREATE TABLE IF NOT EXISTS pipeline_logs (
     ts DATETIME DEFAULT CURRENT_TIMESTAMP,
     message TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_pipeline ON pipeline_runs(pipeline, started_at DESC);
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_group ON pipeline_runs(group_key);
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_project ON pipeline_runs(project_key);
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_card ON pipeline_runs(card_id);
-CREATE INDEX IF NOT EXISTS ix_pipeline_logs_run ON pipeline_logs(run_id, ts);
 """
 
 
@@ -87,9 +82,10 @@ class PipelineHistory:
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             cx.executescript(SCHEMA)
-            self._ensure_columns(cx)
+            columns = self._ensure_columns(cx)
+            self._ensure_indexes(cx, columns)
 
-    def _ensure_columns(self, cx: sqlite3.Connection) -> None:
+    def _ensure_columns(self, cx: sqlite3.Connection) -> set[str]:
         info = cx.execute("PRAGMA table_info(pipeline_runs)").fetchall()
         columns = {row[1] for row in info}
         statements: list[str] = []
@@ -105,6 +101,33 @@ class PipelineHistory:
             cx.execute(stmt)
         if statements:
             cx.commit()
+            info = cx.execute("PRAGMA table_info(pipeline_runs)").fetchall()
+            columns = {row[1] for row in info}
+        return columns
+
+    def _ensure_indexes(self, cx: sqlite3.Connection, columns: set[str]) -> None:
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_pipeline"
+            " ON pipeline_runs(pipeline, started_at DESC)"
+        )
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_group"
+            " ON pipeline_runs(group_key)"
+        )
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_project"
+            " ON pipeline_runs(project_key)"
+        )
+        if "card_id" in columns:
+            cx.execute(
+                "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_card"
+                " ON pipeline_runs(card_id)"
+            )
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_logs_run"
+            " ON pipeline_logs(run_id, ts)"
+        )
+        cx.commit()
 
     # ------------------------------------------------------------------
     def start_run(
