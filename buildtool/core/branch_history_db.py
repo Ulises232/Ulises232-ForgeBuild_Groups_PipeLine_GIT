@@ -161,11 +161,6 @@ class BranchHistoryDB:
                     UNIQUE (ts, user, group_name, project, branch, action, result, message)
                 );
 
-                CREATE INDEX IF NOT EXISTS idx_activity_branch_key
-                    ON activity_log(branch_key);
-                CREATE INDEX IF NOT EXISTS idx_activity_ts
-                    ON activity_log(ts DESC);
-
                 CREATE TABLE IF NOT EXISTS sprints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     branch_key TEXT NOT NULL,
@@ -200,11 +195,6 @@ class BranchHistoryDB:
                     status TEXT DEFAULT 'pending',
                     FOREIGN KEY(sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
                 );
-                CREATE INDEX IF NOT EXISTS idx_cards_sprint
-                    ON cards(sprint_id);
-                CREATE INDEX IF NOT EXISTS idx_cards_branch
-                    ON cards(branch);
-
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
@@ -229,8 +219,36 @@ class BranchHistoryDB:
                 """
             )
 
+            self._ensure_indexes(conn)
+
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
         self._ensure_activity_log_branch_key(conn)
+
+    def _ensure_indexes(self, conn: sqlite3.Connection) -> None:
+        """Create or rebuild indexes that may rely on migrated columns."""
+
+        # activity_log indexes depend on the branch_key column being present on
+        # legacy installations, so we guard them explicitly instead of relying
+        # on the shared DDL script.
+        activity_columns = self._table_columns(conn, "activity_log")
+        if "branch_key" in activity_columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_branch_key ON activity_log(branch_key)"
+            )
+
+        if activity_columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(ts DESC)"
+            )
+
+        # The remaining tables always exist with the required columns when the
+        # script above runs, but `CREATE INDEX IF NOT EXISTS` keeps the calls
+        # idempotent for repeated initialisations.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sprints_branch ON sprints(branch_key)"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cards_sprint ON cards(sprint_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_cards_branch ON cards(branch)")
 
     def _ensure_activity_log_branch_key(self, conn: sqlite3.Connection) -> None:
         columns = self._table_columns(conn, "activity_log")

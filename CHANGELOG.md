@@ -15,6 +15,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La vista de historial de pipelines muestra información de QA/pruebas y permite filtrar por estado o tarjeta asociada.
 
 ### Corregido
+- La migración del historial crea los índices después de validar `branch_key`,
+  evitando errores de inicio cuando existen bases antiguas sin la columna.
 - La inicialización de la base `branch_history_db.sqlite3` migra `activity_log` heredado añadiendo `branch_key` antes de crear los
   índices, evitando fallos al abrir el diálogo de autenticación en instalaciones existentes.
 
