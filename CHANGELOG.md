@@ -4,10 +4,20 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.4.6] - 2025-10-04
+### Cambiado
+- El helper `SignalBlocker` vive en `buildtool/ui/widgets.py` para reutilizarlo entre vistas y
+  evitar definiciones duplicadas en los historiales.
+- Los historiales de ramas y actividad NAS comparten helpers de filtros y búsqueda para
+  eliminar duplicaciones y mantener una experiencia consistente.
+- Los combos de grupo y proyecto en las vistas de build y deploy usan `setup_quick_filter`
+  compartido para tener filtrado consistente sin duplicar código.
+
 ## [1.4.5] - 2025-10-04
 ### Corregido
 - Se degrada automáticamente el `journal_mode` a `DELETE` cuando SQLite no permite `WAL`, evitando
   bloqueos al compartir la base de historial entre sesiones concurrentes.
+
 
 ## [1.4.4] - 2025-10-03
 ### Cambiado

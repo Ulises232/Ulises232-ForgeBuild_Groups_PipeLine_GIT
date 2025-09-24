@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
+from operator import itemgetter
+
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QComboBox,
@@ -18,6 +20,11 @@ from PySide6.QtWidgets import (
 
 from ..core.branch_store import load_nas_activity_log
 from ..ui.widgets import combo_with_arrow
+from .shared_filters import (
+    iter_filtered_records,
+    sync_group_project_filters,
+    update_project_filter,
+)
 
 
 class NasActivityLogView(QWidget):
@@ -26,6 +33,8 @@ class NasActivityLogView(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._entries: List[dict] = []
+        self._group_getter = itemgetter("group")
+        self._project_getter = itemgetter("project")
         self._setup_ui()
         self._load_entries()
 
@@ -76,7 +85,7 @@ class NasActivityLogView(QWidget):
         root.addWidget(self.tree, 1)
 
         self.btnRefresh.clicked.connect(self._load_entries)
-        self.cboGroup.currentIndexChanged.connect(self._on_filters_changed)
+        self.cboGroup.currentIndexChanged.connect(self._on_group_filter_changed)
         self.cboProject.currentIndexChanged.connect(self._refresh_tree)
         self.txtSearch.textChanged.connect(self._refresh_tree)
 
@@ -85,45 +94,24 @@ class NasActivityLogView(QWidget):
     def _load_entries(self) -> None:
         self._entries = load_nas_activity_log()
         self._entries.sort(key=lambda e: e.get("ts") or 0, reverse=True)
-        self._populate_filters()
+        sync_group_project_filters(
+            self.cboGroup,
+            self.cboProject,
+            self._entries,
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
         self._refresh_tree()
 
-    def _populate_filters(self) -> None:
-        groups = sorted({e.get("group") or "" for e in self._entries})
-        with SignalBlocker(self.cboGroup):
-            self.cboGroup.clear()
-            self.cboGroup.addItem("Todos", userData=None)
-            for g in groups:
-                if g:
-                    self.cboGroup.addItem(g, userData=g)
-        self._update_projects_filter()
-
-    def _update_projects_filter(self) -> None:
-        group = self._current_group_filter()
-        projects = set()
-        for e in self._entries:
-            if group and e.get("group") != group:
-                continue
-            proj = e.get("project")
-            if proj:
-                projects.add(proj)
-        with SignalBlocker(self.cboProject):
-            self.cboProject.clear()
-            self.cboProject.addItem("Todos", userData=None)
-            for proj in sorted(projects):
-                self.cboProject.addItem(proj, userData=proj)
-
-    def _current_group_filter(self) -> Optional[str]:
-        idx = self.cboGroup.currentIndex()
-        return self.cboGroup.itemData(idx)
-
-    def _current_project_filter(self) -> Optional[str]:
-        idx = self.cboProject.currentIndex()
-        return self.cboProject.itemData(idx)
-
     @Slot()
-    def _on_filters_changed(self) -> None:
-        self._update_projects_filter()
+    def _on_group_filter_changed(self) -> None:
+        update_project_filter(
+            self.cboGroup,
+            self.cboProject,
+            self._entries,
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+        )
         self._refresh_tree()
 
     # ----- rendering -----
@@ -131,22 +119,23 @@ class NasActivityLogView(QWidget):
     def _refresh_tree(self) -> None:
         self.tree.setUpdatesEnabled(False)
         self.tree.clear()
-        group = self._current_group_filter()
-        project = self._current_project_filter()
-        search = (self.txtSearch.text() or "").strip().lower()
         count = 0
-        for entry in self._entries:
-            if group and entry.get("group") != group:
-                continue
-            if project and entry.get("project") != project:
-                continue
-            if search:
-                haystack = " ".join(
-                    str(entry.get(key, ""))
-                    for key in ("user", "branch", "action", "result", "message")
-                ).lower()
-                if search not in haystack:
-                    continue
+        filtered = iter_filtered_records(
+            self._entries,
+            group_combo=self.cboGroup,
+            project_combo=self.cboProject,
+            search_text=self.txtSearch.text(),
+            group_getter=self._group_getter,
+            project_getter=self._project_getter,
+            haystack_builder=lambda entry: (
+                str(entry.get("user", "")),
+                str(entry.get("branch", "")),
+                str(entry.get("action", "")),
+                str(entry.get("result", "")),
+                str(entry.get("message", "")),
+            ),
+        )
+        for entry in filtered:
             item = QTreeWidgetItem([
                 self._fmt_ts(entry.get("ts")),
                 entry.get("user", ""),
@@ -171,24 +160,3 @@ class NasActivityLogView(QWidget):
             return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
         except Exception:
             return "—"
-
-
-class SignalBlocker:
-    def __init__(self, widget):
-        self.widget = widget
-        self._blocked = False
-
-    def __enter__(self):
-        try:
-            self.widget.blockSignals(True)
-            self._blocked = True
-        except Exception:
-            self._blocked = False
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._blocked:
-            try:
-                self.widget.blockSignals(False)
-            except Exception:
-                pass

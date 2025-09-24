@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QInputDialog,
     QMessageBox,
-    QCompleter,
 )
 
 from ..core.bg import run_in_thread
@@ -32,7 +31,7 @@ from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker
 
 from ..ui.multi_select import MultiSelectComboBox
-from ..ui.widgets import combo_with_arrow
+from ..ui.widgets import combo_with_arrow, setup_quick_filter
 from .preset_manager import PresetManagerDialog
 
 
@@ -136,8 +135,8 @@ class DeployView(QWidget):
         self.btnManagePresets.clicked.connect(self.open_preset_manager)
 
         self._worker_record: Optional[dict] = None
-        self._setup_quick_filter(self.cboGroup)
-        self._setup_quick_filter(self.cboProject)
+        setup_quick_filter(self.cboGroup)
+        setup_quick_filter(self.cboProject)
         self._refresh_presets()
         if hasattr(self.preset_notifier, "changed"):
             self.preset_notifier.changed.connect(self._refresh_presets)
@@ -151,14 +150,6 @@ class DeployView(QWidget):
 
     def _current_group(self) -> Optional[str]:
         return self.cboGroup.currentData()
-
-    def _setup_quick_filter(self, combo: QComboBox) -> None:
-        combo.setEditable(True)
-        combo.setInsertPolicy(QComboBox.NoInsert)
-        completer: QCompleter = combo.completer()
-        completer.setCompletionMode(QCompleter.PopupCompletion)
-        completer.setFilterMode(Qt.MatchContains)
-        combo.lineEdit().setReadOnly(False)
 
     @Slot()
     def _refresh_presets(self) -> None:
