@@ -106,8 +106,93 @@ class BranchHistoryDB:
                     ON activity_log(branch_key);
                 CREATE INDEX IF NOT EXISTS idx_activity_ts
                     ON activity_log(ts DESC);
+
+                CREATE TABLE IF NOT EXISTS sprint_roles (
+                    name TEXT PRIMARY KEY,
+                    description TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS sprint_users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE,
+                    display_name TEXT,
+                    role_name TEXT,
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(role_name) REFERENCES sprint_roles(name)
+                        ON UPDATE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sprint_users_role
+                    ON sprint_users(role_name);
+
+                CREATE TABLE IF NOT EXISTS sprints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    version_branch TEXT NOT NULL,
+                    group_name TEXT,
+                    project_name TEXT,
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    created_by INTEGER,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    updated_by INTEGER,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    FOREIGN KEY(created_by) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL,
+                    FOREIGN KEY(updated_by) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sprints_group
+                    ON sprints(group_name, project_name);
+
+                CREATE TABLE IF NOT EXISTS sprint_cards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL UNIQUE,
+                    sprint_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    branch_name TEXT NOT NULL,
+                    assignee_id INTEGER,
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    created_by INTEGER,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    updated_by INTEGER,
+                    unit_status TEXT NOT NULL DEFAULT 'pending',
+                    qa_status TEXT NOT NULL DEFAULT 'pending',
+                    unit_checked_at INTEGER,
+                    qa_checked_at INTEGER,
+                    unit_checked_by INTEGER,
+                    qa_checked_by INTEGER,
+                    is_qa_branch INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(sprint_id) REFERENCES sprints(id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(assignee_id) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL,
+                    FOREIGN KEY(created_by) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL,
+                    FOREIGN KEY(updated_by) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL,
+                    FOREIGN KEY(unit_checked_by) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL,
+                    FOREIGN KEY(qa_checked_by) REFERENCES sprint_users(id)
+                        ON UPDATE CASCADE ON DELETE SET NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sprint_cards_sprint
+                    ON sprint_cards(sprint_id);
+                CREATE INDEX IF NOT EXISTS idx_sprint_cards_branch
+                    ON sprint_cards(branch_name);
+                CREATE INDEX IF NOT EXISTS idx_sprint_cards_assignee
+                    ON sprint_cards(assignee_id);
                 """
             )
+
+    def connect(self) -> sqlite3.Connection:
+        """Public accessor returning a SQLite connection with the proper settings."""
+
+        return self._connect()
 
     # ------------------------------------------------------------------
     # branches

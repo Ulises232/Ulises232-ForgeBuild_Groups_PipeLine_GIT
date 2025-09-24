@@ -4,6 +4,19 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.5.0] - 2025-10-05
+### Añadido
+- Módulo de persistencia para administrar versiones, sprints y tarjetas vinculadas a ramas,
+  con reglas de aprobación por pruebas unitarias y QA y excepciones para ramas de validación.
+- Registros de usuarios y roles asociados al flujo de tarjetas dentro de la base
+  `branches_history.sqlite3`, habilitando asignaciones y trazabilidad de aprobaciones.
+- Consultas de disponibilidad de merge por tarjeta y listados de sprints reutilizables en futuras
+  vistas de UI.
+
+### Cambiado
+- La inicialización de la base `branches_history.sqlite3` crea las tablas auxiliares para usuarios,
+  sprints y tarjetas, manteniendo compatibilidad con bases existentes.
+
 ## [1.4.5] - 2025-10-04
 ### Corregido
 - Se degrada automáticamente el `journal_mode` a `DELETE` cuando SQLite no permite `WAL`, evitando
