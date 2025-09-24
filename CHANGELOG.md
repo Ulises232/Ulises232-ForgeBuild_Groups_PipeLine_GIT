@@ -9,6 +9,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La inicialización de `branch_history_db.sqlite3` omite la creación temprana del índice de sprints
   y valida que existan las columnas antes de construir índices, evitando el error
   `no such column: branch_key` al abrir el diálogo de autenticación en instalaciones antiguas.
+- La utilería de widgets importa `QCompleter` desde `QtWidgets`, restaurando el arranque en entornos
+  con PySide6 6.8 donde la clase ya no está disponible en `QtGui`.
 
 ## [1.5.0] - 2025-10-05
 ### Añadido
