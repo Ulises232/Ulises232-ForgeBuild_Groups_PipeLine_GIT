@@ -123,6 +123,25 @@ def _cfg_file() -> pathlib.Path:
     return _state_dir() / "config.yaml"
 
 
+def _nas_config_db_path(nas_dir: Optional[str]) -> Optional[pathlib.Path]:
+    if not nas_dir:
+        return None
+    candidate = pathlib.Path(nas_dir).expanduser()
+    return candidate / "config.sqlite3"
+
+
+def _store_path_from_raw_config(data: Dict) -> Optional[pathlib.Path]:
+    paths_section = data.get("paths") if isinstance(data, dict) else None
+    if isinstance(paths_section, dict):
+        return _nas_config_db_path(paths_section.get("nas_dir"))
+    return None
+
+
+def _store_path_from_cfg(cfg: Config) -> Optional[pathlib.Path]:
+    nas_dir = getattr(getattr(cfg, "paths", None), "nas_dir", None)
+    return _nas_config_db_path(nas_dir)
+
+
 def _model_to_dict(model) -> Dict:
     if hasattr(model, "dict"):
         return model.dict()
@@ -149,13 +168,15 @@ def apply_environment(cfg: Config) -> None:
 
 def load_config() -> Config:
     cfg_path = _cfg_file()
-    store = ConfigStore()
-    legacy_groups_data = []
+    legacy_groups_data: List[Dict] = []
+    store: ConfigStore
     if cfg_path.exists():
         with open(cfg_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         legacy_groups_data = data.get("groups") or []
         data.pop("groups", None)
+        store_path = _store_path_from_raw_config(data)
+        store = ConfigStore(store_path) if store_path else ConfigStore()
         cfg = Config(**data)
         migrated = False
         if store.is_empty() and legacy_groups_data:
@@ -178,6 +199,8 @@ def load_config() -> Config:
             data = yaml.safe_load(f) or {}
         legacy_groups_data = data.get("groups") or []
         data.pop("groups", None)
+        store_path = _store_path_from_raw_config(data)
+        store = ConfigStore(store_path) if store_path else ConfigStore()
         cfg = Config(**data)
         migrated = False
         if store.is_empty() and legacy_groups_data:
@@ -204,6 +227,7 @@ def load_config() -> Config:
         return cfg
 
     # default
+    store = ConfigStore()
     cfg = Config(paths=Paths(workspaces={}, output_base="", nas_dir=""))
     cfg.groups = store.list_groups()
     cfg.sprints = store.list_sprints()
@@ -212,7 +236,8 @@ def load_config() -> Config:
 
 def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()
-    store = ConfigStore()
+    store_path = _store_path_from_cfg(cfg)
+    store = ConfigStore(store_path) if store_path else ConfigStore()
     store.replace_groups(cfg.groups or [])
     store.replace_sprints(cfg.sprints or [])
     data = _model_to_dict(cfg)

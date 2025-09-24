@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import unittest
 from pathlib import Path
@@ -21,6 +22,17 @@ from buildtool.core.config_store import ConfigStore
 
 
 class ConfigStoreMigrationTests(unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        original = os.environ.get("FORGEBUILD_CONFIG_DB")
+        if original is not None:
+            self.addCleanup(
+                lambda value=original: os.environ.__setitem__("FORGEBUILD_CONFIG_DB", value)
+            )
+        else:
+            self.addCleanup(lambda: os.environ.pop("FORGEBUILD_CONFIG_DB", None))
+        os.environ.pop("FORGEBUILD_CONFIG_DB", None)
+
     def test_migrates_groups_from_yaml_to_sqlite(self):
         with TemporaryDirectory() as tmp:
             state_dir = Path(tmp) / "state"
@@ -71,6 +83,40 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 stored = store.list_groups()
                 self.assertEqual(1, len(stored))
                 self.assertEqual("G1", stored[0].key)
+
+    def test_uses_nas_directory_for_shared_store(self):
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            nas_dir = Path(tmp) / "nas"
+            cfg_file = state_dir / "config.yaml"
+            cfg_file.parent.mkdir(parents=True, exist_ok=True)
+            cfg_file.write_text(
+                yaml.safe_dump(
+                    {
+                        "paths": {
+                            "workspaces": {},
+                            "output_base": "/tmp/output",
+                            "nas_dir": str(nas_dir),
+                        },
+                        "groups": [],
+                    },
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
+                "buildtool.core.config_store._state_dir", return_value=state_dir
+            ):
+                try:
+                    cfg = load_config()
+                    self.assertEqual(str(nas_dir), cfg.paths.nas_dir)
+                    store = ConfigStore()
+                    self.assertEqual(nas_dir / "config.sqlite3", store.db_path)
+                    self.assertTrue(store.db_path.exists())
+                finally:
+                    os.environ.pop("FORGEBUILD_CONFIG_DB", None)
 
     def test_save_config_persists_groups_into_store(self):
         with TemporaryDirectory() as tmp:

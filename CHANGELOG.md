@@ -14,6 +14,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - La carga y guardado de configuración sincroniza los sprints con SQLite y expone nuevas consultas para
   obtener tarjetas por grupo o proyecto desde `core.config_queries`.
+- El almacén de configuración detecta `paths.nas_dir` y coloca `config.sqlite3` en la NAS para compartir
+  sprints y tarjetas entre todo el equipo.
 
 ## [1.4.5] - 2025-10-04
 ### Corregido

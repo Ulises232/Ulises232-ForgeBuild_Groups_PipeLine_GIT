@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Iterable, List, Optional, Any, Dict
@@ -125,11 +126,19 @@ CREATE TABLE IF NOT EXISTS cards (
 """
 
 
+_ENV_DB_PATH = "FORGEBUILD_CONFIG_DB"
+_DB_FILENAME = "config.sqlite3"
+
+
 def _state_dir() -> Path:
     base = os.environ.get("APPDATA")
     if base:
         return Path(base) / "ForgeBuild"
     return Path.home() / ".forgebuild"
+
+
+def _default_db_path() -> Path:
+    return _state_dir() / _DB_FILENAME
 
 
 def _serialize_model(obj: Any) -> Dict[str, Any]:
@@ -161,8 +170,40 @@ class ConfigStore:
     """Persistencia seccionada de grupos, proyectos y despliegues en SQLite."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
-        self.db_path = Path(db_path or (_state_dir() / "config.sqlite3"))
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved: Path
+        if db_path is not None:
+            resolved = Path(db_path)
+        else:
+            env_path = os.environ.get(_ENV_DB_PATH)
+            if env_path:
+                resolved = Path(env_path)
+            else:
+                resolved = _default_db_path()
+
+        default_db = _default_db_path()
+
+        try:
+            resolved.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"No se pudo preparar el directorio para la base de configuración en '{resolved.parent}': {exc}"
+            ) from exc
+
+        if (
+            resolved != default_db
+            and not resolved.exists()
+            and default_db.exists()
+        ):
+            try:
+                shutil.copy2(default_db, resolved)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"No se pudo copiar la base de configuración existente hacia '{resolved}': {exc}"
+                ) from exc
+
+        self.db_path = resolved
+        os.environ[_ENV_DB_PATH] = str(self.db_path)
+
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             legacy_groups = self._extract_legacy_groups(cx)
