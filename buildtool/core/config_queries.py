@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Optional, Tuple, Dict
 
-from .config import Config, Group, Project, Module, DeployTarget
+from .config import Config, Group, Project, Module, DeployTarget, Sprint, Card
 
 
 def iter_groups(cfg: Config) -> Iterator[Group]:
@@ -139,3 +139,74 @@ def profile_target_map(
         for profile in getattr(target, "profiles", None) or []:
             mapping.setdefault(profile, target.name)
     return mapping
+
+
+def iter_group_sprints(
+    cfg: Config, group_key: str | None = None
+) -> Iterator[Sprint]:
+    """Itera los sprints registrados, opcionalmente filtrados por grupo."""
+
+    for sprint in getattr(cfg, "sprints", None) or []:
+        if sprint is None:
+            continue
+        if group_key and sprint.group_key != group_key:
+            continue
+        yield sprint
+
+
+def find_sprint(
+    cfg: Config, sprint_key: str | None, group_key: str | None = None
+) -> Optional[Sprint]:
+    """Localiza un sprint según su clave y, si se indica, por grupo."""
+
+    if not sprint_key:
+        return None
+    for sprint in iter_group_sprints(cfg, group_key):
+        if sprint.key == sprint_key:
+            return sprint
+    return None
+
+
+def iter_sprint_cards(
+    cfg: Config,
+    sprint_key: str | None,
+    group_key: str | None = None,
+) -> Iterator[Card]:
+    """Devuelve las tarjetas asociadas al sprint indicado."""
+
+    sprint = find_sprint(cfg, sprint_key, group_key)
+    for card in getattr(sprint, "cards", None) or []:
+        if card is not None:
+            yield card
+
+
+def iter_project_cards(
+    cfg: Config,
+    project_key: str | None,
+    group_key: str | None = None,
+) -> Iterator[Card]:
+    """Itera las tarjetas que apuntan al proyecto indicado."""
+
+    if not project_key:
+        return iter([])  # type: ignore[return-value]
+
+    def _generator() -> Iterator[Card]:
+        for sprint in iter_group_sprints(cfg, group_key):
+            for card in getattr(sprint, "cards", None) or []:
+                if card is None:
+                    continue
+                if card.project_key and card.project_key != project_key:
+                    continue
+                yield card
+
+    return _generator()
+
+
+def cards_for_project(
+    cfg: Config,
+    project_key: str | None,
+    group_key: str | None = None,
+) -> list[Card]:
+    """Lista todas las tarjetas asociadas a un proyecto."""
+
+    return list(iter_project_cards(cfg, project_key, group_key))

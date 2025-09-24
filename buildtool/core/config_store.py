@@ -93,6 +93,35 @@ CREATE TABLE IF NOT EXISTS deploy_target_profiles (
     profile TEXT NOT NULL,
     FOREIGN KEY(target_id) REFERENCES deploy_targets(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS sprints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    sprint_key TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    goal TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    config_json TEXT DEFAULT '{}',
+    FOREIGN KEY(group_key) REFERENCES groups(key) ON DELETE CASCADE,
+    UNIQUE(group_key, sprint_key)
+);
+CREATE TABLE IF NOT EXISTS cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sprint_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    card_key TEXT NOT NULL,
+    title TEXT NOT NULL,
+    project_key TEXT,
+    version TEXT,
+    owners TEXT DEFAULT '[]',
+    tests_ready INTEGER NOT NULL DEFAULT 0,
+    qa_ready INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    config_json TEXT DEFAULT '{}',
+    FOREIGN KEY(sprint_id) REFERENCES sprints(id) ON DELETE CASCADE,
+    UNIQUE(sprint_id, card_key)
+);
 """
 
 
@@ -229,6 +258,26 @@ DROP TABLE IF EXISTS groups;
     # ------------------------------------------------------------------
     def _next_group_position(self, cx: sqlite3.Connection) -> int:
         row = cx.execute("SELECT MAX(position) FROM groups").fetchone()
+        if not row or row[0] is None:
+            return 0
+        return int(row[0]) + 1
+
+    # ------------------------------------------------------------------
+    def _next_sprint_position(self, cx: sqlite3.Connection, group_key: str) -> int:
+        row = cx.execute(
+            "SELECT MAX(position) FROM sprints WHERE group_key = ?",
+            (str(group_key),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return 0
+        return int(row[0]) + 1
+
+    # ------------------------------------------------------------------
+    def _next_card_position(self, cx: sqlite3.Connection, sprint_id: int) -> int:
+        row = cx.execute(
+            "SELECT MAX(position) FROM cards WHERE sprint_id = ?",
+            (int(sprint_id),),
+        ).fetchone()
         if not row or row[0] is None:
             return 0
         return int(row[0]) + 1
@@ -785,6 +834,398 @@ DROP TABLE IF EXISTS groups;
             )
 
         return target_id
+
+    # ------------------------------------------------------------------
+    def _insert_sprint(
+        self, cx: sqlite3.Connection, sprint: Any, position: int
+    ) -> Optional[int]:
+        data = _serialize_model(sprint)
+        key = data.get("key")
+        name = data.get("name")
+        group_key = data.get("group_key")
+        if not key or not name or not group_key:
+            return None
+        cards = list(data.get("cards") or [])
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {"key", "name", "group_key", "goal", "start_date", "end_date", "cards"}
+        }
+
+        cursor = cx.execute(
+            "INSERT INTO sprints("
+            "group_key, sprint_key, position, name, goal, start_date, end_date, config_json"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(group_key),
+                str(key),
+                int(position),
+                str(name),
+                data.get("goal"),
+                data.get("start_date"),
+                data.get("end_date"),
+                _json_dumps(extras) if extras else "{}",
+            ),
+        )
+        sprint_id = int(cursor.lastrowid)
+
+        for idx, card in enumerate(cards):
+            self._insert_card(cx, sprint_id, card, idx)
+
+        return sprint_id
+
+    # ------------------------------------------------------------------
+    def _update_sprint(
+        self, cx: sqlite3.Connection, sprint_id: int, sprint: Any, position: int
+    ) -> None:
+        data = _serialize_model(sprint)
+        key = data.get("key")
+        name = data.get("name")
+        group_key = data.get("group_key")
+        if not key or not name or not group_key:
+            return
+        cards = list(data.get("cards") or [])
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {"key", "name", "group_key", "goal", "start_date", "end_date", "cards"}
+        }
+
+        cx.execute(
+            "UPDATE sprints SET position = ?, name = ?, goal = ?, start_date = ?, end_date = ?, config_json = ?"
+            " WHERE id = ?",
+            (
+                int(position),
+                str(name),
+                data.get("goal"),
+                data.get("start_date"),
+                data.get("end_date"),
+                _json_dumps(extras) if extras else "{}",
+                int(sprint_id),
+            ),
+        )
+
+        self._sync_cards(cx, int(sprint_id), cards)
+
+    # ------------------------------------------------------------------
+    def _sync_cards(
+        self, cx: sqlite3.Connection, sprint_id: int, cards: List[Any]
+    ) -> None:
+        old_row_factory = cx.row_factory
+        try:
+            cx.row_factory = sqlite3.Row
+            current_cards = {
+                row["card_key"]: row
+                for row in cx.execute(
+                    "SELECT id, card_key FROM cards WHERE sprint_id = ?",
+                    (int(sprint_id),),
+                ).fetchall()
+            }
+        finally:
+            cx.row_factory = old_row_factory
+
+        seen_ids: set[int] = set()
+        for idx, card in enumerate(cards):
+            card_key = _serialize_model(card).get("key")
+            if not card_key:
+                continue
+            if card_key in current_cards:
+                card_id = int(current_cards[card_key]["id"])
+                seen_ids.add(card_id)
+                self._update_card(cx, card_id, card, idx)
+            else:
+                card_id = self._insert_card(cx, int(sprint_id), card, idx)
+                if card_id is not None:
+                    seen_ids.add(card_id)
+
+        for row in current_cards.values():
+            card_id = int(row["id"])
+            if card_id not in seen_ids:
+                cx.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+
+    # ------------------------------------------------------------------
+    def _insert_card(
+        self, cx: sqlite3.Connection, sprint_id: int, card: Any, position: int
+    ) -> Optional[int]:
+        data = _serialize_model(card)
+        key = data.get("key")
+        title = data.get("title")
+        if not key or not title:
+            return None
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {
+                "key",
+                "title",
+                "project_key",
+                "version",
+                "owners",
+                "tests_ready",
+                "qa_ready",
+                "notes",
+            }
+        }
+
+        cursor = cx.execute(
+            "INSERT INTO cards(" 
+            "sprint_id, position, card_key, title, project_key, version, owners, tests_ready, qa_ready, notes, config_json"
+            ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(sprint_id),
+                int(position),
+                str(key),
+                str(title),
+                data.get("project_key"),
+                data.get("version"),
+                _json_dumps(data.get("owners") or []),
+                1 if data.get("tests_ready") else 0,
+                1 if data.get("qa_ready") else 0,
+                data.get("notes"),
+                _json_dumps(extras) if extras else "{}",
+            ),
+        )
+        return int(cursor.lastrowid)
+
+    # ------------------------------------------------------------------
+    def _update_card(
+        self, cx: sqlite3.Connection, card_id: int, card: Any, position: int
+    ) -> None:
+        data = _serialize_model(card)
+        key = data.get("key")
+        title = data.get("title")
+        if not key or not title:
+            return
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {
+                "key",
+                "title",
+                "project_key",
+                "version",
+                "owners",
+                "tests_ready",
+                "qa_ready",
+                "notes",
+            }
+        }
+
+        cx.execute(
+            "UPDATE cards SET position = ?, card_key = ?, title = ?, project_key = ?, version = ?, owners = ?, "
+            "tests_ready = ?, qa_ready = ?, notes = ?, config_json = ? WHERE id = ?",
+            (
+                int(position),
+                str(key),
+                str(title),
+                data.get("project_key"),
+                data.get("version"),
+                _json_dumps(data.get("owners") or []),
+                1 if data.get("tests_ready") else 0,
+                1 if data.get("qa_ready") else 0,
+                data.get("notes"),
+                _json_dumps(extras) if extras else "{}",
+                int(card_id),
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    def replace_sprints(self, sprints: Iterable[Any]) -> None:
+        from .config import Sprint  # import diferido
+
+        normalized: List[Sprint] = []
+        for sprint in sprints:
+            if sprint is None:
+                continue
+            if isinstance(sprint, Sprint):
+                normalized.append(sprint)
+            else:
+                try:
+                    normalized.append(Sprint(**_serialize_model(sprint)))
+                except Exception:
+                    continue
+
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            old_factory = cx.row_factory
+            try:
+                cx.row_factory = sqlite3.Row
+                current = {
+                    (str(row["group_key"]), str(row["sprint_key"])): row
+                    for row in cx.execute(
+                        "SELECT id, group_key, sprint_key FROM sprints"
+                    ).fetchall()
+                }
+            finally:
+                cx.row_factory = old_factory
+
+            incoming_keys = {(s.group_key, s.key) for s in normalized}
+            for key in set(current) - incoming_keys:
+                cx.execute("DELETE FROM sprints WHERE id = ?", (int(current[key]["id"]),))
+
+            positions: Dict[str, int] = {}
+            for sprint in normalized:
+                position = positions.setdefault(sprint.group_key, 0)
+                positions[sprint.group_key] = position + 1
+                lookup = (sprint.group_key, sprint.key)
+                if lookup in current:
+                    self._update_sprint(cx, int(current[lookup]["id"]), sprint, position)
+                else:
+                    self._insert_sprint(cx, sprint, position)
+
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def list_sprints(self, group_key: Optional[str] = None) -> List[Any]:
+        from .config import Sprint
+
+        with sqlite3.connect(self.db_path) as cx:
+            cx.row_factory = sqlite3.Row
+            cx.execute("PRAGMA foreign_keys = ON")
+            if group_key:
+                sprint_rows = cx.execute(
+                    "SELECT id, group_key, sprint_key, position, name, goal, start_date, end_date, config_json "
+                    "FROM sprints WHERE group_key = ? ORDER BY position, sprint_key",
+                    (str(group_key),),
+                ).fetchall()
+            else:
+                sprint_rows = cx.execute(
+                    "SELECT id, group_key, sprint_key, position, name, goal, start_date, end_date, config_json "
+                    "FROM sprints ORDER BY group_key, position, sprint_key"
+                ).fetchall()
+            card_rows = cx.execute(
+                "SELECT sprint_id, position, card_key, title, project_key, version, owners, tests_ready, qa_ready, notes, config_json "
+                "FROM cards ORDER BY position, card_key"
+            ).fetchall()
+
+        cards_by_sprint: Dict[int, List[sqlite3.Row]] = {}
+        for row in card_rows:
+            cards_by_sprint.setdefault(int(row["sprint_id"]), []).append(row)
+
+        result: List[Any] = []
+        for row in sprint_rows:
+            payload: Dict[str, Any] = {
+                "key": str(row["sprint_key"]),
+                "name": str(row["name"]),
+                "group_key": str(row["group_key"]),
+                "goal": row["goal"],
+                "start_date": row["start_date"],
+                "end_date": row["end_date"],
+                "cards": [],
+            }
+            payload.update(_json_loads(row["config_json"], {}))
+
+            for card_row in cards_by_sprint.get(int(row["id"]), []):
+                card_payload: Dict[str, Any] = {
+                    "key": str(card_row["card_key"]),
+                    "title": str(card_row["title"]),
+                    "project_key": card_row["project_key"],
+                    "version": card_row["version"],
+                    "owners": _json_loads(card_row["owners"], []),
+                    "tests_ready": bool(card_row["tests_ready"]),
+                    "qa_ready": bool(card_row["qa_ready"]),
+                    "notes": card_row["notes"],
+                }
+                card_payload.update(_json_loads(card_row["config_json"], {}))
+                payload["cards"].append(card_payload)
+
+            try:
+                result.append(Sprint(**payload))
+            except Exception:
+                continue
+
+        return result
+
+    # ------------------------------------------------------------------
+    def upsert_sprint(self, sprint: Any) -> None:
+        from .config import Sprint
+
+        data = _serialize_model(sprint)
+        key = data.get("key")
+        group_key = data.get("group_key")
+        if not key or not group_key:
+            raise ValueError("El sprint debe tener 'key' y 'group_key' válidos")
+        try:
+            normalized = sprint if isinstance(sprint, Sprint) else Sprint(**data)
+        except Exception as exc:
+            raise ValueError("Datos de sprint inválidos") from exc
+
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            current = cx.execute(
+                "SELECT id, position FROM sprints WHERE group_key = ? AND sprint_key = ?",
+                (normalized.group_key, normalized.key),
+            ).fetchone()
+            if current:
+                self._update_sprint(cx, int(current[0]), normalized, int(current[1]))
+            else:
+                position = self._next_sprint_position(cx, normalized.group_key)
+                self._insert_sprint(cx, normalized, position)
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def delete_sprint(self, group_key: str, sprint_key: str) -> None:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            cx.execute(
+                "DELETE FROM sprints WHERE group_key = ? AND sprint_key = ?",
+                (str(group_key), str(sprint_key)),
+            )
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def upsert_card(self, group_key: str, sprint_key: str, card: Any) -> None:
+        from .config import Card
+
+        data = _serialize_model(card)
+        key = data.get("key")
+        if not key:
+            raise ValueError("La tarjeta debe tener una clave válida")
+        try:
+            normalized = card if isinstance(card, Card) else Card(**data)
+        except Exception as exc:
+            raise ValueError("Datos de tarjeta inválidos") from exc
+
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            sprint_row = cx.execute(
+                "SELECT id FROM sprints WHERE group_key = ? AND sprint_key = ?",
+                (str(group_key), str(sprint_key)),
+            ).fetchone()
+            if not sprint_row:
+                raise ValueError("Sprint inexistente")
+            sprint_id = int(sprint_row[0])
+            current = cx.execute(
+                "SELECT id, position FROM cards WHERE sprint_id = ? AND card_key = ?",
+                (sprint_id, normalized.key),
+            ).fetchone()
+            if current:
+                self._update_card(cx, int(current[0]), normalized, int(current[1]))
+            else:
+                position = self._next_card_position(cx, sprint_id)
+                self._insert_card(cx, sprint_id, normalized, position)
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def delete_card(self, group_key: str, sprint_key: str, card_key: str) -> None:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            sprint_row = cx.execute(
+                "SELECT id FROM sprints WHERE group_key = ? AND sprint_key = ?",
+                (str(group_key), str(sprint_key)),
+            ).fetchone()
+            if not sprint_row:
+                return
+            sprint_id = int(sprint_row[0])
+            cx.execute(
+                "DELETE FROM cards WHERE sprint_id = ? AND card_key = ?",
+                (sprint_id, str(card_key)),
+            )
+            cx.commit()
 
     # ------------------------------------------------------------------
     def is_empty(self) -> bool:

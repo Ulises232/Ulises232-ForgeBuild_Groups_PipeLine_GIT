@@ -4,6 +4,17 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.5.0] - 2025-10-05
+### Añadido
+- Persistencia y modelos de sprints y tarjetas dentro de `config.sqlite3`, con soporte para responsables,
+  versiones y banderas de QA/pruebas reutilizables en toda la aplicación.
+- Vista dedicada de planificación de sprints con creación de tarjetas, asignación de responsables y
+  marcado de checks directamente desde la interfaz principal.
+
+### Cambiado
+- La carga y guardado de configuración sincroniza los sprints con SQLite y expone nuevas consultas para
+  obtener tarjetas por grupo o proyecto desde `core.config_queries`.
+
 ## [1.4.5] - 2025-10-04
 ### Corregido
 - Se degrada automáticamente el `journal_mode` a `DELETE` cuando SQLite no permite `WAL`, evitando

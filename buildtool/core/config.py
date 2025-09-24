@@ -56,6 +56,28 @@ class DeployTarget(BaseModel):
     path_template: str
     hotfix_path_template: Optional[str] = None  # << NUEVO: ruta alternativa para hotfix
 
+
+class Card(BaseModel):
+    key: str
+    title: str
+    project_key: Optional[str] = None
+    version: Optional[str] = None
+    owners: List[str] = Field(default_factory=list)
+    tests_ready: bool = False
+    qa_ready: bool = False
+    notes: Optional[str] = None
+
+
+class Sprint(BaseModel):
+    key: str
+    name: str
+    group_key: str
+    goal: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    cards: List[Card] = Field(default_factory=list)
+
+
 class Group(BaseModel):
     key: str
     repos: Dict[str, str]
@@ -69,6 +91,7 @@ class Config(BaseModel):
     artifact_patterns: List[str] = Field(default_factory=lambda: ["*.war","*.jar"])
     default_execution_mode: str = "integrated"
     groups: List[Group] = Field(default_factory=list)
+    sprints: List[Sprint] = Field(default_factory=list)
     environment: Dict[str, str] = Field(default_factory=dict)
     pipeline_presets: List[PipelinePreset] = Field(default_factory=list)
     max_build_workers: Optional[int] = None
@@ -144,6 +167,7 @@ def load_config() -> Config:
             store.save_metadata("yaml_migrated_at", datetime.utcnow().isoformat())
             migrated = True
         cfg.groups = store.list_groups()
+        cfg.sprints = store.list_sprints()
         if migrated:
             save_config(cfg)
         apply_environment(cfg)
@@ -165,6 +189,7 @@ def load_config() -> Config:
             store.save_metadata("yaml_migrated_at", datetime.utcnow().isoformat())
             migrated = True
         cfg.groups = store.list_groups()
+        cfg.sprints = store.list_sprints()
         try:
             cfg_path.parent.mkdir(parents=True, exist_ok=True)
             data_to_save = _model_to_dict(cfg)
@@ -181,6 +206,7 @@ def load_config() -> Config:
     # default
     cfg = Config(paths=Paths(workspaces={}, output_base="", nas_dir=""))
     cfg.groups = store.list_groups()
+    cfg.sprints = store.list_sprints()
     apply_environment(cfg)
     return cfg
 
@@ -188,8 +214,10 @@ def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()
     store = ConfigStore()
     store.replace_groups(cfg.groups or [])
+    store.replace_sprints(cfg.sprints or [])
     data = _model_to_dict(cfg)
     data.pop("groups", None)
+    data.pop("sprints", None)
     cfg_path = _cfg_file()
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     with open(cfg_path, "w", encoding="utf-8") as f:

@@ -16,6 +16,7 @@ from buildtool import __version__
 from buildtool.core.thread_tracker import TRACKER
 from .core.config import load_config, Config
 from .views.pipeline_view import PipelineView
+from .views.sprint_view import SprintView
 from .views.git_view import GitView
 from .views.groups_wizard import GroupsWizard
 from .ui.icons import get_icon
@@ -23,6 +24,7 @@ from .ui.theme import apply_theme, ThemeMode
 
 
 TAB_PIPELINE = "Pipeline"
+TAB_SPRINTS = "Sprints"
 TAB_GIT = "Repos (Git)"
 
 class MainWindow(QWidget):
@@ -86,10 +88,10 @@ class MainWindow(QWidget):
         self.tabs.setMovable(False)
         content_layout.addWidget(self.tabs)
 
-        self.pipeline = PipelineView(self.cfg, self.reload_config)
-        self.git = GitView(self.cfg, self)
-        self.tabs.addTab(self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
-        self.tabs.addTab(self.git, get_icon("git"), TAB_GIT)
+        self.pipeline: Optional[PipelineView] = None
+        self.sprints: Optional[SprintView] = None
+        self.git: Optional[GitView] = None
+        self._create_tabs()
 
         splitter.addWidget(content)
         splitter.setStretchFactor(0, 0)
@@ -98,13 +100,25 @@ class MainWindow(QWidget):
         self.btnGroups.clicked.connect(self.open_groups)
 
     def reload_config(self):
-        self.cfg = load_config(); idx = self.tabs.currentIndex()
-        self.tabs.removeTab(1); self.git.deleteLater()
-        self.tabs.removeTab(0); self.pipeline.deleteLater()
-        self.pipeline = PipelineView(self.cfg, self.reload_config); self.git = GitView(self.cfg, self)
-        self.tabs.insertTab(0, self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
-        self.tabs.insertTab(1, self.git, get_icon("git"), TAB_GIT)
+        self.cfg = load_config()
+        idx = self.tabs.currentIndex()
+        for widget in (self.pipeline, self.sprints, self.git):
+            if widget is None:
+                continue
+            tab_index = self.tabs.indexOf(widget)
+            if tab_index != -1:
+                self.tabs.removeTab(tab_index)
+            widget.deleteLater()
+        self._create_tabs()
         self.tabs.setCurrentIndex(idx if idx < self.tabs.count() else 0)
+
+    def _create_tabs(self) -> None:
+        self.pipeline = PipelineView(self.cfg, self.reload_config)
+        self.sprints = SprintView(self.cfg, self.reload_config)
+        self.git = GitView(self.cfg, self)
+        self.tabs.addTab(self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
+        self.tabs.addTab(self.sprints, get_icon("history"), TAB_SPRINTS)
+        self.tabs.addTab(self.git, get_icon("git"), TAB_GIT)
 
     def open_groups(self):
         if self._groups_win is None:
