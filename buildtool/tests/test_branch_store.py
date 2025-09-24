@@ -143,6 +143,103 @@ class LoadIndexTest(unittest.TestCase):
                 row = conn.execute("SELECT branch_key FROM activity_log").fetchone()
         self.assertEqual(row[0], "g/p/feature/old")
 
+    def test_upgrades_legacy_sprints_schema(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            db_path = base / "branches_history.sqlite3"
+            with sqlite3.connect(db_path) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE sprints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        version TEXT NOT NULL
+                    );
+                    INSERT INTO sprints (name, version) VALUES ('Sprint 1', '1.0');
+                    """
+                )
+
+            BranchHistoryDB(db_path)
+
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(sprints)")}
+                expected = {
+                    "id",
+                    "branch_key",
+                    "name",
+                    "version",
+                    "lead_user",
+                    "qa_user",
+                    "description",
+                    "created_at",
+                    "created_by",
+                    "updated_at",
+                    "updated_by",
+                }
+                self.assertTrue(expected.issubset(columns))
+                row = conn.execute(
+                    "SELECT name, version, branch_key, lead_user FROM sprints"
+                ).fetchone()
+
+        self.assertEqual(row[0], "Sprint 1")
+        self.assertEqual(row[1], "1.0")
+        self.assertEqual(row[2], "")
+        self.assertIsNone(row[3])
+
+    def test_upgrades_legacy_cards_schema(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            db_path = base / "branches_history.sqlite3"
+            with sqlite3.connect(db_path) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE sprints (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        version TEXT NOT NULL
+                    );
+                    INSERT INTO sprints (name, version) VALUES ('Sprint 1', '1.0');
+                    CREATE TABLE cards (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sprint_id INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        branch TEXT NOT NULL
+                    );
+                    INSERT INTO cards (sprint_id, title, branch)
+                    VALUES (1, 'Card 1', 'feature/foo');
+                    """
+                )
+
+            BranchHistoryDB(db_path)
+
+            with sqlite3.connect(db_path) as conn:
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(cards)")}
+                expected = {
+                    "id",
+                    "sprint_id",
+                    "title",
+                    "branch",
+                    "assignee",
+                    "qa_assignee",
+                    "description",
+                    "unit_tests_done",
+                    "qa_done",
+                    "unit_tests_by",
+                    "qa_by",
+                    "unit_tests_at",
+                    "qa_at",
+                    "status",
+                }
+                self.assertTrue(expected.issubset(columns))
+                row = conn.execute(
+                    "SELECT title, status, unit_tests_done, qa_done FROM cards"
+                ).fetchone()
+
+        self.assertEqual(row[0], "Card 1")
+        self.assertEqual(row[1], "pending")
+        self.assertEqual(row[2], 0)
+        self.assertEqual(row[3], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

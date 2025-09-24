@@ -38,6 +38,77 @@ ACTIVITY_COLUMNS = [
 ]
 
 
+SPRINT_COLUMNS = [
+    "id",
+    "branch_key",
+    "name",
+    "version",
+    "lead_user",
+    "qa_user",
+    "description",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
+]
+
+
+CARD_COLUMNS = [
+    "id",
+    "sprint_id",
+    "title",
+    "branch",
+    "assignee",
+    "qa_assignee",
+    "description",
+    "unit_tests_done",
+    "qa_done",
+    "unit_tests_by",
+    "qa_by",
+    "unit_tests_at",
+    "qa_at",
+    "status",
+]
+
+
+SPRINT_TABLE_TEMPLATE = """
+CREATE TABLE {if_not_exists}{table} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_key TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
+    lead_user TEXT,
+    qa_user TEXT,
+    description TEXT,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    updated_by TEXT
+);
+"""
+
+
+CARD_TABLE_TEMPLATE = """
+CREATE TABLE {if_not_exists}{table} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sprint_id INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    branch TEXT NOT NULL DEFAULT '',
+    assignee TEXT,
+    qa_assignee TEXT,
+    description TEXT,
+    unit_tests_done INTEGER NOT NULL DEFAULT 0,
+    qa_done INTEGER NOT NULL DEFAULT 0,
+    unit_tests_by TEXT,
+    qa_by TEXT,
+    unit_tests_at INTEGER,
+    qa_at INTEGER,
+    status TEXT DEFAULT 'pending',
+    FOREIGN KEY(sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+);
+"""
+
+
 @dataclass(slots=True)
 class Sprint:
     """Model representing a sprint/version planning entry."""
@@ -161,38 +232,9 @@ class BranchHistoryDB:
                     UNIQUE (ts, user, group_name, project, branch, action, result, message)
                 );
 
-                CREATE TABLE IF NOT EXISTS sprints (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    branch_key TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    version TEXT NOT NULL,
-                    lead_user TEXT,
-                    qa_user TEXT,
-                    description TEXT,
-                    created_at INTEGER NOT NULL DEFAULT 0,
-                    created_by TEXT,
-                    updated_at INTEGER NOT NULL DEFAULT 0,
-                    updated_by TEXT,
-                    FOREIGN KEY(branch_key) REFERENCES branches(key) ON DELETE CASCADE
-                );
+                {sprint_table}
 
-                CREATE TABLE IF NOT EXISTS cards (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sprint_id INTEGER NOT NULL,
-                    title TEXT NOT NULL,
-                    branch TEXT NOT NULL,
-                    assignee TEXT,
-                    qa_assignee TEXT,
-                    description TEXT,
-                    unit_tests_done INTEGER NOT NULL DEFAULT 0,
-                    qa_done INTEGER NOT NULL DEFAULT 0,
-                    unit_tests_by TEXT,
-                    qa_by TEXT,
-                    unit_tests_at INTEGER,
-                    qa_at INTEGER,
-                    status TEXT DEFAULT 'pending',
-                    FOREIGN KEY(sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
-                );
+                {card_table}
                 CREATE TABLE IF NOT EXISTS users (
                     username TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
@@ -214,13 +256,22 @@ class BranchHistoryDB:
                     FOREIGN KEY(username) REFERENCES users(username) ON DELETE CASCADE,
                     FOREIGN KEY(role_key) REFERENCES roles(key) ON DELETE CASCADE
                 );
-                """
+                """.format(
+                    sprint_table=SPRINT_TABLE_TEMPLATE.format(
+                        if_not_exists="IF NOT EXISTS ", table="sprints"
+                    ),
+                    card_table=CARD_TABLE_TEMPLATE.format(
+                        if_not_exists="IF NOT EXISTS ", table="cards"
+                    ),
+                )
             )
 
             self._ensure_indexes(conn)
 
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
         self._ensure_activity_log_branch_key(conn)
+        self._ensure_sprints_schema(conn)
+        self._ensure_cards_schema(conn)
 
     def _ensure_indexes(self, conn: sqlite3.Connection) -> None:
         """Create or rebuild indexes that may rely on migrated columns."""
@@ -273,12 +324,99 @@ class BranchHistoryDB:
             """
         )
 
+    def _ensure_sprints_schema(self, conn: sqlite3.Connection) -> None:
+        columns = self._table_columns(conn, "sprints")
+        if not columns:
+            return
+        if set(SPRINT_COLUMNS).issubset(columns):
+            return
+        defaults = {
+            "branch_key": "''",
+            "name": "''",
+            "version": "''",
+            "lead_user": "NULL",
+            "qa_user": "NULL",
+            "description": "''",
+            "created_at": "0",
+            "created_by": "''",
+            "updated_at": "0",
+            "updated_by": "''",
+        }
+        self._rebuild_table(
+            conn,
+            "sprints",
+            SPRINT_TABLE_TEMPLATE,
+            SPRINT_COLUMNS,
+            defaults,
+        )
+
+    def _ensure_cards_schema(self, conn: sqlite3.Connection) -> None:
+        columns = self._table_columns(conn, "cards")
+        if not columns:
+            return
+        if set(CARD_COLUMNS).issubset(columns):
+            return
+        defaults = {
+            "assignee": "NULL",
+            "qa_assignee": "NULL",
+            "description": "''",
+            "unit_tests_done": "0",
+            "qa_done": "0",
+            "unit_tests_by": "NULL",
+            "qa_by": "NULL",
+            "unit_tests_at": "NULL",
+            "qa_at": "NULL",
+            "status": "'pending'",
+        }
+        self._rebuild_table(
+            conn,
+            "cards",
+            CARD_TABLE_TEMPLATE,
+            CARD_COLUMNS,
+            defaults,
+        )
+
     def _table_columns(self, conn: sqlite3.Connection, table: str) -> set[str]:
         try:
             rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
         except sqlite3.OperationalError:
             return set()
         return {str(row[1]) for row in rows}
+
+    def _rebuild_table(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        template: str,
+        expected_columns: Sequence[str],
+        defaults: Dict[str, str],
+    ) -> None:
+        existing_columns = self._table_columns(conn, table)
+        if not existing_columns:
+            return
+        temp_name = f"__{table}_new"
+        conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            conn.execute(f"DROP TABLE IF EXISTS {temp_name}")
+            conn.executescript(
+                template.format(if_not_exists="", table=temp_name)
+            )
+            dest_cols: List[str] = []
+            select_cols: List[str] = []
+            for col in expected_columns:
+                dest_cols.append(col)
+                if col in existing_columns:
+                    select_cols.append(col)
+                else:
+                    select_cols.append(defaults.get(col, "NULL"))
+            conn.execute(
+                f"INSERT INTO {temp_name} ({', '.join(dest_cols)}) "
+                f"SELECT {', '.join(select_cols)} FROM {table}"
+            )
+            conn.execute(f"DROP TABLE {table}")
+            conn.execute(f"ALTER TABLE {temp_name} RENAME TO {table}")
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
 
     # ------------------------------------------------------------------
     # branches
