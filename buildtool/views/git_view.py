@@ -34,6 +34,8 @@ from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
     push_branch, delete_local_branch_by_name, merge_into_current_branch
 )
+from ..core.sprint_queries import find_card_by_branch, is_card_ready_for_merge
+from ..core.branch_store import upsert_card
 from ..core import errguard
 from ..core.bg import run_in_thread
 from ..core.discover import discover_status_fast
@@ -688,9 +690,32 @@ class GitView(QWidget):
         push = self.chkMergePush.isChecked()
         gkey, pkey = self._current_keys()
 
+        card = find_card_by_branch(source)
+        allow_missing_qa = source.endswith("_QA")
+        if card:
+            if not is_card_ready_for_merge(card, allow_qa_missing=allow_missing_qa):
+                card.status = "bloqueado"
+                upsert_card(card)
+                self._alert(
+                    "La tarjeta asociada aún no cuenta con todas las aprobaciones",
+                    error=True,
+                )
+                self.logger.line.emit(
+                    f"[merge] Bloqueado merge de {source}: aprobaciones incompletas"
+                )
+                return
+            card.status = "merge_en_progreso"
+            upsert_card(card)
+        card_id = card.id if card else None
+
         def _after(ok: bool):
             if ok:
                 STATE.add_history(gkey, pkey, source)
+            if card_id:
+                latest = find_card_by_branch(source)
+                if latest and latest.id == card_id:
+                    latest.status = "merge_ok" if ok else "merge_error"
+                    upsert_card(latest)
 
         self._start_task(
             f"Merge {source} -> rama actual (global)",

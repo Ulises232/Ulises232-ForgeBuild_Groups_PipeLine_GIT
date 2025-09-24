@@ -7,7 +7,7 @@ import time
 import json
 
 from .config import load_config
-from .branch_history_db import BranchHistoryDB
+from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
 
 
 class NasUnavailableError(RuntimeError):
@@ -253,6 +253,60 @@ def _row_to_record(row: dict) -> BranchRecord:
     return BranchRecord(**data)
 
 
+def _row_to_sprint(row: dict) -> Sprint:
+    return Sprint(
+        id=int(row["id"]) if row.get("id") is not None else None,
+        branch_key=row.get("branch_key") or "",
+        name=row.get("name") or "",
+        version=row.get("version") or "",
+        lead_user=row.get("lead_user") or None,
+        qa_user=row.get("qa_user") or None,
+        description=row.get("description") or "",
+        created_at=int(row.get("created_at") or 0),
+        created_by=row.get("created_by") or "",
+        updated_at=int(row.get("updated_at") or 0),
+        updated_by=row.get("updated_by") or "",
+    )
+
+
+def _row_to_card(row: dict) -> Card:
+    unit_ts_at = row.get("unit_tests_at")
+    qa_at = row.get("qa_at")
+    return Card(
+        id=int(row["id"]) if row.get("id") is not None else None,
+        sprint_id=int(row.get("sprint_id") or 0),
+        title=row.get("title") or "",
+        branch=row.get("branch") or "",
+        assignee=row.get("assignee") or None,
+        qa_assignee=row.get("qa_assignee") or None,
+        description=row.get("description") or "",
+        unit_tests_done=bool(row.get("unit_tests_done")),
+        qa_done=bool(row.get("qa_done")),
+        unit_tests_by=row.get("unit_tests_by") or None,
+        qa_by=row.get("qa_by") or None,
+        unit_tests_at=int(unit_ts_at) if unit_ts_at else None,
+        qa_at=int(qa_at) if qa_at else None,
+        status=row.get("status") or "pending",
+    )
+
+
+def _row_to_user(row: dict) -> User:
+    return User(
+        username=row.get("username") or "",
+        display_name=row.get("display_name") or (row.get("username") or ""),
+        active=bool(row.get("active", 1)),
+        email=row.get("email") or None,
+    )
+
+
+def _row_to_role(row: dict) -> Role:
+    return Role(
+        key=row.get("key") or "",
+        name=row.get("name") or (row.get("key") or ""),
+        description=row.get("description") or "",
+    )
+
+
 # ---------------- index persistence -----------------
 
 def _resolve_base(path: Optional[Path]) -> Path:
@@ -345,6 +399,145 @@ def remove(rec: BranchRecord, index: Optional[Index] = None) -> Index:
         idx.pop(rec.key(), None)
     record_activity("remove", rec)
     return idx
+
+
+# ---------------- sprint management -----------------
+
+def list_sprints(*, branch_keys: Optional[Iterable[str]] = None, path: Optional[Path] = None) -> List[Sprint]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_sprints(branch_keys=list(branch_keys) if branch_keys else None)
+    return [_row_to_sprint(row) for row in rows]
+
+
+def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
+    base = _resolve_base(path)
+    payload = {
+        "id": sprint.id,
+        "branch_key": sprint.branch_key,
+        "name": sprint.name,
+        "version": sprint.version,
+        "lead_user": sprint.lead_user,
+        "qa_user": sprint.qa_user,
+        "description": sprint.description,
+        "created_at": sprint.created_at,
+        "created_by": sprint.created_by,
+        "updated_at": sprint.updated_at,
+        "updated_by": sprint.updated_by,
+    }
+    sprint_id = _get_db(base).upsert_sprint(payload)
+    sprint.id = sprint_id
+    return sprint
+
+
+def delete_sprint(sprint_id: int, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_sprint(int(sprint_id))
+
+
+def list_cards(
+    *,
+    sprint_ids: Optional[Iterable[int]] = None,
+    branches: Optional[Iterable[str]] = None,
+    path: Optional[Path] = None,
+) -> List[Card]:
+    base = _resolve_base(path)
+    ids = list(sprint_ids) if sprint_ids else None
+    branch_list = list(branches) if branches else None
+    rows = _get_db(base).fetch_cards(sprint_ids=ids, branches=branch_list)
+    return [_row_to_card(row) for row in rows]
+
+
+def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
+    base = _resolve_base(path)
+    payload = {
+        "id": card.id,
+        "sprint_id": card.sprint_id,
+        "title": card.title,
+        "branch": card.branch,
+        "assignee": card.assignee,
+        "qa_assignee": card.qa_assignee,
+        "description": card.description,
+        "unit_tests_done": card.unit_tests_done,
+        "qa_done": card.qa_done,
+        "unit_tests_by": card.unit_tests_by,
+        "qa_by": card.qa_by,
+        "unit_tests_at": card.unit_tests_at,
+        "qa_at": card.qa_at,
+        "status": card.status,
+    }
+    card_id = _get_db(base).upsert_card(payload)
+    card.id = card_id
+    return card
+
+
+def delete_card(card_id: int, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_card(int(card_id))
+
+
+# ---------------- users & roles -----------------
+
+def list_users(*, include_inactive: bool = True, path: Optional[Path] = None) -> List[User]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_users()
+    users = [_row_to_user(row) for row in rows]
+    if include_inactive:
+        return users
+    return [user for user in users if user.active]
+
+
+def upsert_user(user: User, *, path: Optional[Path] = None) -> User:
+    base = _resolve_base(path)
+    payload = {
+        "username": user.username,
+        "display_name": user.display_name,
+        "email": user.email,
+        "active": user.active,
+    }
+    _get_db(base).upsert_user(payload)
+    return user
+
+
+def delete_user(username: str, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_user(username)
+
+
+def list_roles(*, path: Optional[Path] = None) -> List[Role]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_roles()
+    return [_row_to_role(row) for row in rows]
+
+
+def upsert_role(role: Role, *, path: Optional[Path] = None) -> Role:
+    base = _resolve_base(path)
+    payload = {
+        "key": role.key,
+        "name": role.name,
+        "description": role.description,
+    }
+    _get_db(base).upsert_role(payload)
+    return role
+
+
+def delete_role(role_key: str, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_role(role_key)
+
+
+def list_user_roles(username: Optional[str] = None, *, path: Optional[Path] = None) -> Dict[str, List[str]]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_user_roles(username)
+    roles: Dict[str, List[str]] = {}
+    for row in rows:
+        user = row.get("username") or ""
+        roles.setdefault(user, []).append(row.get("role_key") or "")
+    return roles
+
+
+def set_user_roles(username: str, roles: Iterable[str], *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).set_user_roles(username, list(roles))
 
 
 # ---------------- filtering helpers -----------------

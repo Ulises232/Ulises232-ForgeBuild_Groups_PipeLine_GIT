@@ -4,6 +4,7 @@ from .config import Config
 from .maven import run_maven
 from .copier import copy_artifacts
 from .pipeline_history import PipelineHistory
+from .session import current_username
 import pathlib, shutil, tempfile, os, threading, getpass
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -284,7 +285,7 @@ def build_project_scheduled(
     try:
         history_run_id = history.start_run(
             "build",
-            user=getpass.getuser(),
+            user=current_username(getpass.getuser()),
             group_key=group_key,
             project_key=project_key,
             profiles=profiles,
@@ -479,7 +480,7 @@ def deploy_profiles_scheduled(
     try:
         history_run_id = history.start_run(
             "deploy",
-            user=getpass.getuser(),
+            user=current_username(getpass.getuser()),
             group_key=group_key,
             project_key=project_key,
             profiles=profiles,

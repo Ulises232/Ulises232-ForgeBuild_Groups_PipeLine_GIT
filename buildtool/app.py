@@ -126,7 +126,7 @@ def main():
 
     # 5) Crear QApplication DESPUÉS de instalar errguard y configurar reglas Qt
     try:
-        from PySide6.QtWidgets import QApplication
+        from PySide6.QtWidgets import QApplication, QDialog
     except Exception as e:
         log(f"!! cannot import PySide6: {e}")
         raise
@@ -167,6 +167,12 @@ def main():
         sys.unraisablehook = _unraisable_hook
 
     # 6) Crear y mostrar la ventana principal
+    from buildtool.views.user_login import UserLoginDialog
+    login = UserLoginDialog()
+    if login.exec() != QDialog.Accepted:
+        log("== app.main: login cancelled ==")
+        return 0
+
     from buildtool.main_window import MainWindow
     log("== app.main: importing MainWindow ok ==")
     w = MainWindow()

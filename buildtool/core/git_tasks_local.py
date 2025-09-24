@@ -19,6 +19,7 @@ from buildtool.core.branch_store import (
 )
 from buildtool.core.git_console_trace import clog
 from buildtool.core.git_tasks import _iter_modules as _iter_modules_cfg
+from .session import current_username
 
 # --------------------- helpers de salida y ejecución ---------------------
 
@@ -131,7 +132,8 @@ def _switch_branch_with_fallback(path: Path, branch: str, emit=None) -> Tuple[bo
 
 
 def _current_user() -> str:
-    return os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+    fallback = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+    return current_username(fallback)
 
 
 def _get_record(index, gkey, pkey, branch) -> BranchRecord:

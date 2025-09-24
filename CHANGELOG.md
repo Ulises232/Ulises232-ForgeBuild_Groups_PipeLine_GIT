@@ -4,6 +4,16 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.5.0] - 2025-10-05
+### Añadido
+- Módulo de planeación de sprints con tarjetas enlazadas a ramas, asignación de responsables y validación de checks antes del merge.
+- Diálogo de autenticación con gestión de usuarios y roles persistidos en NAS/SQLite para reutilizar la identidad en todas las vistas.
+- Nuevos campos en el historial de pipelines para rastrear tarjetas, aprobaciones y responsables, incluyendo filtros específicos en la UI.
+
+### Cambiado
+- El flujo de merge en la vista Git valida las aprobaciones registradas en las tarjetas y documenta el resultado en la historia.
+- La vista de historial de pipelines muestra información de QA/pruebas y permite filtrar por estado o tarjeta asociada.
+
 ## [1.4.6] - 2025-10-04
 ### Cambiado
 - El helper `SignalBlocker` vive en `buildtool/ui/widgets.py` para reutilizarlo entre vistas y

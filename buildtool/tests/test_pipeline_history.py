@@ -40,6 +40,9 @@ class PipelineHistoryTest(unittest.TestCase):
         self.assertIn("dev", rec.profiles)
         self.assertEqual(rec.status, "success")
         self.assertEqual(rec.message, "Completado")
+        self.assertIsNone(rec.card_id)
+        self.assertIsNone(rec.unit_tests_status)
+        self.assertIsNone(rec.qa_status)
 
         logs = self.history.get_logs(run_id)
         self.assertEqual(len(logs), 1)
