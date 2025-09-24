@@ -175,8 +175,6 @@ class BranchHistoryDB:
                     updated_by TEXT,
                     FOREIGN KEY(branch_key) REFERENCES branches(key) ON DELETE CASCADE
                 );
-                CREATE INDEX IF NOT EXISTS idx_sprints_branch
-                    ON sprints(branch_key);
 
                 CREATE TABLE IF NOT EXISTS cards (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -244,11 +242,17 @@ class BranchHistoryDB:
         # The remaining tables always exist with the required columns when the
         # script above runs, but `CREATE INDEX IF NOT EXISTS` keeps the calls
         # idempotent for repeated initialisations.
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_sprints_branch ON sprints(branch_key)"
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cards_sprint ON cards(sprint_id)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_cards_branch ON cards(branch)")
+        sprints_columns = self._table_columns(conn, "sprints")
+        if "branch_key" in sprints_columns:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sprints_branch ON sprints(branch_key)"
+            )
+
+        cards_columns = self._table_columns(conn, "cards")
+        if "sprint_id" in cards_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cards_sprint ON cards(sprint_id)")
+        if "branch" in cards_columns:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_cards_branch ON cards(branch)")
 
     def _ensure_activity_log_branch_key(self, conn: sqlite3.Connection) -> None:
         columns = self._table_columns(conn, "activity_log")
