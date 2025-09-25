@@ -46,6 +46,9 @@ SPRINT_COLUMNS = [
     "lead_user",
     "qa_user",
     "description",
+    "status",
+    "closed_at",
+    "closed_by",
     "created_at",
     "created_by",
     "updated_at",
@@ -56,7 +59,9 @@ SPRINT_COLUMNS = [
 CARD_COLUMNS = [
     "id",
     "sprint_id",
+    "branch_key",
     "title",
+    "ticket_id",
     "branch",
     "assignee",
     "qa_assignee",
@@ -68,6 +73,12 @@ CARD_COLUMNS = [
     "unit_tests_at",
     "qa_at",
     "status",
+    "branch_created_by",
+    "branch_created_at",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
 ]
 
 
@@ -80,6 +91,9 @@ CREATE TABLE {if_not_exists}{table} (
     lead_user TEXT,
     qa_user TEXT,
     description TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    closed_at INTEGER,
+    closed_by TEXT,
     created_at INTEGER NOT NULL DEFAULT 0,
     created_by TEXT,
     updated_at INTEGER NOT NULL DEFAULT 0,
@@ -92,7 +106,9 @@ CARD_TABLE_TEMPLATE = """
 CREATE TABLE {if_not_exists}{table} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sprint_id INTEGER NOT NULL,
+    branch_key TEXT,
     title TEXT NOT NULL DEFAULT '',
+    ticket_id TEXT,
     branch TEXT NOT NULL DEFAULT '',
     assignee TEXT,
     qa_assignee TEXT,
@@ -104,6 +120,12 @@ CREATE TABLE {if_not_exists}{table} (
     unit_tests_at INTEGER,
     qa_at INTEGER,
     status TEXT DEFAULT 'pending',
+    branch_created_by TEXT,
+    branch_created_at INTEGER,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    updated_by TEXT,
     FOREIGN KEY(sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
 );
 """
@@ -120,6 +142,9 @@ class Sprint:
     lead_user: Optional[str] = None
     qa_user: Optional[str] = None
     description: str = ""
+    status: str = "open"
+    closed_at: Optional[int] = None
+    closed_by: Optional[str] = None
     created_at: int = 0
     created_by: str = ""
     updated_at: int = 0
@@ -132,8 +157,10 @@ class Card:
 
     id: Optional[int]
     sprint_id: int
-    title: str
-    branch: str
+    branch_key: Optional[str] = None
+    title: str = ""
+    ticket_id: str = ""
+    branch: str = ""
     assignee: Optional[str] = None
     qa_assignee: Optional[str] = None
     description: str = ""
@@ -144,6 +171,12 @@ class Card:
     unit_tests_at: Optional[int] = None
     qa_at: Optional[int] = None
     status: str = "pending"
+    branch_created_by: Optional[str] = None
+    branch_created_at: Optional[int] = None
+    created_at: int = 0
+    created_by: str = ""
+    updated_at: int = 0
+    updated_by: str = ""
 
 
 @dataclass(slots=True)
@@ -337,6 +370,9 @@ class BranchHistoryDB:
             "lead_user": "NULL",
             "qa_user": "NULL",
             "description": "''",
+            "status": "'open'",
+            "closed_at": "NULL",
+            "closed_by": "NULL",
             "created_at": "0",
             "created_by": "''",
             "updated_at": "0",
@@ -357,6 +393,7 @@ class BranchHistoryDB:
         if set(CARD_COLUMNS).issubset(columns):
             return
         defaults = {
+            "branch_key": "NULL",
             "assignee": "NULL",
             "qa_assignee": "NULL",
             "description": "''",
@@ -367,6 +404,13 @@ class BranchHistoryDB:
             "unit_tests_at": "NULL",
             "qa_at": "NULL",
             "status": "'pending'",
+            "ticket_id": "NULL",
+            "branch_created_by": "NULL",
+            "branch_created_at": "NULL",
+            "created_at": "0",
+            "created_by": "''",
+            "updated_at": "0",
+            "updated_by": "''",
         }
         self._rebuild_table(
             conn,
@@ -548,10 +592,10 @@ class BranchHistoryDB:
                 """
                 INSERT INTO sprints (
                     id, branch_key, name, version, lead_user, qa_user, description,
-                    created_at, created_by, updated_at, updated_by
+                    status, closed_at, closed_by, created_at, created_by, updated_at, updated_by
                 ) VALUES (
                     :id, :branch_key, :name, :version, :lead_user, :qa_user, :description,
-                    :created_at, :created_by, :updated_at, :updated_by
+                    :status, :closed_at, :closed_by, :created_at, :created_by, :updated_at, :updated_by
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     branch_key = excluded.branch_key,
@@ -560,6 +604,9 @@ class BranchHistoryDB:
                     lead_user = excluded.lead_user,
                     qa_user = excluded.qa_user,
                     description = excluded.description,
+                    status = excluded.status,
+                    closed_at = excluded.closed_at,
+                    closed_by = excluded.closed_by,
                     created_at = excluded.created_at,
                     created_by = excluded.created_by,
                     updated_at = excluded.updated_at,
@@ -609,15 +656,19 @@ class BranchHistoryDB:
             cursor = conn.execute(
                 """
                 INSERT INTO cards (
-                    id, sprint_id, title, branch, assignee, qa_assignee, description,
-                    unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at, qa_at, status
+                    id, sprint_id, branch_key, title, ticket_id, branch, assignee, qa_assignee, description,
+                    unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at, qa_at, status,
+                    branch_created_by, branch_created_at, created_at, created_by, updated_at, updated_by
                 ) VALUES (
-                    :id, :sprint_id, :title, :branch, :assignee, :qa_assignee, :description,
-                    :unit_tests_done, :qa_done, :unit_tests_by, :qa_by, :unit_tests_at, :qa_at, :status
+                    :id, :sprint_id, :branch_key, :title, :ticket_id, :branch, :assignee, :qa_assignee, :description,
+                    :unit_tests_done, :qa_done, :unit_tests_by, :qa_by, :unit_tests_at, :qa_at, :status,
+                    :branch_created_by, :branch_created_at, :created_at, :created_by, :updated_at, :updated_by
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     sprint_id = excluded.sprint_id,
+                    branch_key = excluded.branch_key,
                     title = excluded.title,
+                    ticket_id = excluded.ticket_id,
                     branch = excluded.branch,
                     assignee = excluded.assignee,
                     qa_assignee = excluded.qa_assignee,
@@ -628,7 +679,13 @@ class BranchHistoryDB:
                     qa_by = excluded.qa_by,
                     unit_tests_at = excluded.unit_tests_at,
                     qa_at = excluded.qa_at,
-                    status = excluded.status
+                    status = excluded.status,
+                    branch_created_by = excluded.branch_created_by,
+                    branch_created_at = excluded.branch_created_at,
+                    created_at = excluded.created_at,
+                    created_by = excluded.created_by,
+                    updated_at = excluded.updated_at,
+                    updated_by = excluded.updated_by
                 """,
                 data,
             )
@@ -758,6 +815,9 @@ class BranchHistoryDB:
             "lead_user": payload.get("lead_user"),
             "qa_user": payload.get("qa_user"),
             "description": payload.get("description") or "",
+            "status": (payload.get("status") or "open").lower(),
+            "closed_at": int(payload.get("closed_at") or 0) or None,
+            "closed_by": payload.get("closed_by") or None,
             "created_at": int(payload.get("created_at") or 0),
             "created_by": payload.get("created_by") or "",
             "updated_at": int(payload.get("updated_at") or 0),
@@ -771,7 +831,9 @@ class BranchHistoryDB:
         data = {
             "id": payload.get("id"),
             "sprint_id": int(payload.get("sprint_id") or 0),
+            "branch_key": payload.get("branch_key"),
             "title": payload.get("title") or "",
+            "ticket_id": payload.get("ticket_id") or "",
             "branch": payload.get("branch") or "",
             "assignee": payload.get("assignee"),
             "qa_assignee": payload.get("qa_assignee"),
@@ -783,6 +845,12 @@ class BranchHistoryDB:
             "unit_tests_at": int(payload.get("unit_tests_at") or 0) or None,
             "qa_at": int(payload.get("qa_at") or 0) or None,
             "status": payload.get("status") or "pending",
+            "branch_created_by": payload.get("branch_created_by"),
+            "branch_created_at": int(payload.get("branch_created_at") or 0) or None,
+            "created_at": int(payload.get("created_at") or 0),
+            "created_by": payload.get("created_by") or "",
+            "updated_at": int(payload.get("updated_at") or 0),
+            "updated_by": payload.get("updated_by") or "",
         }
         if data["id"] in ("", None):
             data["id"] = None

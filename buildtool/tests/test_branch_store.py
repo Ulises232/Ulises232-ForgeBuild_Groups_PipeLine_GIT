@@ -218,7 +218,9 @@ class LoadIndexTest(unittest.TestCase):
                 expected = {
                     "id",
                     "sprint_id",
+                    "branch_key",
                     "title",
+                    "ticket_id",
                     "branch",
                     "assignee",
                     "qa_assignee",
@@ -230,6 +232,12 @@ class LoadIndexTest(unittest.TestCase):
                     "unit_tests_at",
                     "qa_at",
                     "status",
+                    "branch_created_by",
+                    "branch_created_at",
+                    "created_at",
+                    "created_by",
+                    "updated_at",
+                    "updated_by",
                 }
                 self.assertTrue(expected.issubset(columns))
                 row = conn.execute(
@@ -261,13 +269,22 @@ class LoadIndexTest(unittest.TestCase):
                 id=None,
                 sprint_id=sprint.id,
                 title="Tarjeta 1",
+                ticket_id="ELASS-40",
                 branch="feature/login",
+                created_by="alice",
+                updated_by="alice",
             )
             branch_store.upsert_card(card, path=base)
             self.assertTrue(card.branch.startswith("v2.68_"))
+            expected_key = "ellis/proyecto/v2.68_feature/login"
+            self.assertEqual(card.branch_key, expected_key)
             stored = branch_store.list_cards(path=base, sprint_ids=[sprint.id])
             self.assertEqual(len(stored), 1)
-            self.assertEqual(stored[0].branch, "v2.68_feature/login")
+            stored_card = stored[0]
+            self.assertEqual(stored_card.branch, "v2.68_feature/login")
+            self.assertEqual(stored_card.branch_key, expected_key)
+            self.assertEqual(stored_card.ticket_id, "ELASS-40")
+            self.assertEqual(stored_card.created_by, "alice")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,13 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 ## [1.5.1] - 2025-10-06
+### Añadido
+- Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la
+  misma vista, con finalización de sprints, borrado y bloqueo automático de nuevas
+  tarjetas cuando un sprint está cerrado.
+- Controles de tarjetas con ID de ticket, autoría y creación directa de ramas que
+  muestran su presencia local/origin y registran al creador desde el historial NAS.
+
 ### Corregido
 - La inicialización de `branch_history_db.sqlite3` omite la creación temprana del índice de sprints
   y valida que existan las columnas antes de construir índices, evitando el error

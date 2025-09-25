@@ -262,6 +262,9 @@ def _row_to_sprint(row: dict) -> Sprint:
         lead_user=row.get("lead_user") or None,
         qa_user=row.get("qa_user") or None,
         description=row.get("description") or "",
+        status=(row.get("status") or "open").lower(),
+        closed_at=int(row.get("closed_at") or 0) or None,
+        closed_by=row.get("closed_by") or None,
         created_at=int(row.get("created_at") or 0),
         created_by=row.get("created_by") or "",
         updated_at=int(row.get("updated_at") or 0),
@@ -275,7 +278,9 @@ def _row_to_card(row: dict) -> Card:
     return Card(
         id=int(row["id"]) if row.get("id") is not None else None,
         sprint_id=int(row.get("sprint_id") or 0),
+        branch_key=row.get("branch_key") or None,
         title=row.get("title") or "",
+        ticket_id=row.get("ticket_id") or "",
         branch=row.get("branch") or "",
         assignee=row.get("assignee") or None,
         qa_assignee=row.get("qa_assignee") or None,
@@ -287,6 +292,12 @@ def _row_to_card(row: dict) -> Card:
         unit_tests_at=int(unit_ts_at) if unit_ts_at else None,
         qa_at=int(qa_at) if qa_at else None,
         status=row.get("status") or "pending",
+        branch_created_by=row.get("branch_created_by") or None,
+        branch_created_at=int(row.get("branch_created_at") or 0) or None,
+        created_at=int(row.get("created_at") or 0),
+        created_by=row.get("created_by") or "",
+        updated_at=int(row.get("updated_at") or 0),
+        updated_by=row.get("updated_by") or "",
     )
 
 
@@ -409,8 +420,24 @@ def list_sprints(*, branch_keys: Optional[Iterable[str]] = None, path: Optional[
     return [_row_to_sprint(row) for row in rows]
 
 
+def _split_branch_key(value: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    if not value:
+        return (None, None, None)
+    parts = value.split("/", 2)
+    if len(parts) == 1:
+        return (parts[0] or None, None, None)
+    if len(parts) == 2:
+        return (parts[0] or None, parts[1] or None, None)
+    return (parts[0] or None, parts[1] or None, parts[2] or None)
+
+
 def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
     base = _resolve_base(path)
+    now = int(time.time())
+    if not sprint.created_at:
+        sprint.created_at = now
+    if not sprint.updated_at:
+        sprint.updated_at = now
     payload = {
         "id": sprint.id,
         "branch_key": sprint.branch_key,
@@ -419,6 +446,9 @@ def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
         "lead_user": sprint.lead_user,
         "qa_user": sprint.qa_user,
         "description": sprint.description,
+        "status": sprint.status,
+        "closed_at": sprint.closed_at,
+        "closed_by": sprint.closed_by,
         "created_at": sprint.created_at,
         "created_by": sprint.created_by,
         "updated_at": sprint.updated_at,
@@ -459,6 +489,23 @@ def _card_branch_prefix(card: Card, base: Path) -> str:
     return f"v{version}_"
 
 
+def _card_branch_key(card: Card, base: Path) -> Optional[str]:
+    if getattr(card, "branch_key", None):
+        return card.branch_key
+    if not getattr(card, "sprint_id", None):
+        return None
+    sprint = _get_db(base).fetch_sprint(int(card.sprint_id))
+    if not sprint:
+        return None
+    group, project, _ = _split_branch_key(sprint.get("branch_key"))
+    branch = (card.branch or "").strip()
+    if not branch:
+        return None
+    group_part = group or ""
+    project_part = project or ""
+    return f"{group_part}/{project_part}/{branch}".strip("/")
+
+
 def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
     base = _resolve_base(path)
     prefix = _card_branch_prefix(card, base)
@@ -466,10 +513,17 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
     if prefix and branch_value and not branch_value.startswith(prefix):
         branch_value = f"{prefix}{branch_value}"
     card.branch = branch_value
+    card.branch_key = _card_branch_key(card, base)
+    now = int(time.time())
+    if not card.created_at:
+        card.created_at = now
+    card.updated_at = now
     payload = {
         "id": card.id,
         "sprint_id": card.sprint_id,
+        "branch_key": card.branch_key,
         "title": card.title,
+        "ticket_id": card.ticket_id,
         "branch": card.branch,
         "assignee": card.assignee,
         "qa_assignee": card.qa_assignee,
@@ -481,6 +535,12 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
         "unit_tests_at": card.unit_tests_at,
         "qa_at": card.qa_at,
         "status": card.status,
+        "branch_created_by": card.branch_created_by,
+        "branch_created_at": card.branch_created_at,
+        "created_at": card.created_at,
+        "created_by": card.created_by,
+        "updated_at": card.updated_at,
+        "updated_by": card.updated_by,
     }
     card_id = _get_db(base).upsert_card(payload)
     card.id = card_id
