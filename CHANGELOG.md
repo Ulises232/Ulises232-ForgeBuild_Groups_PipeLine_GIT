@@ -13,10 +13,10 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - Las operaciones de escritura (`upsert_*`, asignaciones de roles, bitácora) usan actualizaciones seguidas de inserción, compatibles con motores sin `ON CONFLICT`.
 - Documentación actualizada con los pasos para habilitar SQL Server y opciones de conexión.
-- El asistente de configuración permite definir `BRANCH_HISTORY_URL` desde la pestaña de variables y se documentó que `pyodbc` es opcional, manteniendo SQLite cuando no se desea instalar el driver ODBC.
+- El asistente de configuración permite definir `BRANCH_HISTORY_URL` desde la pestaña de variables y la documentación recalca que, al apuntar a SQL Server, es obligatorio contar con `pyodbc` y el driver ODBC correspondiente.
 
 ### Corregido
-- Si `BRANCH_HISTORY_URL` apunta a SQL Server y `pyodbc` no está disponible, la aplicación ignora la URL y mantiene SQLite para evitar bloqueos en instalaciones sin el driver.
+- Si `BRANCH_HISTORY_URL` apunta a SQL Server y falta `pyodbc`, el arranque falla con un mensaje claro en lugar de continuar sobre SQLite, evitando que el NAS vuelva a quedar bloqueado por el archivo compartido.
 
 ## [1.5.1] - 2025-10-06
 ### Añadido
