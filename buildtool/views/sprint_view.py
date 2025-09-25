@@ -147,8 +147,8 @@ class SprintView(QWidget):
         self._build_card_form()
 
         splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
 
         self.btnRefresh.clicked.connect(self.refresh)
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
@@ -959,5 +959,3 @@ class SprintView(QWidget):
         self.refresh()
         if card.id:
             self._select_tree_item("card", card.id)
-
-*** End of File
