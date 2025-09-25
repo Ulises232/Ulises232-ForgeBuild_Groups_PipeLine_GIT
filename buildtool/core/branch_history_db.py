@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Seque
 from urllib.parse import parse_qs, urlparse
 
 try:  # pragma: no cover - optional dependency, exercised in integration flows
-    import tds
+    import pytds as tds
 except Exception:  # pragma: no cover - tests run without SQL Server driver
     tds = None
 
