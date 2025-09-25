@@ -204,7 +204,8 @@ Todas las acciones corren en hilos de fondo con protección de errores; la bitá
 - Desde la versión 1.6.0 es posible apuntar el historial hacia un SQL Server 2019 centralizado declarando la variable `FORGEBUILD_BRANCH_HISTORY_URL` en un archivo `.env` (local o en `~/.forgebuild/.env`).
   - Ejemplo (ODBC): `FORGEBUILD_BRANCH_HISTORY_URL="mssql+pyodbc://usuario:contraseña@host/BasesGrupos?driver=ODBC+Driver+17+for+SQL+Server"`.
   - Ejemplo (TDS puro): `FORGEBUILD_BRANCH_HISTORY_URL="mssql+pytds://usuario:contraseña@host:1433/BasesGrupos"`.
-  - Instala por separado el driver que prefieras (`pyodbc`, `python-tds`, `aioodbc`, etc.); la aplicación sólo requiere `SQLAlchemy`.
+  - Ejemplo (FreeTDS nativo): `FORGEBUILD_BRANCH_HISTORY_URL="mssql+pymssql://usuario:contraseña@host:1433/BasesGrupos"`.
+  - La distribución incluye `python-tds` para contar con un driver listo para usar; puedes instalar por separado otras alternativas (`pyodbc`, `pymssql`, `aioodbc`, etc.) según tus necesidades.
   - La capa de persistencia usa `SQLAlchemy` con pool de conexiones y cae automáticamente en SQLite cuando la variable no está definida.
 - Las vistas **Repos**, **NAS → Ramas** y **NAS → Activity Log** leen directamente desde el backend configurado, conservando filtros, búsquedas y edición manual.
 - Para migrar una instalación existente utiliza `python -m buildtool.scripts.migrate_branch_history path/al/sqlite url-sqlserver`.

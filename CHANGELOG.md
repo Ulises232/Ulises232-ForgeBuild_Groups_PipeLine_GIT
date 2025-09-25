@@ -13,6 +13,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Script `buildtool/scripts/migrate_branch_history.py` que vuelca los datos de
   `branches_history.sqlite3` hacia el servidor configurado conservando ramas,
   actividad, sprints, tarjetas y usuarios.
+- Distribución con el driver `python-tds` preinstalado para conectar contra SQL Server
+  sin depender de ruedas binarias específicas del entorno.
 
 ### Cambiado
 - El historial NAS utiliza conexiones pool mediante `SQLAlchemy` cuando se trabaja

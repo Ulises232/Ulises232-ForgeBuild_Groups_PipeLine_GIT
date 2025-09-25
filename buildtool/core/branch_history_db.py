@@ -935,7 +935,7 @@ class _SQLServerBranchHistoryBackend(_NormalizerMixin):
         if not create_engine or not text:
             raise RuntimeError(
                 "El backend SQL Server requiere SQLAlchemy y un driver compatible "
-                "con SQL Server instalado (por ejemplo, pyodbc, python-tds o pymssql)."
+                "con SQL Server instalado (por ejemplo, python-tds o pymssql)."
             )
         self.connection_url = connection_url
         self._engine: Engine = create_engine(
