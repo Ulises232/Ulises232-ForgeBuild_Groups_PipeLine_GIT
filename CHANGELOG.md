@@ -15,6 +15,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Documentación actualizada con los pasos para habilitar SQL Server y opciones de conexión.
 - El asistente de configuración permite definir `BRANCH_HISTORY_URL` desde la pestaña de variables y se documentó que `pyodbc` es opcional, manteniendo SQLite cuando no se desea instalar el driver ODBC.
 
+### Corregido
+- Si `BRANCH_HISTORY_URL` apunta a SQL Server y `pyodbc` no está disponible, la aplicación ignora la URL y mantiene SQLite para evitar bloqueos en instalaciones sin el driver.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la
