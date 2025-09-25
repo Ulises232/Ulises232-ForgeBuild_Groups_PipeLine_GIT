@@ -33,8 +33,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   añadiendo controles de permisos y edición directa desde la misma pestaña.
 - Las tarjetas nuevas y existentes normalizan el nombre de la rama para anteponer el prefijo de versión
   (por ejemplo `v2.68_`), guiando al usuario en los diálogos y validándolo en la capa de persistencia.
-- El divisor de la vista de planeación reserva más espacio para la tabla de sprints y tarjetas,
-  facilitando la lectura de columnas sin desplazar el panel de detalles.
+- El divisor de la vista de planeación mantiene más ancho el panel izquierdo y limita el panel de
+  detalles, facilitando la lectura de columnas sin que la ficha se imponga por su tamaño mínimo.
 
 ## [1.5.0] - 2025-10-05
 ### Añadido

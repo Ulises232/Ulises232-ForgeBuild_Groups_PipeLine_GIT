@@ -135,6 +135,8 @@ class SprintView(QWidget):
         splitter.addWidget(left_panel)
 
         right_panel = QWidget()
+        right_panel.setMinimumWidth(360)
+        right_panel.setMaximumWidth(560)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
@@ -147,8 +149,9 @@ class SprintView(QWidget):
         self._build_card_form()
 
         splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(0, 5)
         splitter.setStretchFactor(1, 2)
+        splitter.setSizes([960, 420])
 
         self.btnRefresh.clicked.connect(self.refresh)
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
