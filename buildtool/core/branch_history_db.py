@@ -41,6 +41,7 @@ ACTIVITY_COLUMNS = [
 SPRINT_COLUMNS = [
     "id",
     "branch_key",
+    "qa_branch_key",
     "name",
     "version",
     "lead_user",
@@ -86,6 +87,7 @@ SPRINT_TABLE_TEMPLATE = """
 CREATE TABLE {if_not_exists}{table} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     branch_key TEXT NOT NULL DEFAULT '',
+    qa_branch_key TEXT,
     name TEXT NOT NULL DEFAULT '',
     version TEXT NOT NULL DEFAULT '',
     lead_user TEXT,
@@ -139,6 +141,7 @@ class Sprint:
     branch_key: str
     name: str
     version: str
+    qa_branch_key: Optional[str] = None
     lead_user: Optional[str] = None
     qa_user: Optional[str] = None
     description: str = ""
@@ -365,6 +368,7 @@ class BranchHistoryDB:
             return
         defaults = {
             "branch_key": "''",
+            "qa_branch_key": "NULL",
             "name": "''",
             "version": "''",
             "lead_user": "NULL",
@@ -591,14 +595,15 @@ class BranchHistoryDB:
             cursor = conn.execute(
                 """
                 INSERT INTO sprints (
-                    id, branch_key, name, version, lead_user, qa_user, description,
+                    id, branch_key, qa_branch_key, name, version, lead_user, qa_user, description,
                     status, closed_at, closed_by, created_at, created_by, updated_at, updated_by
                 ) VALUES (
-                    :id, :branch_key, :name, :version, :lead_user, :qa_user, :description,
+                    :id, :branch_key, :qa_branch_key, :name, :version, :lead_user, :qa_user, :description,
                     :status, :closed_at, :closed_by, :created_at, :created_by, :updated_at, :updated_by
                 )
                 ON CONFLICT(id) DO UPDATE SET
                     branch_key = excluded.branch_key,
+                    qa_branch_key = excluded.qa_branch_key,
                     name = excluded.name,
                     version = excluded.version,
                     lead_user = excluded.lead_user,
@@ -810,6 +815,7 @@ class BranchHistoryDB:
         data = {
             "id": payload.get("id"),
             "branch_key": payload.get("branch_key") or "",
+            "qa_branch_key": payload.get("qa_branch_key") or None,
             "name": payload.get("name") or "",
             "version": payload.get("version") or "",
             "lead_user": payload.get("lead_user"),
@@ -825,6 +831,10 @@ class BranchHistoryDB:
         }
         if data["id"] in ("", None):
             data["id"] = None
+        if isinstance(data["qa_branch_key"], str):
+            data["qa_branch_key"] = data["qa_branch_key"].strip() or None
+        if data["qa_branch_key"] in ("", None):
+            data["qa_branch_key"] = None
         return data
 
     def _normalize_card(self, payload: dict) -> Dict[str, object]:

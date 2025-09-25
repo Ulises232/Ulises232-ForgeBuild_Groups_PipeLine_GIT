@@ -11,6 +11,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   tarjetas cuando un sprint está cerrado.
 - Controles de tarjetas con ID de ticket, autoría y creación directa de ramas que
   muestran su presencia local/origin y registran al creador desde el historial NAS.
+- Los sprints almacenan también la rama QA asociada para dirigir la creación de
+  tarjetas y validar los flujos de revisión.
 
 ### Corregido
 - La inicialización de `branch_history_db.sqlite3` omite la creación temprana del índice de sprints
@@ -27,8 +29,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   por defecto esperados por la nueva UI de planeación.
 - La vista de sprints permite escoger la rama base a partir del grupo y maneja de forma segura
   el alta cuando la rama ya no existe, evitando violaciones de llave foránea al crear nuevos sprints.
-- La creación de ramas desde tarjetas parte siempre de la rama base configurada en el sprint,
-  evitando que se generen ramas huérfanas desde `HEAD` al trabajar múltiples módulos.
+- La creación de ramas desde tarjetas parte ahora de la rama QA configurada en el sprint,
+  validando su selección antes de operar y evitando ramas huérfanas desde `HEAD`.
 
 ### Cambiado
 - La vista de sprints permite editar sprints solo para líderes y tarjetas para cualquier usuario,

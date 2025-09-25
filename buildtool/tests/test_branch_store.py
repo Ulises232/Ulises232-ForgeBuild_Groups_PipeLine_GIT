@@ -167,6 +167,7 @@ class LoadIndexTest(unittest.TestCase):
                 expected = {
                     "id",
                     "branch_key",
+                    "qa_branch_key",
                     "name",
                     "version",
                     "lead_user",
@@ -256,6 +257,7 @@ class LoadIndexTest(unittest.TestCase):
             sprint = branch_store.Sprint(
                 id=None,
                 branch_key="ellis/proyecto/v2.68",
+                qa_branch_key="ellis/proyecto/v2.68_QA",
                 name="Sprint 3",
                 version="2.68",
                 created_at=now,
@@ -285,6 +287,62 @@ class LoadIndexTest(unittest.TestCase):
             self.assertEqual(stored_card.branch_key, expected_key)
             self.assertEqual(stored_card.ticket_id, "ELASS-40")
             self.assertEqual(stored_card.created_by, "alice")
+
+    def test_upsert_sprint_persists_qa_branch(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            now = int(time.time())
+            sprint = branch_store.Sprint(
+                id=None,
+                branch_key="ellis/proyecto/v2.68",
+                qa_branch_key="ellis/proyecto/v2.68_QA",
+                name="Sprint 3",
+                version="2.68",
+                created_at=now,
+                created_by="alice",
+                updated_at=now,
+                updated_by="alice",
+            )
+            branch_store.upsert_sprint(sprint, path=base)
+
+            stored = branch_store.list_sprints(path=base)
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0].qa_branch_key, "ellis/proyecto/v2.68_QA")
+
+    def test_card_branch_key_uses_qa_branch_scope(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            now = int(time.time())
+            sprint = branch_store.Sprint(
+                id=None,
+                branch_key="",
+                qa_branch_key="ellis/proyecto/v2.68_QA",
+                name="Sprint QA",
+                version="2.68",
+                created_at=now,
+                created_by="alice",
+                updated_at=now,
+                updated_by="alice",
+            )
+            branch_store.upsert_sprint(sprint, path=base)
+            self.assertIsNotNone(sprint.id)
+
+            card = branch_store.Card(
+                id=None,
+                sprint_id=sprint.id,
+                title="Tarjeta QA",
+                ticket_id="ELASS-50",
+                branch="feature/test",
+                created_by="alice",
+                updated_by="alice",
+            )
+            branch_store.upsert_card(card, path=base)
+
+            self.assertTrue(card.branch.startswith("v2.68_"))
+            self.assertEqual(card.branch_key, "ellis/proyecto/v2.68_feature/test")
+            stored = branch_store.list_cards(path=base, sprint_ids=[sprint.id])
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0].branch_key, "ellis/proyecto/v2.68_feature/test")
 
 
 if __name__ == "__main__":

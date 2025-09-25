@@ -62,6 +62,7 @@ class SprintView(QWidget):
         self._selected_card_id: Optional[int] = None
         self._card_parent_id: Optional[int] = None
         self._current_sprint_branch_key: Optional[str] = None
+        self._current_sprint_qa_branch_key: Optional[str] = None
         self._current_card_prefix: str = ""
 
         self._setup_ui()
@@ -123,6 +124,7 @@ class SprintView(QWidget):
                 "QA",
                 "Checks",
                 "Rama",
+                "Rama QA",
                 "Local",
                 "Origen",
                 "Creada por",
@@ -186,6 +188,15 @@ class SprintView(QWidget):
         branch_row.addWidget(self.btnPickBranch)
         form.addRow("Rama base", branch_row)
 
+        qa_row = QHBoxLayout()
+        self.txtSprintQABranch = QLineEdit()
+        self.txtSprintQABranch.setReadOnly(True)
+        qa_row.addWidget(self.txtSprintQABranch, 1)
+        self.btnPickQABranch = QPushButton("Seleccionar rama QA")
+        self.btnPickQABranch.setIcon(get_icon("branch"))
+        qa_row.addWidget(self.btnPickQABranch)
+        form.addRow("Rama QA", qa_row)
+
         self.txtSprintName = QLineEdit()
         form.addRow("Nombre", self.txtSprintName)
 
@@ -218,6 +229,7 @@ class SprintView(QWidget):
         form.addRow("", button_row)
 
         self.btnPickBranch.clicked.connect(self._on_pick_branch)
+        self.btnPickQABranch.clicked.connect(self._on_pick_qa_branch)
         self.btnSprintSave.clicked.connect(self._on_save_sprint)
         self.btnSprintCancel.clicked.connect(self._on_cancel)
         self.btnSprintDelete.clicked.connect(self._on_delete_sprint)
@@ -308,6 +320,7 @@ class SprintView(QWidget):
         self.btnNewSprint.setEnabled(can_lead)
 
         self.btnPickBranch.setEnabled(can_lead and sprint_mode)
+        self.btnPickQABranch.setEnabled(can_lead and sprint_mode)
         self.btnSprintSave.setEnabled(can_lead and sprint_mode)
         self.btnSprintDelete.setEnabled(can_lead and sprint_mode and self._selected_sprint_id is not None)
         self.chkSprintClosed.setEnabled(can_lead and sprint_mode)
@@ -364,9 +377,10 @@ class SprintView(QWidget):
             sprint_item.setText(2, sprint.qa_user or "")
             sprint_item.setText(3, "Cerrado" if sprint.status == "closed" else "Abierto")
             sprint_item.setText(4, sprint.branch_key)
-            sprint_item.setText(5, "-" )
+            sprint_item.setText(5, sprint.qa_branch_key or "")
             sprint_item.setText(6, "-")
-            sprint_item.setText(7, sprint.created_by or "")
+            sprint_item.setText(7, "-")
+            sprint_item.setText(8, sprint.created_by or "")
             sprint_item.setData(0, Qt.UserRole, ("sprint", sprint.id))
             self.tree.addTopLevelItem(sprint_item)
 
@@ -397,6 +411,7 @@ class SprintView(QWidget):
         checks.append("Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖")
         item.setText(3, " / ".join(checks))
         item.setText(4, card.branch)
+        item.setText(5, sprint.qa_branch_key or "")
 
         record = self._branch_record_for_card(card, sprint)
         has_branch = bool((card.branch or "").strip())
@@ -409,9 +424,9 @@ class SprintView(QWidget):
             origin_text = "No" if has_branch else "-"
             creator = card.branch_created_by or ""
 
-        item.setText(5, local_text)
-        item.setText(6, origin_text)
-        item.setText(7, creator or "")
+        item.setText(6, local_text)
+        item.setText(7, origin_text)
+        item.setText(8, creator or "")
         item.setData(0, Qt.UserRole, ("card", card.id))
         parent.addChild(item)
 
@@ -437,8 +452,9 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _build_card_branch_key(self, card: Card, sprint: Sprint) -> Optional[str]:
-        group, project, _ = self._split_branch_key(sprint.branch_key)
-        if group is None and project is None and not (sprint.branch_key or "").strip():
+        source_key = self._effective_sprint_branch_key(sprint)
+        group, project, _ = self._split_branch_key(source_key)
+        if group is None and project is None and not (source_key or ""):
             return None
         branch = (card.branch or "").strip()
         if not branch:
@@ -446,6 +462,13 @@ class SprintView(QWidget):
         group = group or ""
         project = project or ""
         return f"{group}/{project}/{branch}".strip("/")
+
+    # ------------------------------------------------------------------
+    def _effective_sprint_branch_key(self, sprint: Optional[Sprint]) -> Optional[str]:
+        if not sprint:
+            return None
+        primary = (sprint.qa_branch_key or sprint.branch_key or "").strip()
+        return primary or None
 
     # ------------------------------------------------------------------
     def _restore_selection(self) -> None:
@@ -540,6 +563,7 @@ class SprintView(QWidget):
         self._selected_sprint_id = None
         self._selected_card_id = None
         self._current_sprint_branch_key = None
+        self._current_sprint_qa_branch_key = None
         sprint = Sprint(id=None, branch_key="", name="", version="")
         self._show_sprint_form(sprint, new=True)
         self.update_permissions()
@@ -584,7 +608,9 @@ class SprintView(QWidget):
     def _show_sprint_form(self, sprint: Sprint, new: bool = False) -> None:
         self.stack.setCurrentWidget(self.pageSprint)
         self._current_sprint_branch_key = sprint.branch_key
+        self._current_sprint_qa_branch_key = sprint.qa_branch_key or None
         self.txtSprintBranch.setText(sprint.branch_key)
+        self.txtSprintQABranch.setText(sprint.qa_branch_key or "")
         self.txtSprintName.setText(sprint.name)
         self.txtSprintVersion.setText(sprint.version)
         self._populate_user_combo(self.cboSprintLead, sprint.lead_user or None)
@@ -659,31 +685,64 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_pick_branch(self) -> None:
-        key = self._select_branch_key()
+        key = self._select_branch_key(
+            title="Nuevo sprint",
+            prompt="Selecciona la rama base:",
+        )
         if key:
             self._current_sprint_branch_key = key
             self.txtSprintBranch.setText(key)
 
     # ------------------------------------------------------------------
-    def _select_branch_key(self) -> Optional[str]:
+    def _on_pick_qa_branch(self) -> None:
+        group_hint, _, _ = self._split_branch_key(self._current_sprint_branch_key)
+        key = self._select_branch_key(
+            title="Rama QA",
+            prompt="Selecciona la rama QA:",
+            group_hint=group_hint,
+        )
+        if key:
+            self._current_sprint_qa_branch_key = key
+            self.txtSprintQABranch.setText(key)
+
+    # ------------------------------------------------------------------
+    def _select_branch_key(
+        self,
+        *,
+        title: str,
+        prompt: str,
+        group_hint: Optional[str] = None,
+    ) -> Optional[str]:
         grouped = branches_by_group()
         if not grouped:
             QMessageBox.information(
                 self,
-                "Sprints",
+                title,
                 "No hay ramas registradas en la NAS. Sincroniza el historial antes de crear un sprint.",
             )
             return None
 
         groups = sorted(grouped.keys())
-        group, ok = QInputDialog.getItem(
-            self,
-            "Nuevo sprint",
-            "Selecciona el grupo:",
-            groups,
-            0,
-            False,
-        )
+        if not groups:
+            QMessageBox.warning(self, title, "No hay grupos disponibles.")
+            return None
+
+        initial_idx = 0
+        if group_hint and group_hint in groups:
+            initial_idx = groups.index(group_hint)
+
+        if len(groups) == 1:
+            group = groups[0]
+            ok = True
+        else:
+            group, ok = QInputDialog.getItem(
+                self,
+                title,
+                "Selecciona el grupo:",
+                groups,
+                initial_idx,
+                False,
+            )
         if not ok or not group:
             return None
 
@@ -699,12 +758,12 @@ class SprintView(QWidget):
             mapping[display] = record.key()
             options.append(display)
         if not options:
-            QMessageBox.warning(self, "Sprints", f"El grupo '{group}' no tiene ramas disponibles.")
+            QMessageBox.warning(self, title, f"El grupo '{group}' no tiene ramas disponibles.")
             return None
         branch_label, ok = QInputDialog.getItem(
             self,
-            "Nuevo sprint",
-            "Selecciona la rama base:",
+            title,
+            prompt,
             options,
             0,
             False,
@@ -720,6 +779,7 @@ class SprintView(QWidget):
             QMessageBox.warning(self, "Sprint", "No tienes permisos para guardar sprints.")
             return
         branch_key = (self._current_sprint_branch_key or "").strip()
+        qa_branch_key = (self._current_sprint_qa_branch_key or self.txtSprintQABranch.text().strip() or "").strip()
         name = self.txtSprintName.text().strip()
         version = self.txtSprintVersion.text().strip()
         if not branch_key:
@@ -734,6 +794,7 @@ class SprintView(QWidget):
         now = int(time.time())
         user = self._current_user()
         sprint.branch_key = branch_key
+        sprint.qa_branch_key = qa_branch_key or None
         sprint.name = name
         sprint.version = version
         sprint.lead_user = self._combo_value(self.cboSprintLead)
@@ -881,6 +942,8 @@ class SprintView(QWidget):
     def _on_cancel(self) -> None:
         self.tree.clearSelection()
         self.stack.setCurrentIndex(0)
+        self._current_sprint_branch_key = None
+        self._current_sprint_qa_branch_key = None
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -934,13 +997,20 @@ class SprintView(QWidget):
         if not branch_name:
             QMessageBox.warning(self, "Tarjeta", "La tarjeta no tiene un nombre de rama válido.")
             return
-        branch_key = card.branch_key or self._build_card_branch_key(card, sprint)
-        group_key, project_key, base_branch = self._split_branch_key(branch_key)
+        if not sprint.qa_branch_key:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "Configura la rama QA del sprint antes de crear ramas de tarjetas.",
+            )
+            return
+        effective_key = self._effective_sprint_branch_key(sprint)
+        group_key, project_key, base_branch = self._split_branch_key(effective_key)
         if not base_branch:
             QMessageBox.warning(
                 self,
                 "Tarjeta",
-                "El sprint no tiene una rama base configurada para crear tarjetas.",
+                "La rama QA seleccionada no es válida para crear tarjetas.",
             )
             return
         logs: List[str] = []

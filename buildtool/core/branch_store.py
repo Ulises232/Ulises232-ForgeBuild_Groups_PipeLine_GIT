@@ -254,11 +254,15 @@ def _row_to_record(row: dict) -> BranchRecord:
 
 
 def _row_to_sprint(row: dict) -> Sprint:
+    qa_branch = row.get("qa_branch_key")
+    if isinstance(qa_branch, str):
+        qa_branch = qa_branch or None
     return Sprint(
         id=int(row["id"]) if row.get("id") is not None else None,
         branch_key=row.get("branch_key") or "",
         name=row.get("name") or "",
         version=row.get("version") or "",
+        qa_branch_key=qa_branch,
         lead_user=row.get("lead_user") or None,
         qa_user=row.get("qa_user") or None,
         description=row.get("description") or "",
@@ -434,6 +438,9 @@ def _split_branch_key(value: Optional[str]) -> tuple[Optional[str], Optional[str
 def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
     base = _resolve_base(path)
     now = int(time.time())
+    sprint.branch_key = (sprint.branch_key or "").strip()
+    qa_branch = (sprint.qa_branch_key or "")
+    sprint.qa_branch_key = qa_branch.strip() or None
     if not sprint.created_at:
         sprint.created_at = now
     if not sprint.updated_at:
@@ -441,6 +448,7 @@ def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
     payload = {
         "id": sprint.id,
         "branch_key": sprint.branch_key,
+        "qa_branch_key": sprint.qa_branch_key,
         "name": sprint.name,
         "version": sprint.version,
         "lead_user": sprint.lead_user,
@@ -497,7 +505,9 @@ def _card_branch_key(card: Card, base: Path) -> Optional[str]:
     sprint = _get_db(base).fetch_sprint(int(card.sprint_id))
     if not sprint:
         return None
-    group, project, _ = _split_branch_key(sprint.get("branch_key"))
+    group, project, _ = _split_branch_key(sprint.get("qa_branch_key"))
+    if not any((group, project)):
+        group, project, _ = _split_branch_key(sprint.get("branch_key"))
     branch = (card.branch or "").strip()
     if not branch:
         return None
