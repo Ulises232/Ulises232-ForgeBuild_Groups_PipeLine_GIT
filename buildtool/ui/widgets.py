@@ -6,12 +6,12 @@ from typing import Optional
 from PySide6.QtCore import Qt, QSize, QObject, QEvent, Slot
 from PySide6.QtWidgets import (
     QComboBox,
+    QCompleter,
     QHBoxLayout,
     QSizePolicy,
     QToolButton,
     QWidget,
 )
-from PySide6.QtGui import QCompleter
 
 from .icons import get_icon
 

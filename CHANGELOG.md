@@ -4,6 +4,71 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.5.1] - 2025-10-06
+### Añadido
+- Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la
+  misma vista, con finalización de sprints, borrado y bloqueo automático de nuevas
+  tarjetas cuando un sprint está cerrado.
+- Controles de tarjetas con ID de ticket, autoría y creación directa de ramas que
+  muestran su presencia local/origin y registran al creador desde el historial NAS.
+- Los sprints almacenan también la rama QA asociada para dirigir la creación de
+  tarjetas y validar los flujos de revisión.
+- Campos de evidencia para registrar los enlaces de pruebas unitarias y QA en cada
+  tarjeta, editables únicamente por el rol correspondiente o el líder del equipo.
+- Los combos de asignación filtran desarrolladores y QA según su rol e incorporan
+  toggles que permiten marcar o desmarcar las pruebas unitarias/QA respetando los
+  permisos del usuario y actualizando el historial de pipelines.
+
+### Corregido
+- La inicialización de `branch_history_db.sqlite3` omite la creación temprana del índice de sprints
+  y valida que existan las columnas antes de construir índices, evitando el error
+  `no such column: branch_key` al abrir el diálogo de autenticación en instalaciones antiguas.
+- La utilería de widgets importa `QCompleter` desde `QtWidgets`, restaurando el arranque en entornos
+  con PySide6 6.8 donde la clase ya no está disponible en `QtGui`.
+- La migración de `config.sqlite3` añade las columnas `branch_key`/`metadata` a `sprints`
+  antes de recrear índices, evitando fallos al cargar la ventana principal con bases antiguas.
+- El historial de pipelines migra primero las columnas nuevas y crea los índices al final,
+  evitando el error `no such column: card_id` en bases existentes sin los campos recientes.
+- La inicialización de `branch_history_db.sqlite3` reconstruye las tablas `sprints` y `cards`
+  cuando faltan columnas recientes, preservando los datos heredados y rellenando los valores
+  por defecto esperados por la nueva UI de planeación.
+- La vista de sprints permite escoger la rama base a partir del grupo y maneja de forma segura
+  el alta cuando la rama ya no existe, evitando violaciones de llave foránea al crear nuevos sprints.
+- La creación de ramas desde tarjetas parte ahora de la rama QA configurada en el sprint,
+  validando su selección antes de operar y evitando ramas huérfanas desde `HEAD`.
+
+### Cambiado
+- La vista de sprints permite editar sprints solo para líderes y tarjetas para cualquier usuario,
+  añadiendo controles de permisos y edición directa desde la misma pestaña.
+- Las tarjetas nuevas y existentes normalizan el nombre de la rama anteponiendo la rama QA y el ticket
+  (por ejemplo `v2.68_QA_EA-102`), guiando al usuario en los diálogos y validándolo en la capa de
+  persistencia.
+- Las acciones de marcar pruebas unitarias/QA y crear la rama de la tarjeta respetan al responsable
+  asignado (o al líder), bloqueando el botón tras generar la rama hasta que se elimina del historial
+  local/origin.
+- El divisor de la vista de planeación mantiene más ancho el panel izquierdo (3/3 con tamaño inicial
+  860/520) y amplía el máximo del panel de detalle, facilitando la lectura de columnas sin que la ficha
+  se imponga por su tamaño mínimo.
+- Las validaciones de merge en la vista Git permiten integrar tarjetas a la rama QA con solo pruebas
+  unitarias aprobadas, bloquean merges directos contra la rama madre y exigen que todas las tarjetas del
+  sprint tengan QA y unitarias antes de liberar la rama QA hacia la versión.
+
+## [1.5.0] - 2025-10-05
+### Añadido
+- Módulo de planeación de sprints con tarjetas enlazadas a ramas, asignación de responsables y validación de checks antes del merge.
+- Diálogo de autenticación con gestión de usuarios y roles persistidos en NAS/SQLite para reutilizar la identidad en todas las vistas.
+- Nuevos campos en el historial de pipelines para rastrear tarjetas, aprobaciones y responsables, incluyendo filtros específicos en la UI.
+
+### Cambiado
+- El flujo de merge en la vista Git valida las aprobaciones registradas en las tarjetas y documenta el resultado en la historia.
+- La vista de historial de pipelines muestra información de QA/pruebas y permite filtrar por estado o tarjeta asociada.
+
+### Corregido
+- La migración del historial crea los índices después de validar `branch_key`,
+  evitando errores de inicio cuando existen bases antiguas sin la columna.
+- La inicialización de la base `branch_history_db.sqlite3` migra `activity_log` heredado añadiendo `branch_key` antes de crear los
+  índices, evitando fallos al abrir el diálogo de autenticación en instalaciones existentes.
+
 ## [1.4.6] - 2025-10-04
 ### Cambiado
 - El helper `SignalBlocker` vive en `buildtool/ui/widgets.py` para reutilizarlo entre vistas y

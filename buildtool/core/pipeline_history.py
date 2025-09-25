@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     modules TEXT,
     version TEXT,
     hotfix INTEGER,
+    card_id INTEGER,
+    unit_tests_status TEXT,
+    qa_status TEXT,
+    approved_by TEXT,
     started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     finished_at DATETIME,
     status TEXT,
@@ -31,10 +35,6 @@ CREATE TABLE IF NOT EXISTS pipeline_logs (
     ts DATETIME DEFAULT CURRENT_TIMESTAMP,
     message TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_pipeline ON pipeline_runs(pipeline, started_at DESC);
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_group ON pipeline_runs(group_key);
-CREATE INDEX IF NOT EXISTS ix_pipeline_runs_project ON pipeline_runs(project_key);
-CREATE INDEX IF NOT EXISTS ix_pipeline_logs_run ON pipeline_logs(run_id, ts);
 """
 
 
@@ -63,6 +63,10 @@ class RunRecord:
     modules: List[str]
     version: Optional[str]
     hotfix: Optional[bool]
+    card_id: Optional[int]
+    unit_tests_status: Optional[str]
+    qa_status: Optional[str]
+    approved_by: Optional[str]
     started_at: str
     finished_at: Optional[str]
     status: Optional[str]
@@ -78,6 +82,52 @@ class PipelineHistory:
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             cx.executescript(SCHEMA)
+            columns = self._ensure_columns(cx)
+            self._ensure_indexes(cx, columns)
+
+    def _ensure_columns(self, cx: sqlite3.Connection) -> set[str]:
+        info = cx.execute("PRAGMA table_info(pipeline_runs)").fetchall()
+        columns = {row[1] for row in info}
+        statements: list[str] = []
+        if "card_id" not in columns:
+            statements.append("ALTER TABLE pipeline_runs ADD COLUMN card_id INTEGER")
+        if "unit_tests_status" not in columns:
+            statements.append("ALTER TABLE pipeline_runs ADD COLUMN unit_tests_status TEXT")
+        if "qa_status" not in columns:
+            statements.append("ALTER TABLE pipeline_runs ADD COLUMN qa_status TEXT")
+        if "approved_by" not in columns:
+            statements.append("ALTER TABLE pipeline_runs ADD COLUMN approved_by TEXT")
+        for stmt in statements:
+            cx.execute(stmt)
+        if statements:
+            cx.commit()
+            info = cx.execute("PRAGMA table_info(pipeline_runs)").fetchall()
+            columns = {row[1] for row in info}
+        return columns
+
+    def _ensure_indexes(self, cx: sqlite3.Connection, columns: set[str]) -> None:
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_pipeline"
+            " ON pipeline_runs(pipeline, started_at DESC)"
+        )
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_group"
+            " ON pipeline_runs(group_key)"
+        )
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_project"
+            " ON pipeline_runs(project_key)"
+        )
+        if "card_id" in columns:
+            cx.execute(
+                "CREATE INDEX IF NOT EXISTS ix_pipeline_runs_card"
+                " ON pipeline_runs(card_id)"
+            )
+        cx.execute(
+            "CREATE INDEX IF NOT EXISTS ix_pipeline_logs_run"
+            " ON pipeline_logs(run_id, ts)"
+        )
+        cx.commit()
 
     # ------------------------------------------------------------------
     def start_run(
@@ -91,6 +141,10 @@ class PipelineHistory:
         modules: Iterable[str],
         version: Optional[str] = None,
         hotfix: Optional[bool] = None,
+        card_id: Optional[int] = None,
+        unit_tests_status: Optional[str] = None,
+        qa_status: Optional[str] = None,
+        approved_by: Optional[str] = None,
         started_at: Optional[datetime] = None,
     ) -> int:
         started_at = started_at or datetime.utcnow()
@@ -102,8 +156,9 @@ class PipelineHistory:
                 """
                 INSERT INTO pipeline_runs (
                     pipeline, user, group_key, project_key, profiles, modules,
-                    version, hotfix, started_at, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    version, hotfix, card_id, unit_tests_status, qa_status, approved_by,
+                    started_at, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     pipeline,
@@ -114,6 +169,10 @@ class PipelineHistory:
                     json.dumps(list(modules)),
                     version,
                     1 if hotfix else (0 if hotfix is not None else None),
+                    card_id,
+                    unit_tests_status,
+                    qa_status,
+                    approved_by,
                     started_at.isoformat(timespec="seconds"),
                     "running",
                 ),
@@ -127,6 +186,10 @@ class PipelineHistory:
         run_id: int,
         status: str,
         message: Optional[str] = None,
+        *,
+        unit_tests_status: Optional[str] = None,
+        qa_status: Optional[str] = None,
+        approved_by: Optional[str] = None,
         finished_at: Optional[datetime] = None,
     ) -> None:
         finished_at = finished_at or datetime.utcnow()
@@ -139,13 +202,19 @@ class PipelineHistory:
                 UPDATE pipeline_runs
                    SET status = ?,
                        message = ?,
-                       finished_at = ?
+                       finished_at = ?,
+                       unit_tests_status = COALESCE(?, unit_tests_status),
+                       qa_status = COALESCE(?, qa_status),
+                       approved_by = COALESCE(?, approved_by)
                  WHERE id = ?
                 """,
                 (
                     status,
                     message,
                     finished_at.isoformat(timespec="seconds"),
+                    unit_tests_status,
+                    qa_status,
+                    approved_by,
                     run_id,
                 ),
             )
@@ -195,7 +264,8 @@ class PipelineHistory:
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         sql = (
             "SELECT id, pipeline, user, group_key, project_key, profiles, modules, "
-            "version, hotfix, started_at, finished_at, status, message "
+            "version, hotfix, card_id, unit_tests_status, qa_status, approved_by, "
+            "started_at, finished_at, status, message "
             "FROM pipeline_runs"
             f"{where} ORDER BY started_at DESC LIMIT ?"
         )
@@ -219,6 +289,10 @@ class PipelineHistory:
                     modules=json.loads(row["modules"] or "[]"),
                     version=row["version"],
                     hotfix=None if row["hotfix"] is None else bool(row["hotfix"]),
+                    card_id=row["card_id"],
+                    unit_tests_status=row["unit_tests_status"],
+                    qa_status=row["qa_status"],
+                    approved_by=row["approved_by"],
                     started_at=row["started_at"],
                     finished_at=row["finished_at"],
                     status=row["status"],
@@ -239,7 +313,47 @@ class PipelineHistory:
     def clear(self) -> None:
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
+            cx.execute("DELETE FROM pipeline_logs")
             cx.execute("DELETE FROM pipeline_runs")
+            cx.commit()
+
+    def update_card_status(
+        self,
+        card_id: int,
+        *,
+        unit_tests_status: Optional[str] = None,
+        qa_status: Optional[str] = None,
+        approved_by: Optional[str] = None,
+    ) -> None:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            row = cx.execute(
+                "SELECT id FROM pipeline_runs WHERE card_id = ? ORDER BY started_at DESC LIMIT 1",
+                (card_id,),
+            ).fetchone()
+            if row:
+                cx.execute(
+                    """
+                    UPDATE pipeline_runs
+                       SET unit_tests_status = COALESCE(?, unit_tests_status),
+                           qa_status = COALESCE(?, qa_status),
+                           approved_by = COALESCE(?, approved_by)
+                     WHERE id = ?
+                    """,
+                    (unit_tests_status, qa_status, approved_by, row[0]),
+                )
+            else:
+                cx.execute(
+                    """
+                    INSERT INTO pipeline_runs(
+                        pipeline, user, group_key, project_key, profiles, modules,
+                        version, hotfix, card_id, unit_tests_status, qa_status, approved_by,
+                        started_at, status
+                    ) VALUES('card-check', NULL, NULL, NULL, '[]', '[]', NULL, NULL,
+                             ?, ?, ?, ?, datetime('now'), 'running')
+                    """,
+                    (card_id, unit_tests_status, qa_status, approved_by),
+                )
             cx.commit()
 
     def export_csv(
@@ -262,6 +376,10 @@ class PipelineHistory:
                     "modules",
                     "version",
                     "hotfix",
+                    "card_id",
+                    "unit_tests_status",
+                    "qa_status",
+                    "approved_by",
                     "started_at",
                     "finished_at",
                     "status",
@@ -280,6 +398,10 @@ class PipelineHistory:
                         ", ".join(rec.modules),
                         rec.version or "",
                         "sí" if rec.hotfix else "no",
+                        rec.card_id or "",
+                        rec.unit_tests_status or "",
+                        rec.qa_status or "",
+                        rec.approved_by or "",
                         rec.started_at,
                         rec.finished_at or "",
                         rec.status or "",

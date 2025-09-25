@@ -19,6 +19,7 @@ from buildtool.core.branch_store import (
 )
 from buildtool.core.git_console_trace import clog
 from buildtool.core.git_tasks import _iter_modules as _iter_modules_cfg
+from .session import current_username
 
 # --------------------- helpers de salida y ejecución ---------------------
 
@@ -131,7 +132,8 @@ def _switch_branch_with_fallback(path: Path, branch: str, emit=None) -> Tuple[bo
 
 
 def _current_user() -> str:
-    return os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+    fallback = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+    return current_username(fallback)
 
 
 def _get_record(index, gkey, pkey, branch) -> BranchRecord:
@@ -311,15 +313,33 @@ def _discover_repos(cfg, gkey, pkey, only_modules, emit=None) -> List[Tuple[str,
 # --------------------- operaciones por cada repo ---------------------
 
 
-def _create_or_switch(branch: str, path: Path, emit=None) -> Tuple[bool, str]:
+def _create_or_switch(
+    branch: str, path: Path, emit=None, base: Optional[str] = None
+) -> Tuple[bool, str]:
     """Crea o activa una rama en el repo especificado."""
 
-    attempts = [
-        (["git", "switch", "-c", branch], "create_switch"),
-        (["git", "checkout", "-b", branch], "checkout_create"),
-        (["git", "switch", branch], "switch"),
-        (["git", "checkout", branch], "checkout"),
-    ]
+    if base:
+        rc_base, out_base = _run(["git", "rev-parse", "--verify", base], path, emit=emit)
+        if rc_base != 0:
+            reason = _last_nonempty(out_base) or f"rama base '{base}' no existe"
+            return False, reason
+
+        rc_switch, out_switch = _run(["git", "switch", branch], path, emit=emit)
+        if rc_switch == 0:
+            return True, "switch"
+
+        attempts = [
+            (["git", "switch", "-c", branch, base], "create_switch_base"),
+            (["git", "checkout", "-b", branch, base], "checkout_create_base"),
+        ]
+    else:
+        attempts = [
+            (["git", "switch", "-c", branch], "create_switch"),
+            (["git", "checkout", "-b", branch], "checkout_create"),
+            (["git", "switch", branch], "switch"),
+            (["git", "checkout", branch], "checkout"),
+        ]
+
     last_reason = ""
     for cmd, label in attempts:
         rc, out = _run(cmd, path, emit=emit)
@@ -398,6 +418,7 @@ def create_branches_local(
     pkey,
     name: str,
     emit,
+    base_branch: Optional[str] = None,
     only_modules: Optional[Iterable[str]] = None,
 ) -> bool:
     bname = (name or "").strip()
@@ -417,13 +438,19 @@ def create_branches_local(
             ok_all = False
             continue
 
-        _out(emit, f"[{mname}] ▶ crear/switch rama: {bname}")
-        ok, detail = _create_or_switch(bname, mpath, emit=emit)
+        base_hint = f" (base {base_branch})" if base_branch else ""
+        _out(emit, f"[{mname}] ▶ crear/switch rama: {bname}{base_hint}")
+        ok, detail = _create_or_switch(bname, mpath, emit=emit, base=base_branch)
         if not ok:
             _out(emit, f"[{mname}] ❌ No se pudo crear/switch a '{bname}': {detail}")
             ok_all = False
         else:
-            verb = "creada" if detail in {"create_switch", "checkout_create"} else "activada"
+            verb = (
+                "creada"
+                if detail
+                in {"create_switch", "checkout_create", "create_switch_base", "checkout_create_base"}
+                else "activada"
+            )
             _out(emit, f"[{mname}] ✅ rama {verb}: {bname}")
     if ok_all:
         idx = load_index()

@@ -34,6 +34,8 @@ from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
     push_branch, delete_local_branch_by_name, merge_into_current_branch
 )
+from ..core import sprint_queries
+from ..core.branch_store import upsert_card
 from ..core import errguard
 from ..core.bg import run_in_thread
 from ..core.discover import discover_status_fast
@@ -396,6 +398,21 @@ class GitView(QWidget):
         gkey = self.cboProject.itemData(idx) if idx >= 0 else None
         return gkey, pkey
 
+    def _current_project_branch(self, gkey: Optional[str], pkey: Optional[str]) -> Optional[str]:
+        try:
+            items = discover_status_fast(self.cfg, gkey, pkey) or []
+            for _, _, path in items:
+                current = get_current_branch_fast(path)
+                if current:
+                    return current
+        except Exception as exc:
+            self._dbg(f"current_project_branch: {exc}")
+        text = self.lblCurrent.text() or ""
+        if ":" in text:
+            guess = text.split(":", 1)[1].strip()
+            return guess or None
+        return None
+
     @Slot(str)
     def _on_project_changed(self, _):
         self._dbg("on_project_changed")
@@ -688,9 +705,81 @@ class GitView(QWidget):
         push = self.chkMergePush.isChecked()
         gkey, pkey = self._current_keys()
 
+        target_branch = self._current_project_branch(gkey, pkey)
+        if not target_branch:
+            self._alert("No se pudo determinar la rama destino del merge", error=True)
+            return
+
+        card = sprint_queries.find_card_by_branch(source)
+        source_key = sprint_queries.branch_key(gkey, pkey, source)
+        sprint_for_source = sprint_queries.find_sprint_by_branch(source_key)
+        allow_missing_qa = False
+
+        if card:
+            sprint_obj = sprint_queries.get_sprint(card.sprint_id)
+            sprint_main = sprint_queries.sprint_branch_name(sprint_obj)
+            sprint_qa = sprint_queries.sprint_qa_branch_name(sprint_obj)
+            if target_branch and sprint_main and target_branch == sprint_main:
+                card.status = "bloqueado"
+                upsert_card(card)
+                self._alert(
+                    "Las ramas de tarjeta solo pueden integrarse a la rama QA del sprint.",
+                    error=True,
+                )
+                self.logger.line.emit(
+                    f"[merge] Bloqueado merge de {source}: destino '{target_branch}' es la rama madre"
+                )
+                return
+            allow_missing_qa = bool(target_branch and sprint_qa and target_branch == sprint_qa)
+            if not sprint_queries.is_card_ready_for_merge(card, allow_qa_missing=allow_missing_qa):
+                card.status = "bloqueado"
+                upsert_card(card)
+                if not card.unit_tests_done:
+                    detail = "faltan las pruebas unitarias"
+                elif not allow_missing_qa and not card.qa_done:
+                    detail = "falta la validación de QA"
+                else:
+                    detail = "faltan aprobaciones requeridas"
+                self._alert(
+                    f"La tarjeta asociada aún no cuenta con todas las aprobaciones ({detail}).",
+                    error=True,
+                )
+                self.logger.line.emit(
+                    f"[merge] Bloqueado merge de {source}: {detail}"
+                )
+                return
+            card.status = "merge_en_progreso"
+            upsert_card(card)
+
+        if (
+            sprint_for_source
+            and sprint_queries.sprint_qa_branch_name(sprint_for_source) == source
+        ):
+            target_sprint_main = sprint_queries.sprint_branch_name(sprint_for_source)
+            if target_branch and target_sprint_main and target_branch == target_sprint_main:
+                pending = sprint_queries.cards_pending_release(
+                    sprint_for_source.id or 0
+                )
+                if pending:
+                    self._alert(
+                        "No se puede mergear la rama QA hasta que todas las tarjetas estén aprobadas por QA y pruebas unitarias.",
+                        error=True,
+                    )
+                    self.logger.line.emit(
+                        f"[merge] Bloqueado merge de {source}: {len(pending)} tarjetas pendientes"
+                    )
+                    return
+
+        card_id = card.id if card else None
+
         def _after(ok: bool):
             if ok:
                 STATE.add_history(gkey, pkey, source)
+            if card_id:
+                latest = sprint_queries.find_card_by_branch(source)
+                if latest and latest.id == card_id:
+                    latest.status = "merge_ok" if ok else "merge_error"
+                    upsert_card(latest)
 
         self._start_task(
             f"Merge {source} -> rama actual (global)",

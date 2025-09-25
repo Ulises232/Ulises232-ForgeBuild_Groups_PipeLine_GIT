@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtCore import Qt, QDate, QSignalBlocker, Slot
 from PySide6.QtWidgets import (
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QComboBox,
     QDateEdit,
+    QLineEdit,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -55,6 +57,22 @@ class PipelineHistoryView(QWidget):
         self.cboStatus.addItem("Cancelado", "cancelled")
         filter_row.addWidget(self.cboStatus)
 
+        filter_row.addWidget(QLabel("Pruebas:"))
+        self.cboUnitStatus = QComboBox()
+        self.cboUnitStatus.addItem("Todas", None)
+        self.cboUnitStatus.addItem("Pendiente", "pending")
+        self.cboUnitStatus.addItem("Listas", "done")
+        self.cboUnitStatus.addItem("Error", "failed")
+        filter_row.addWidget(self.cboUnitStatus)
+
+        filter_row.addWidget(QLabel("QA:"))
+        self.cboQAStatus = QComboBox()
+        self.cboQAStatus.addItem("Todos", None)
+        self.cboQAStatus.addItem("Pendiente", "pending")
+        self.cboQAStatus.addItem("Aprobado", "approved")
+        self.cboQAStatus.addItem("Rechazado", "failed")
+        filter_row.addWidget(self.cboQAStatus)
+
         filter_row.addWidget(QLabel("Grupo:"))
         self.cboGroup = QComboBox()
         self.cboGroup.addItem("Todos", None)
@@ -65,6 +83,12 @@ class PipelineHistoryView(QWidget):
         filter_row.addWidget(QLabel("Proyecto:"))
         self.cboProject = QComboBox()
         filter_row.addWidget(self.cboProject)
+
+        filter_row.addWidget(QLabel("Tarjeta:"))
+        self.txtCard = QLineEdit()
+        self.txtCard.setPlaceholderText("ID de tarjeta")
+        self.txtCard.setMaximumWidth(90)
+        filter_row.addWidget(self.txtCard)
 
         filter_row.addWidget(QLabel("Desde:"))
         self.dtStart = QDateEdit()
@@ -88,7 +112,7 @@ class PipelineHistoryView(QWidget):
 
         layout.addLayout(filter_row)
 
-        self.table = QTableWidget(0, 12)
+        self.table = QTableWidget(0, 16)
         self.table.setHorizontalHeaderLabels(
             [
                 "Inicio",
@@ -102,6 +126,10 @@ class PipelineHistoryView(QWidget):
                 "Módulos",
                 "Versión",
                 "Hotfix",
+                "Tarjeta",
+                "Pruebas",
+                "QA",
+                "Aprobado por",
                 "Mensaje",
             ]
         )
@@ -133,6 +161,10 @@ class PipelineHistoryView(QWidget):
         self.btnExport.clicked.connect(self.export_csv)
         self.btnClear.clicked.connect(self.clear_history)
         self.table.itemSelectionChanged.connect(self._load_selected_logs)
+        self.cboUnitStatus.currentIndexChanged.connect(self.refresh)
+        self.cboQAStatus.currentIndexChanged.connect(self.refresh)
+        self.txtCard.returnPressed.connect(self.refresh)
+        self.txtCard.editingFinished.connect(self.refresh)
 
         self.refresh()
 
@@ -177,10 +209,45 @@ class PipelineHistoryView(QWidget):
         }
         return {k: v for k, v in filters.items() if v is not None}
 
+    def _filter_by_checks(self, runs: list) -> list:
+        unit_value = self.cboUnitStatus.currentData()
+        qa_value = self.cboQAStatus.currentData()
+        card_text = self.txtCard.text().strip()
+
+        def _match_status(value: Optional[str], expected: Optional[str]) -> bool:
+            if expected in (None, "", "all"):
+                return True
+            current = (value or "").lower()
+            return current == str(expected).lower()
+
+        filtered = []
+        desired_card = None
+        if card_text:
+            try:
+                desired_card = int(card_text)
+            except ValueError:
+                desired_card = card_text.lower()
+
+        for run in runs:
+            if not _match_status(run.unit_tests_status, unit_value):
+                continue
+            if not _match_status(run.qa_status, qa_value):
+                continue
+            if desired_card is not None:
+                if isinstance(desired_card, int):
+                    if run.card_id != desired_card:
+                        continue
+                else:
+                    if not run.message or desired_card not in run.message.lower():
+                        continue
+            filtered.append(run)
+        return filtered
+
     @Slot()
     def refresh(self) -> None:
         filters = self._filters()
         runs = self.history.list_runs(**filters)
+        runs = self._filter_by_checks(runs)
         self.current_runs = [r.__dict__ for r in runs]
         self.table.setRowCount(len(runs))
 
@@ -196,7 +263,11 @@ class PipelineHistoryView(QWidget):
             self.table.setItem(row_idx, 8, QTableWidgetItem(", ".join(run.modules)))
             self.table.setItem(row_idx, 9, QTableWidgetItem(run.version or ""))
             self.table.setItem(row_idx, 10, QTableWidgetItem("Sí" if run.hotfix else "No"))
-            self.table.setItem(row_idx, 11, QTableWidgetItem(run.message or ""))
+            self.table.setItem(row_idx, 11, QTableWidgetItem(str(run.card_id or "")))
+            self.table.setItem(row_idx, 12, QTableWidgetItem(run.unit_tests_status or ""))
+            self.table.setItem(row_idx, 13, QTableWidgetItem(run.qa_status or ""))
+            self.table.setItem(row_idx, 14, QTableWidgetItem(run.approved_by or ""))
+            self.table.setItem(row_idx, 15, QTableWidgetItem(run.message or ""))
             self.table.setRowHeight(row_idx, 22)
             self.table.item(row_idx, 0).setData(Qt.UserRole, run.id)
 

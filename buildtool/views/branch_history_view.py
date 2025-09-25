@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from ..core.session import current_username
 
 from ..core.branch_store import (
     BranchRecord,
@@ -67,7 +68,9 @@ class BranchHistoryView(QWidget):
         self.backend = self._build_backend(storage)
         self._index: Index = {}
         self._current_key: Optional[str] = None
-        self._user_default = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+        self._user_default = current_username(
+            os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+        )
         self._group_getter = attrgetter("group")
         self._project_getter = attrgetter("project")
         self._setup_ui()

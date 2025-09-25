@@ -93,6 +93,32 @@ CREATE TABLE IF NOT EXISTS deploy_target_profiles (
     profile TEXT NOT NULL,
     FOREIGN KEY(target_id) REFERENCES deploy_targets(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS sprints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    metadata TEXT DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_cfg_sprints_branch ON sprints(branch_key);
+CREATE TABLE IF NOT EXISTS cards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sprint_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    metadata TEXT DEFAULT '{}',
+    FOREIGN KEY(sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_cfg_cards_sprint ON cards(sprint_id);
+CREATE TABLE IF NOT EXISTS card_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL,
+    UNIQUE(card_id, username, role),
+    FOREIGN KEY(card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
 """
 
 
@@ -138,6 +164,7 @@ class ConfigStore:
             cx.execute("PRAGMA foreign_keys = ON")
             legacy_groups = self._extract_legacy_groups(cx)
             self._inline_project_profiles(cx)
+            self._migrate_sprint_tables(cx)
             cx.executescript(SCHEMA)
             if legacy_groups:
                 self._replace_groups_with_connection(cx, legacy_groups)
@@ -168,6 +195,32 @@ DROP TABLE IF EXISTS groups;
 """
         )
         return legacy_data
+
+    # ------------------------------------------------------------------
+    def _migrate_sprint_tables(self, cx: sqlite3.Connection) -> None:
+        """Ensure legacy sprint/card tables expose the new columns used by the app."""
+
+        sprint_exists = cx.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sprints'"
+        ).fetchone()
+        if sprint_exists:
+            columns = {row[1] for row in cx.execute("PRAGMA table_info(sprints)")}
+            if "branch_key" not in columns:
+                cx.execute("ALTER TABLE sprints ADD COLUMN branch_key TEXT")
+            if "metadata" not in columns:
+                cx.execute(
+                    "ALTER TABLE sprints ADD COLUMN metadata TEXT DEFAULT '{}'"
+                )
+
+        cards_exists = cx.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cards'"
+        ).fetchone()
+        if cards_exists:
+            columns = {row[1] for row in cx.execute("PRAGMA table_info(cards)")}
+            if "metadata" not in columns:
+                cx.execute(
+                    "ALTER TABLE cards ADD COLUMN metadata TEXT DEFAULT '{}'"
+                )
 
     # ------------------------------------------------------------------
     def _inline_project_profiles(self, cx: sqlite3.Connection) -> None:
@@ -991,6 +1044,162 @@ DROP TABLE IF EXISTS groups;
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             self._delete_group_rows(cx, key)
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def list_sprints(self, branch_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.row_factory = sqlite3.Row
+            sql = "SELECT id, branch_key, name, version, metadata FROM sprints"
+            params: List[Any] = []
+            if branch_key:
+                sql += " WHERE branch_key = ?"
+                params.append(branch_key)
+            sql += " ORDER BY id DESC"
+            rows = cx.execute(sql, params).fetchall()
+        result: List[Dict[str, Any]] = []
+        for row in rows:
+            data = dict(row)
+            data["metadata"] = _json_loads(row["metadata"], {})
+            result.append(data)
+        return result
+
+    # ------------------------------------------------------------------
+    def upsert_sprint(self, payload: Dict[str, Any]) -> int:
+        metadata = _json_dumps(_serialize_model(payload.get("metadata")))
+        with sqlite3.connect(self.db_path) as cx:
+            cx.row_factory = sqlite3.Row
+            cursor = cx.execute(
+                """
+                INSERT INTO sprints(id, branch_key, name, version, metadata)
+                VALUES(:id, :branch_key, :name, :version, :metadata)
+                ON CONFLICT(id) DO UPDATE SET
+                    branch_key = excluded.branch_key,
+                    name = excluded.name,
+                    version = excluded.version,
+                    metadata = excluded.metadata
+                """,
+                {
+                    "id": payload.get("id"),
+                    "branch_key": payload.get("branch_key"),
+                    "name": payload.get("name"),
+                    "version": payload.get("version"),
+                    "metadata": metadata,
+                },
+            )
+            cx.commit()
+            if payload.get("id"):
+                return int(payload["id"])
+            return int(cursor.lastrowid)
+
+    # ------------------------------------------------------------------
+    def delete_sprint(self, sprint_id: int) -> None:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("DELETE FROM sprints WHERE id = ?", (int(sprint_id),))
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def list_cards(
+        self,
+        *,
+        sprint_id: Optional[int] = None,
+        branch: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.row_factory = sqlite3.Row
+            sql = "SELECT id, sprint_id, title, branch, status, metadata FROM cards"
+            params: List[Any] = []
+            clauses: List[str] = []
+            if sprint_id is not None:
+                clauses.append("sprint_id = ?")
+                params.append(int(sprint_id))
+            if branch:
+                clauses.append("branch = ?")
+                params.append(branch)
+            if clauses:
+                sql += " WHERE " + " AND ".join(clauses)
+            sql += " ORDER BY id DESC"
+            rows = cx.execute(sql, params).fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            data = dict(row)
+            data["metadata"] = _json_loads(row["metadata"], {})
+            items.append(data)
+        return items
+
+    # ------------------------------------------------------------------
+    def upsert_card(self, payload: Dict[str, Any]) -> int:
+        metadata = _json_dumps(_serialize_model(payload.get("metadata")))
+        with sqlite3.connect(self.db_path) as cx:
+            cursor = cx.execute(
+                """
+                INSERT INTO cards(id, sprint_id, title, branch, status, metadata)
+                VALUES(:id, :sprint_id, :title, :branch, :status, :metadata)
+                ON CONFLICT(id) DO UPDATE SET
+                    sprint_id = excluded.sprint_id,
+                    title = excluded.title,
+                    branch = excluded.branch,
+                    status = excluded.status,
+                    metadata = excluded.metadata
+                """,
+                {
+                    "id": payload.get("id"),
+                    "sprint_id": payload.get("sprint_id"),
+                    "title": payload.get("title"),
+                    "branch": payload.get("branch"),
+                    "status": payload.get("status", "pending"),
+                    "metadata": metadata,
+                },
+            )
+            cx.commit()
+            if payload.get("id"):
+                return int(payload["id"])
+            return int(cursor.lastrowid)
+
+    # ------------------------------------------------------------------
+    def delete_card(self, card_id: int) -> None:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("DELETE FROM cards WHERE id = ?", (int(card_id),))
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def list_card_assignments(self, card_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.row_factory = sqlite3.Row
+            sql = "SELECT id, card_id, username, role FROM card_assignments"
+            params: List[Any] = []
+            if card_id is not None:
+                sql += " WHERE card_id = ?"
+                params.append(int(card_id))
+            rows = cx.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    def upsert_card_assignment(self, payload: Dict[str, Any]) -> int:
+        with sqlite3.connect(self.db_path) as cx:
+            cursor = cx.execute(
+                """
+                INSERT INTO card_assignments(id, card_id, username, role)
+                VALUES(:id, :card_id, :username, :role)
+                ON CONFLICT(card_id, username, role) DO UPDATE SET
+                    username = excluded.username
+                """,
+                {
+                    "id": payload.get("id"),
+                    "card_id": payload.get("card_id"),
+                    "username": payload.get("username"),
+                    "role": payload.get("role"),
+                },
+            )
+            cx.commit()
+            if payload.get("id"):
+                return int(payload["id"])
+            return int(cursor.lastrowid)
+
+    # ------------------------------------------------------------------
+    def delete_card_assignment(self, assignment_id: int) -> None:
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("DELETE FROM card_assignments WHERE id = ?", (int(assignment_id),))
             cx.commit()
 
     # ------------------------------------------------------------------
