@@ -18,6 +18,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La inicialización de `branch_history_db.sqlite3` reconstruye las tablas `sprints` y `cards`
   cuando faltan columnas recientes, preservando los datos heredados y rellenando los valores
   por defecto esperados por la nueva UI de planeación.
+- La vista de sprints permite escoger la rama base a partir del grupo y maneja de forma segura
+  el alta cuando la rama ya no existe, evitando violaciones de llave foránea al crear nuevos sprints.
 
 ## [1.5.0] - 2025-10-05
 ### Añadido

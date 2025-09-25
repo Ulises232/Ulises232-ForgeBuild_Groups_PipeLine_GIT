@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
 import time
+from collections import Counter
 from typing import Dict, Optional
 
 from PySide6.QtCore import Qt
@@ -28,7 +30,7 @@ from ..core.branch_store import (
     list_users,
 )
 from ..core.session import current_username, require_roles, get_active_user
-from ..core.sprint_queries import is_card_ready_for_merge
+from ..core.sprint_queries import is_card_ready_for_merge, branches_by_group
 from ..core.pipeline_history import PipelineHistory
 from ..ui.icons import get_icon
 
@@ -176,10 +178,8 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _create_sprint(self) -> None:
-        branch_key, ok = QInputDialog.getText(
-            self, "Nuevo sprint", "Rama base (grupo/proyecto/rama):"
-        )
-        if not ok or not branch_key:
+        branch_key = self._select_branch_key()
+        if not branch_key:
             return
         name, ok = QInputDialog.getText(self, "Nuevo sprint", "Nombre del sprint:")
         if not ok or not name:
@@ -204,8 +204,79 @@ class SprintView(QWidget):
             updated_at=now,
             updated_by=user,
         )
-        upsert_sprint(sprint)
+        try:
+            upsert_sprint(sprint)
+        except sqlite3.IntegrityError:
+            QMessageBox.warning(
+                self,
+                "Sprint",
+                "No se pudo crear el sprint porque la rama seleccionada ya no existe. "
+                "Actualiza la información de ramas e inténtalo de nuevo.",
+            )
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            QMessageBox.critical(
+                self,
+                "Sprint",
+                f"Error inesperado al guardar el sprint: {exc}",
+            )
+            return
         self.refresh()
+
+    # ------------------------------------------------------------------
+    def _select_branch_key(self) -> Optional[str]:
+        grouped = branches_by_group()
+        if not grouped:
+            QMessageBox.information(
+                self,
+                "Sprints",
+                "No hay ramas registradas en la NAS. Sincroniza primero el historial.",
+            )
+            return None
+
+        groups = sorted(grouped.keys())
+        group, ok = QInputDialog.getItem(
+            self,
+            "Nuevo sprint",
+            "Selecciona el grupo:",
+            groups,
+            0,
+            False,
+        )
+        if not ok or not group:
+            return None
+
+        records = grouped.get(group, [])
+        if not records:
+            QMessageBox.warning(
+                self,
+                "Sprints",
+                f"El grupo '{group}' no tiene ramas disponibles.",
+            )
+            return None
+
+        base_labels = [f"{rec.project or '-'} / {rec.branch}".strip() for rec in records]
+        counts = Counter(base_labels)
+        options: list[str] = []
+        mapping: Dict[str, str] = {}
+        for rec, label in zip(records, base_labels):
+            clean_label = label or rec.branch
+            if counts[label] > 1:
+                clean_label = f"{clean_label} ({rec.key()})"
+            options.append(clean_label)
+            mapping[clean_label] = rec.key()
+
+        branch_label, ok = QInputDialog.getItem(
+            self,
+            "Nuevo sprint",
+            "Selecciona la rama base:",
+            options,
+            0,
+            False,
+        )
+        if not ok or not branch_label:
+            return None
+        return mapping.get(branch_label)
 
     # ------------------------------------------------------------------
     def _create_card(self) -> None:

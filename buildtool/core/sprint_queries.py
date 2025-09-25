@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from collections import defaultdict
+from typing import Dict, Iterable, List, Optional
 
 from .branch_store import (
     Sprint,
     Card,
     list_sprints,
     list_cards,
+    load_index,
+    BranchRecord,
 )
 
 
@@ -52,3 +55,36 @@ def filter_cards(cards: Iterable[Card], *, status: Optional[str] = None) -> List
         return list(cards)
     wanted = status.lower()
     return [card for card in cards if (card.status or "").lower() == wanted]
+
+
+def branches_by_group(
+    *, path: Optional["Path"] = None, include_empty_group: bool = False
+) -> Dict[str, List[BranchRecord]]:
+    """Return NAS branches grouped by their owning group.
+
+    Parameters
+    ----------
+    path:
+        Optional base directory that hosts the NAS SQLite files. Tests can
+        provide an isolated directory; production callers rely on the default
+        resolution from :func:`load_index`.
+    include_empty_group:
+        When ``True`` branches without ``group`` metadata are included under
+        the key ``""``. The default keeps the UI focused on named groups.
+    """
+
+    # ``load_index`` already returns the latest branch metadata keyed by the
+    # fully-qualified branch identifier. We regroup that information so the UI
+    # can offer a two-step selection (group -> branch).
+    index = load_index(path)
+    grouped: Dict[str, List[BranchRecord]] = defaultdict(list)
+    for record in index.values():
+        group = record.group or ""
+        if not group and not include_empty_group:
+            continue
+        grouped[group].append(record)
+
+    # Sort the groups and their branches to keep the selection dialog stable.
+    for records in grouped.values():
+        records.sort(key=lambda rec: ((rec.project or "").lower(), rec.branch.lower()))
+    return dict(sorted(grouped.items(), key=lambda item: item[0].lower()))
