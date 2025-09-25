@@ -277,13 +277,14 @@ class LoadIndexTest(unittest.TestCase):
                 updated_by="alice",
             )
             branch_store.upsert_card(card, path=base)
-            self.assertTrue(card.branch.startswith("v2.68_"))
-            expected_key = "ellis/proyecto/v2.68_feature/login"
+            expected_prefix = "v2.68_QA_ELASS-40"
+            self.assertTrue(card.branch.startswith(expected_prefix))
+            expected_key = "ellis/proyecto/v2.68_QA_ELASS-40_feature/login"
             self.assertEqual(card.branch_key, expected_key)
             stored = branch_store.list_cards(path=base, sprint_ids=[sprint.id])
             self.assertEqual(len(stored), 1)
             stored_card = stored[0]
-            self.assertEqual(stored_card.branch, "v2.68_feature/login")
+            self.assertEqual(stored_card.branch, "v2.68_QA_ELASS-40_feature/login")
             self.assertEqual(stored_card.branch_key, expected_key)
             self.assertEqual(stored_card.ticket_id, "ELASS-40")
             self.assertEqual(stored_card.created_by, "alice")
@@ -338,11 +339,16 @@ class LoadIndexTest(unittest.TestCase):
             )
             branch_store.upsert_card(card, path=base)
 
-            self.assertTrue(card.branch.startswith("v2.68_"))
-            self.assertEqual(card.branch_key, "ellis/proyecto/v2.68_feature/test")
+            expected_prefix = "v2.68_QA_ELASS-50"
+            self.assertTrue(card.branch.startswith(expected_prefix))
+            self.assertEqual(
+                card.branch_key, "ellis/proyecto/v2.68_QA_ELASS-50_feature/test"
+            )
             stored = branch_store.list_cards(path=base, sprint_ids=[sprint.id])
             self.assertEqual(len(stored), 1)
-            self.assertEqual(stored[0].branch_key, "ellis/proyecto/v2.68_feature/test")
+            self.assertEqual(
+                stored[0].branch_key, "ellis/proyecto/v2.68_QA_ELASS-50_feature/test"
+            )
 
     def test_card_urls_and_unmarking_reset_fields(self):
         with tempfile.TemporaryDirectory() as td:

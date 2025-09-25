@@ -501,16 +501,83 @@ def list_cards(
     return [_row_to_card(row) for row in rows]
 
 
-def _card_branch_prefix(card: Card, base: Path) -> str:
-    if not getattr(card, "sprint_id", None):
-        return ""
-    row = _get_db(base).fetch_sprint(int(card.sprint_id))
+def _qa_branch_base_from_row(row: Optional[dict]) -> str:
     if not row:
         return ""
-    version = str(row.get("version", "")).strip()
+    key = (row.get("qa_branch_key") or row.get("branch_key") or "").strip()
+    _, _, branch = _split_branch_key(key)
+    return branch or ""
+
+
+def _legacy_version_prefix(row: Optional[dict]) -> str:
+    if not row:
+        return ""
+    version = str(row.get("version") or "").strip()
     if not version:
         return ""
     return f"v{version}_"
+
+
+def _card_branch_prefix(card: Card, base: Path, row: Optional[dict] = None) -> str:
+    if not getattr(card, "sprint_id", None):
+        return ""
+    if row is None:
+        row = _get_db(base).fetch_sprint(int(card.sprint_id))
+    if not row:
+        return ""
+    qa_base = _qa_branch_base_from_row(row)
+    ticket = (getattr(card, "ticket_id", "") or "").strip()
+    parts: List[str] = []
+    if qa_base:
+        parts.append(qa_base)
+    else:
+        legacy = _legacy_version_prefix(row)
+        if legacy:
+            parts.append(legacy.rstrip("_"))
+    if ticket:
+        parts.append(ticket)
+    return "_".join([part for part in parts if part])
+
+
+def _normalized_card_branch(card: Card, prefix: str, row: Optional[dict]) -> str:
+    branch_value = (card.branch or "").strip()
+    if not prefix and not branch_value:
+        return ""
+    qa_base = _qa_branch_base_from_row(row)
+    legacy = _legacy_version_prefix(row) if prefix else ""
+    ticket = (getattr(card, "ticket_id", "") or "").strip()
+    suffix = branch_value
+    trimmed = False
+    if branch_value:
+        if prefix and branch_value == prefix:
+            suffix = ""
+            trimmed = True
+        elif prefix and branch_value.startswith(f"{prefix}_"):
+            suffix = branch_value[len(prefix) + 1 :]
+            trimmed = True
+        elif prefix and qa_base and branch_value == qa_base:
+            suffix = ""
+            trimmed = True
+        elif prefix and qa_base and branch_value.startswith(f"{qa_base}_"):
+            remainder = branch_value[len(qa_base) + 1 :]
+            if remainder and ticket:
+                parts = remainder.split("_", 1)
+                suffix = parts[1] if len(parts) == 2 else ""
+            else:
+                suffix = remainder
+            trimmed = True
+        elif prefix and legacy and branch_value.startswith(legacy):
+            suffix = branch_value[len(legacy) :]
+            trimmed = True
+        elif prefix and branch_value.startswith(prefix):
+            suffix = branch_value[len(prefix) :]
+            trimmed = True
+    if trimmed and suffix.startswith("_"):
+        suffix = suffix[1:]
+    suffix = suffix.strip()
+    if prefix:
+        return f"{prefix}_{suffix}" if suffix else prefix
+    return suffix
 
 
 def _card_branch_key(card: Card, base: Path) -> Optional[str]:
@@ -534,11 +601,11 @@ def _card_branch_key(card: Card, base: Path) -> Optional[str]:
 
 def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
     base = _resolve_base(path)
-    prefix = _card_branch_prefix(card, base)
-    branch_value = (card.branch or "").strip()
-    if prefix and branch_value and not branch_value.startswith(prefix):
-        branch_value = f"{prefix}{branch_value}"
-    card.branch = branch_value
+    sprint_row = None
+    if getattr(card, "sprint_id", None):
+        sprint_row = _get_db(base).fetch_sprint(int(card.sprint_id))
+    prefix = _card_branch_prefix(card, base, sprint_row)
+    card.branch = _normalized_card_branch(card, prefix, sprint_row)
     card.branch_key = _card_branch_key(card, base)
     now = int(time.time())
     if not card.created_at:

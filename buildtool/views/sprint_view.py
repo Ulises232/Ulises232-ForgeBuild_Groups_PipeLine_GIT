@@ -65,7 +65,8 @@ class SprintView(QWidget):
         self._card_parent_id: Optional[int] = None
         self._current_sprint_branch_key: Optional[str] = None
         self._current_sprint_qa_branch_key: Optional[str] = None
-        self._current_card_prefix: str = ""
+        self._current_card_base: str = ""
+        self._branch_override: bool = False
 
         self._setup_ui()
         self.refresh()
@@ -249,6 +250,7 @@ class SprintView(QWidget):
 
         self.txtCardTicket = QLineEdit()
         form.addRow("Ticket", self.txtCardTicket)
+        self.txtCardTicket.textChanged.connect(self._on_ticket_changed)
 
         self.txtCardTitle = QLineEdit()
         form.addRow("Título", self.txtCardTitle)
@@ -261,7 +263,7 @@ class SprintView(QWidget):
         self.lblCardBranchPreview = QLabel("")
         branch_row.addWidget(self.lblCardBranchPreview)
         form.addRow("Rama", branch_row)
-        self.txtCardBranch.textChanged.connect(self._update_branch_preview)
+        self.txtCardBranch.textChanged.connect(self._on_branch_text_changed)
 
         self.cboCardAssignee = QComboBox()
         form.addRow("Desarrollador", self.cboCardAssignee)
@@ -322,12 +324,18 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def update_permissions(self) -> None:
+        username = self._current_user()
         can_lead = require_roles("leader")
-        can_mark_unit = require_roles("developer", "leader")
-        can_mark_qa = require_roles("qa", "leader")
         sprint_mode = self.stack.currentWidget() is self.pageSprint
         card_mode = self.stack.currentWidget() is self.pageCard
         card = self._cards.get(self._selected_card_id or -1)
+        sprint = None
+        if card and card.sprint_id:
+            sprint = self._sprints.get(card.sprint_id)
+        elif self._card_parent_id:
+            sprint = self._sprints.get(self._card_parent_id)
+        elif self._selected_sprint_id is not None:
+            sprint = self._sprints.get(self._selected_sprint_id)
 
         self.btnNewSprint.setEnabled(can_lead)
 
@@ -338,8 +346,10 @@ class SprintView(QWidget):
         self.chkSprintClosed.setEnabled(can_lead and sprint_mode)
 
         has_card = card is not None and card.id is not None
-        allow_unit_toggle = card_mode and has_card and can_mark_unit
-        allow_qa_toggle = card_mode and has_card and can_mark_qa
+        is_card_assignee = bool(card and card.assignee and card.assignee == username)
+        is_card_qa = bool(card and card.qa_assignee and card.qa_assignee == username)
+        allow_unit_toggle = card_mode and has_card and (can_lead or is_card_assignee)
+        allow_qa_toggle = card_mode and has_card and (can_lead or is_card_qa)
 
         if card and card.unit_tests_done:
             self.btnCardMarkUnit.setText("Desmarcar pruebas unitarias")
@@ -347,12 +357,15 @@ class SprintView(QWidget):
             self.btnCardMarkUnit.setText("Marcar pruebas unitarias")
         self.btnCardMarkUnit.setEnabled(allow_unit_toggle)
         if not allow_unit_toggle:
-            if card_mode and not has_card and can_mark_unit:
+            if card_mode and not has_card:
                 tooltip = "Guarda la tarjeta antes de actualizar las pruebas unitarias"
-            elif not can_mark_unit:
-                tooltip = (
-                    "Solo desarrolladores o líderes pueden actualizar las pruebas unitarias"
-                )
+            elif not (can_lead or is_card_assignee):
+                if card and card.assignee:
+                    tooltip = (
+                        "Solo el desarrollador asignado o un líder pueden actualizar las pruebas unitarias"
+                    )
+                else:
+                    tooltip = "Asigna un desarrollador antes de marcar las pruebas unitarias"
             else:
                 tooltip = ""
             self.btnCardMarkUnit.setToolTip(tooltip)
@@ -365,32 +378,75 @@ class SprintView(QWidget):
             self.btnCardMarkQA.setText("Marcar QA")
         self.btnCardMarkQA.setEnabled(allow_qa_toggle)
         if not allow_qa_toggle:
-            if card_mode and not has_card and can_mark_qa:
+            if card_mode and not has_card:
                 tooltip = "Guarda la tarjeta antes de actualizar las pruebas QA"
-            elif not can_mark_qa:
-                tooltip = "Solo QA o líderes pueden aprobar QA"
+            elif not (can_lead or is_card_qa):
+                if card and card.qa_assignee:
+                    tooltip = "Solo la persona asignada en QA o un líder pueden aprobar QA"
+                else:
+                    tooltip = "Asigna un responsable de QA antes de marcar la revisión"
             else:
                 tooltip = ""
             self.btnCardMarkQA.setToolTip(tooltip)
         else:
             self.btnCardMarkQA.setToolTip("")
 
-        can_edit_unit_url = card_mode and can_mark_unit
-        can_edit_qa_url = card_mode and can_mark_qa
+        can_edit_unit_url = card_mode and (can_lead or is_card_assignee)
+        can_edit_qa_url = card_mode and (can_lead or is_card_qa)
         self.txtCardUnitUrl.setReadOnly(not can_edit_unit_url)
         self.txtCardQAUrl.setReadOnly(not can_edit_qa_url)
         if not can_edit_unit_url:
             self.txtCardUnitUrl.setToolTip(
-                "Solo desarrolladores o líderes pueden registrar el enlace de pruebas unitarias"
+                "Solo el desarrollador asignado o un líder pueden registrar el enlace de pruebas unitarias"
             )
         else:
             self.txtCardUnitUrl.setToolTip("")
         if not can_edit_qa_url:
             self.txtCardQAUrl.setToolTip(
-                "Solo QA o líderes pueden registrar el enlace de pruebas QA"
+                "Solo la persona asignada en QA o un líder pueden registrar el enlace de pruebas QA"
             )
         else:
             self.txtCardQAUrl.setToolTip("")
+
+        branch_name = self._full_branch_name() if card_mode else ""
+        branch_ready = card_mode and bool(branch_name)
+        branch_record = None
+        if sprint and branch_ready:
+            branch_record = self._branch_record_for_name(sprint, branch_name)
+        branch_exists = bool(
+            branch_record and (branch_record.exists_local or branch_record.exists_origin)
+        )
+        sprint_closed = bool(sprint and sprint.status == "closed")
+        allow_branch_create = (
+            card_mode
+            and has_card
+            and branch_ready
+            and not branch_exists
+            and not sprint_closed
+            and (can_lead or is_card_assignee)
+        )
+        branch_tooltip = ""
+        if not allow_branch_create:
+            if not card_mode:
+                branch_tooltip = ""
+            elif not has_card:
+                branch_tooltip = "Guarda la tarjeta antes de crear la rama"
+            elif sprint_closed:
+                branch_tooltip = "El sprint está finalizado; no se pueden crear nuevas ramas"
+            elif not (can_lead or is_card_assignee):
+                branch_tooltip = (
+                    "Solo el desarrollador asignado o un líder pueden crear la rama de la tarjeta"
+                )
+            elif not branch_ready:
+                branch_tooltip = "Completa el ticket y el nombre de la rama para crearla"
+            elif branch_exists:
+                branch_tooltip = (
+                    "La rama ya existe. Si se eliminó localmente, sincroniza el historial para recrearla"
+                )
+            elif sprint and not self._effective_sprint_branch_key(sprint):
+                branch_tooltip = "Configura la rama QA del sprint antes de crear ramas de tarjeta"
+        self.btnCardCreateBranch.setEnabled(allow_branch_create)
+        self.btnCardCreateBranch.setToolTip(branch_tooltip)
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -504,6 +560,16 @@ class SprintView(QWidget):
         if not branch_key:
             return None
         return self._branch_index.get(branch_key)
+
+    # ------------------------------------------------------------------
+    def _branch_record_for_name(self, sprint: Sprint, branch: str) -> Optional[BranchRecord]:
+        if not sprint or not branch:
+            return None
+        temp = Card(id=None, sprint_id=sprint.id or 0, branch=branch)
+        key = self._build_card_branch_key(temp, sprint)
+        if not key:
+            return None
+        return self._branch_index.get(key)
 
     # ------------------------------------------------------------------
     def _split_branch_key(
@@ -720,15 +786,11 @@ class SprintView(QWidget):
     def _show_card_form(self, card: Card, sprint: Sprint, new: bool = False) -> None:
         self.stack.setCurrentWidget(self.pageCard)
         self.lblCardSprint.setText(f"{sprint.version} — {sprint.name}")
-        prefix = self._branch_prefix(sprint)
-        self._current_card_prefix = prefix
-        self.lblCardPrefix.setText(prefix)
-        suffix = card.branch or ""
-        if prefix and suffix.startswith(prefix):
-            suffix = suffix[len(prefix) :]
-        self.txtCardBranch.setText(suffix)
+        self.txtCardTicket.blockSignals(True)
         self.txtCardTicket.setText(card.ticket_id or "")
+        self.txtCardTicket.blockSignals(False)
         self.txtCardTitle.setText(card.title or "")
+        self._prepare_branch_inputs(card, sprint)
         self._populate_user_combo(
             self.cboCardAssignee,
             card.assignee or None,
@@ -766,21 +828,102 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
+    def _prepare_branch_inputs(self, card: Card, sprint: Sprint) -> None:
+        self._current_card_base = self._qa_branch_base(sprint)
+        branch_value = (card.branch or "").strip()
+        ticket_value = (card.ticket_id or "").strip()
+        prefix = self._compose_branch_prefix(self._current_card_base, ticket_value)
+        self._branch_override = False
+        suffix = ""
+        if branch_value:
+            if prefix and (
+                branch_value == prefix or branch_value.startswith(f"{prefix}_")
+            ):
+                suffix = branch_value[len(prefix) :]
+                if suffix.startswith("_"):
+                    suffix = suffix[1:]
+            else:
+                legacy = self._legacy_branch_prefix(sprint)
+                if legacy and branch_value.startswith(legacy):
+                    suffix = branch_value[len(legacy) :]
+                    if suffix.startswith("_"):
+                        suffix = suffix[1:]
+                else:
+                    self._branch_override = True
+                    suffix = branch_value
+        self.txtCardBranch.blockSignals(True)
+        self.txtCardBranch.setText(suffix)
+        self.txtCardBranch.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _on_branch_text_changed(self) -> None:
+        if self.stack.currentWidget() is not self.pageCard:
+            return
+        text = self.txtCardBranch.text().strip()
+        if self._branch_override and not text:
+            self._branch_override = False
+        self._update_branch_preview()
+        self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _on_ticket_changed(self) -> None:
+        if self.stack.currentWidget() is not self.pageCard:
+            return
+        self._update_branch_preview()
+        self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _current_branch_prefix(self) -> str:
+        if self._branch_override:
+            return ""
+        ticket_value = self.txtCardTicket.text().strip()
+        return self._compose_branch_prefix(self._current_card_base, ticket_value)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _compose_branch_prefix(base: str, ticket: str) -> str:
+        parts = []
+        base_clean = base.strip()
+        ticket_clean = ticket.strip()
+        if base_clean:
+            parts.append(base_clean)
+        if ticket_clean:
+            parts.append(ticket_clean)
+        return "_".join(parts)
+
+    # ------------------------------------------------------------------
+    def _qa_branch_base(self, sprint: Optional[Sprint]) -> str:
+        if not sprint:
+            return ""
+        key = (sprint.qa_branch_key or sprint.branch_key or "").strip()
+        _, _, branch = self._split_branch_key(key)
+        return branch or ""
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _legacy_branch_prefix(sprint: Optional[Sprint]) -> Optional[str]:
+        if not sprint or not sprint.version:
+            return None
+        version = sprint.version.strip()
+        if not version:
+            return None
+        return f"v{version}_"
+
+    # ------------------------------------------------------------------
     def _update_branch_preview(self) -> None:
+        prefix = self._current_branch_prefix()
+        suffix = self.txtCardBranch.text().strip()
+        if self._branch_override:
+            self.lblCardPrefix.setText("")
+        elif prefix:
+            self.lblCardPrefix.setText(f"{prefix}_" if suffix else prefix)
+        else:
+            self.lblCardPrefix.setText("")
         full = self._full_branch_name()
         if full:
             self.lblCardBranchPreview.setText(f"→ {full}")
         else:
             self.lblCardBranchPreview.setText("")
-
-    # ------------------------------------------------------------------
-    def _branch_prefix(self, sprint: Optional[Sprint]) -> str:
-        if not sprint or not sprint.version:
-            return ""
-        version = sprint.version.strip()
-        if not version:
-            return ""
-        return f"v{version}_"
 
     # ------------------------------------------------------------------
     def _on_pick_branch(self) -> None:
@@ -953,9 +1096,12 @@ class SprintView(QWidget):
     # ------------------------------------------------------------------
     def _full_branch_name(self) -> str:
         suffix = self.txtCardBranch.text().strip()
-        if self._current_card_prefix:
-            return f"{self._current_card_prefix}{suffix}" if suffix else ""
-        return suffix
+        if self._branch_override:
+            return suffix
+        prefix = self._current_branch_prefix()
+        if prefix and suffix:
+            return f"{prefix}_{suffix}"
+        return prefix or suffix
 
     # ------------------------------------------------------------------
     def _on_save_card(self) -> None:
@@ -1060,13 +1206,17 @@ class SprintView(QWidget):
         user = self._current_user()
         now = int(time.time())
         history = PipelineHistory()
+        is_leader = require_roles("leader")
+        is_card_assignee = bool(card.assignee and card.assignee == user)
+        is_card_qa = bool(card.qa_assignee and card.qa_assignee == user)
         if kind == "unit":
-            if not require_roles("developer", "leader"):
-                QMessageBox.warning(
-                    self,
-                    "Tarjeta",
-                    "Solo desarrolladores o líderes pueden actualizar las pruebas unitarias.",
+            if not (is_leader or is_card_assignee):
+                message = (
+                    "Solo el desarrollador asignado o un líder pueden actualizar las pruebas unitarias."
                 )
+                if not card.assignee:
+                    message = "Asigna un desarrollador antes de marcar las pruebas unitarias."
+                QMessageBox.warning(self, "Tarjeta", message)
                 return
             toggled_on = not card.unit_tests_done
             card.unit_tests_done = toggled_on
@@ -1076,8 +1226,11 @@ class SprintView(QWidget):
                 card.id, unit_tests_status="done" if toggled_on else "pending"
             )
         elif kind == "qa":
-            if not require_roles("qa", "leader"):
-                QMessageBox.warning(self, "Tarjeta", "No tienes permisos para aprobar QA")
+            if not (is_leader or is_card_qa):
+                message = "Solo la persona asignada en QA o un líder pueden aprobar QA."
+                if not card.qa_assignee:
+                    message = "Asigna un responsable de QA antes de marcar la revisión."
+                QMessageBox.warning(self, "Tarjeta", message)
                 return
             toggled_on = not card.qa_done
             card.qa_done = toggled_on
@@ -1127,15 +1280,31 @@ class SprintView(QWidget):
         if not card or not sprint:
             QMessageBox.warning(self, "Tarjeta", "La tarjeta seleccionada ya no existe.")
             return
-        branch_name = card.branch.strip()
+        user = self._current_user()
+        branch_name = self._full_branch_name().strip()
         if not branch_name:
             QMessageBox.warning(self, "Tarjeta", "La tarjeta no tiene un nombre de rama válido.")
+            return
+        if not (require_roles("leader") or (card.assignee and card.assignee == user)):
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "Solo el desarrollador asignado o un líder pueden crear la rama de la tarjeta.",
+            )
             return
         if not sprint.qa_branch_key:
             QMessageBox.warning(
                 self,
                 "Tarjeta",
                 "Configura la rama QA del sprint antes de crear ramas de tarjetas.",
+            )
+            return
+        existing_record = self._branch_record_for_name(sprint, branch_name)
+        if existing_record and (existing_record.exists_local or existing_record.exists_origin):
+            QMessageBox.information(
+                self,
+                "Tarjeta",
+                "La rama ya existe. Elimina la rama local o sincroniza antes de recrearla.",
             )
             return
         effective_key = self._effective_sprint_branch_key(sprint)
@@ -1167,6 +1336,7 @@ class SprintView(QWidget):
 
         message = "\n".join(logs) or "Operación completada."
         if ok:
+            card.branch = branch_name
             card.branch_created_by = self._current_user()
             card.branch_created_at = int(time.time())
             card.updated_at = card.branch_created_at
