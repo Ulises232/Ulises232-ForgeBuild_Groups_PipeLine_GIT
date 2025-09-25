@@ -4,6 +4,16 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.6.0] - 2025-10-07
+### Añadido
+- Capa de persistencia para `branch_history` que permite seleccionar SQLite o SQL Server 2019 mediante la variable `BRANCH_HISTORY_URL` y abstrae las operaciones comunes.
+- Pool de conexiones `pyodbc` para el backend de SQL Server con compatibilidad automática de tipos y creación de esquema.
+- Script `buildtool/scripts/migrate_branch_history_sqlserver.py` para migrar el historial existente desde un archivo SQLite.
+
+### Cambiado
+- Las operaciones de escritura (`upsert_*`, asignaciones de roles, bitácora) usan actualizaciones seguidas de inserción, compatibles con motores sin `ON CONFLICT`.
+- Documentación actualizada con los pasos para habilitar SQL Server y opciones de conexión.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la

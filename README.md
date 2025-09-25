@@ -151,6 +151,23 @@ Cada entrada en `deploy_targets` dentro de un grupo define adónde copiar los ar
 ### 4.6 Variables de entorno
 Usa `environment` para centralizar configuraciones como rutas de Maven/Java, proxies o flags internos. Al actualizar el YAML desde el asistente o manualmente, la app aplica los valores y elimina variables que ya no existan en el archivo.
 
+### 4.7 Persistencia de `branch_history`
+- Por defecto la aplicación crea `branches_history.sqlite3` en la carpeta local y en la NAS configurada. Ese comportamiento se mantiene cuando **no** defines ninguna variable adicional.
+- Para utilizar un backend centralizado (por ejemplo, SQL Server 2019) exporta la variable `BRANCH_HISTORY_URL` antes de iniciar ForgeBuild. Acepta los siguientes formatos:
+  - `sqlite:///ruta/al/archivo.sqlite3`: fuerza a utilizar un archivo concreto (útil para pruebas o contenedores).
+  - `mssql+pyodbc:///?odbc_connect=Driver%3D%7BODBC+Driver+17+for+SQL+Server%7D%3BServer%3Dsql.local%3BDatabase%3Dforgebuild%3BUID%3Dusuario%3BPWD%3Dsecreto%3B`: reutiliza un DSN ODBC estándar. También puedes usar la forma `mssql+pyodbc://usuario:secreto@sql.local/forgebuild?driver=ODBC+Driver+17+for+SQL+Server`.
+- Cuando el backend apunta a SQL Server, la capa de persistencia reutiliza un pool de conexiones (`pyodbc`) y aplica `BIT`/`NVARCHAR` según el esquema soportado por SQL Server 2019.
+- El repositorio incluye `buildtool/scripts/migrate_branch_history_sqlserver.py`, que copia el contenido de un `branches_history.sqlite3` existente hacia el servidor indicado. Ejecuta:
+
+  ```bash
+  python -m buildtool.scripts.migrate_branch_history_sqlserver \
+      --sqlite /ruta/a/branches_history.sqlite3 \
+      --sqlserver "mssql+pyodbc:///?odbc_connect=Driver%3D%7BODBC+Driver+17+for+SQL+Server%7D%3BServer%3Dsql.local%3BDatabase%3Dforgebuild%3BUID%3Dusuario%3BPWD%3Dsecreto%3B" \
+      --truncate
+  ```
+
+  Usa `--truncate` cuando quieras vaciar las tablas de destino antes de migrar.
+
 ## 5. Uso de la aplicación
 ### 5.1 Elementos comunes de la ventana principal
 - **Botón “Config/Wizard”**: abre el asistente de grupos en modalidad modal. Desde ahí puedes crear/editar grupos, proyectos, módulos, perfiles y targets. Al cerrar con “Guardar”, la app recarga la configuración sin reiniciar.
