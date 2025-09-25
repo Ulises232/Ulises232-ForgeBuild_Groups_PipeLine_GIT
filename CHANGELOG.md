@@ -4,6 +4,22 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.6.0] - 2025-10-07
+### Añadido
+- Capa de persistencia desacoplada que permite utilizar SQL Server 2019 como backend
+  centralizado para el historial de ramas, manteniendo compatibilidad con SQLite.
+- Carga automática de variables desde `.env` (incluyendo `FORGEBUILD_BRANCH_HISTORY_URL`)
+  para definir la cadena de conexión del historial compartido.
+- Script `buildtool/scripts/migrate_branch_history.py` que vuelca los datos de
+  `branches_history.sqlite3` hacia el servidor configurado conservando ramas,
+  actividad, sprints, tarjetas y usuarios.
+
+### Cambiado
+- El historial NAS utiliza conexiones pool mediante `SQLAlchemy` cuando se trabaja
+  contra SQL Server, reutilizando sesiones y evitando reconexiones por operación.
+- La documentación describe el despliegue híbrido SQLite/SQL Server y el proceso
+  de migración para entornos existentes.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la

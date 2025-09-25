@@ -1,13 +1,17 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Dict, Optional, List, Any, Iterable
+from typing import Dict, Optional, List, Any, Iterable, Tuple
 import os
 import time
 import json
 
 from .config import load_config
+from .env import load_dotenv
 from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
+
+
+load_dotenv()
 
 
 class NasUnavailableError(RuntimeError):
@@ -142,16 +146,19 @@ def _normalize_record_payload(raw: Any) -> Optional[BranchRecord]:
     return rec
 
 
-_DB_CACHE: Dict[Path, BranchHistoryDB] = {}
+_DB_CACHE: Dict[Tuple[Path, str], BranchHistoryDB] = {}
 
 
 def _get_db(base: Path) -> BranchHistoryDB:
     base = base.resolve()
-    db = _DB_CACHE.get(base)
+    connection_url = os.environ.get("FORGEBUILD_BRANCH_HISTORY_URL", "").strip()
+    cache_key = (base, connection_url)
+    db = _DB_CACHE.get(cache_key)
     if not db:
-        db = BranchHistoryDB(_db_path(base))
-        _DB_CACHE[base] = db
-        _run_migrations(base, db)
+        db = BranchHistoryDB(_db_path(base), connection_url=connection_url or None)
+        _DB_CACHE[cache_key] = db
+        if not connection_url:
+            _run_migrations(base, db)
     return db
 
 

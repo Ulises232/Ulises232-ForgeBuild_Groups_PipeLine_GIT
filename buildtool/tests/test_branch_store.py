@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import tempfile
 import time
@@ -15,9 +16,11 @@ class LoadIndexTest(unittest.TestCase):
 
     def setUp(self):
         branch_store._DB_CACHE.clear()
+        os.environ.pop("FORGEBUILD_BRANCH_HISTORY_URL", None)
 
     def tearDown(self):
         branch_store._DB_CACHE.clear()
+        os.environ.pop("FORGEBUILD_BRANCH_HISTORY_URL", None)
 
     def _write_index(self, base: Path, payload: dict) -> Path:
         path = base / "branches_index.json"
