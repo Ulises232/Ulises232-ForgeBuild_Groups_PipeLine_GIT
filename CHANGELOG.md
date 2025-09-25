@@ -14,6 +14,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - `BranchHistoryDB` delega en backends específicos (SQLite/SQL Server) y reutiliza la misma API en vistas y pruebas.
 - Documentación extendida con los pasos de despliegue y migración hacia el servidor central de historial.
 
+### Corregido
+- Se implementa `ensure_schema` en el backend SQLite para evitar errores al inicializar la aplicación cuando se usa la base local.
+
 ## [1.5.1] - 2025-10-06
 
 ### Añadido

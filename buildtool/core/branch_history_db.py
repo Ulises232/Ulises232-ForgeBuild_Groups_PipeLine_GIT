@@ -484,7 +484,7 @@ class SQLiteBranchHistoryBackend(BranchHistoryBackend):
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+        self.ensure_schema()
 
     # ------------------------------------------------------------------
     # basic helpers
@@ -494,7 +494,7 @@ class SQLiteBranchHistoryBackend(BranchHistoryBackend):
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
-    def _ensure_schema(self) -> None:
+    def ensure_schema(self) -> None:
         with self._connect() as conn:
             wal_enabled = False
             try:
