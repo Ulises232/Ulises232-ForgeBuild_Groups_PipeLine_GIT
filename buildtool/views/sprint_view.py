@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from collections import Counter
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -72,9 +72,15 @@ class SprintView(QWidget):
         self.btnAddSprint = QPushButton("Nuevo sprint")
         self.btnAddSprint.setIcon(get_icon("branch"))
         actions.addWidget(self.btnAddSprint)
+        self.btnEditSprint = QPushButton("Editar sprint")
+        self.btnEditSprint.setIcon(get_icon("config"))
+        actions.addWidget(self.btnEditSprint)
         self.btnAddCard = QPushButton("Agregar tarjeta")
         self.btnAddCard.setIcon(get_icon("build"))
         actions.addWidget(self.btnAddCard)
+        self.btnEditCard = QPushButton("Editar tarjeta")
+        self.btnEditCard.setIcon(get_icon("app"))
+        actions.addWidget(self.btnEditCard)
         self.btnMarkUnit = QPushButton("Marcar pruebas unitarias")
         self.btnMarkUnit.setIcon(get_icon("build"))
         actions.addWidget(self.btnMarkUnit)
@@ -95,7 +101,9 @@ class SprintView(QWidget):
 
         self.btnRefresh.clicked.connect(self.refresh)
         self.btnAddSprint.clicked.connect(self._create_sprint)
+        self.btnEditSprint.clicked.connect(self._edit_sprint)
         self.btnAddCard.clicked.connect(self._create_card)
+        self.btnEditCard.clicked.connect(self._edit_card)
         self.btnMarkUnit.clicked.connect(lambda: self._mark_card("unit"))
         self.btnMarkQA.clicked.connect(lambda: self._mark_card("qa"))
         self.btnDelete.clicked.connect(self._delete_card)
@@ -104,8 +112,31 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def update_permissions(self) -> None:
+        self._refresh_action_states()
+
+    # ------------------------------------------------------------------
+    def _refresh_action_states(self) -> None:
+        item = self.tree.currentItem()
+        kind: Optional[str] = None
+        if item:
+            kind, _ = item.data(0, Qt.UserRole) or (None, None)
+
+        has_card = self._selected_card is not None
+        can_lead = require_roles("leader")
         can_mark_qa = require_roles("qa", "leader")
-        self.btnMarkQA.setEnabled(can_mark_qa)
+
+        self.btnEditSprint.setEnabled(can_lead and kind == "sprint")
+        self.btnAddCard.setEnabled(kind in {"sprint", "card"})
+        self.btnEditCard.setEnabled(has_card)
+        self.btnDelete.setEnabled(has_card)
+        self.btnMarkUnit.setEnabled(has_card)
+        self.btnMarkQA.setEnabled(has_card and can_mark_qa)
+        if can_mark_qa:
+            self.btnMarkQA.setToolTip("")
+        else:
+            self.btnMarkQA.setToolTip(
+                "Solo los roles QA o líder pueden marcar revisiones de QA"
+            )
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -169,12 +200,60 @@ class SprintView(QWidget):
         item = self.tree.currentItem()
         if not item:
             self._selected_card = None
+            self._refresh_action_states()
             return
         kind, ident = item.data(0, Qt.UserRole) or (None, None)
         if kind == "card" and ident is not None:
             self._selected_card = int(ident)
         else:
             self._selected_card = None
+        self._refresh_action_states()
+
+    # ------------------------------------------------------------------
+    def _branch_prefix(self, sprint: Optional[Sprint]) -> str:
+        if not sprint or not sprint.version:
+            return ""
+        version = sprint.version.strip()
+        if not version:
+            return ""
+        return f"v{version}_"
+
+    # ------------------------------------------------------------------
+    def _choose_user(
+        self,
+        title: str,
+        *,
+        current: Optional[str] = None,
+        allow_empty: bool = False,
+    ) -> Tuple[Optional[str], bool]:
+        users = list_users(include_inactive=False)
+        names = [u.username for u in users]
+        if not names and not allow_empty:
+            return (current, True)
+        if allow_empty and "" not in names:
+            names.insert(0, "")
+        if current and current not in names:
+            insert_at = 1 if allow_empty and names else len(names)
+            names.insert(insert_at, current)
+        index = 0
+        if current and current in names:
+            index = names.index(current)
+        elif allow_empty and names:
+            index = 0
+        choice, ok = QInputDialog.getItem(
+            self,
+            title,
+            "Usuario",
+            names or [""],
+            index,
+            False,
+        )
+        if not ok:
+            return (current, False)
+        choice = choice or None
+        if not allow_empty and choice is None and current:
+            return (current, True)
+        return (choice, True)
 
     # ------------------------------------------------------------------
     def _create_sprint(self) -> None:
@@ -221,6 +300,68 @@ class SprintView(QWidget):
                 f"Error inesperado al guardar el sprint: {exc}",
             )
             return
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    def _edit_sprint(self) -> None:
+        if not require_roles("leader"):
+            QMessageBox.warning(
+                self,
+                "Sprint",
+                "Solo los usuarios con rol de líder pueden editar sprints.",
+            )
+            return
+        sprint_id = self._current_sprint_id()
+        if sprint_id is None:
+            QMessageBox.information(self, "Sprint", "Selecciona un sprint primero")
+            return
+        sprint = self._sprints.get(sprint_id)
+        if not sprint:
+            QMessageBox.warning(
+                self,
+                "Sprint",
+                "El sprint seleccionado ya no existe. Refresca la lista.",
+            )
+            return
+        name, ok = QInputDialog.getText(
+            self,
+            "Editar sprint",
+            "Nombre del sprint:",
+            text=sprint.name,
+        )
+        if not ok or not name:
+            return
+        version, ok = QInputDialog.getText(
+            self,
+            "Editar sprint",
+            "Versión:",
+            text=sprint.version,
+        )
+        if not ok or not version:
+            return
+        leader, accepted = self._choose_user(
+            "Responsable del sprint",
+            current=sprint.lead_user,
+            allow_empty=False,
+        )
+        if not accepted:
+            return
+        qa_lead, accepted = self._choose_user(
+            "Responsable QA",
+            current=sprint.qa_user,
+            allow_empty=True,
+        )
+        if not accepted:
+            return
+        now = int(time.time())
+        user = self._current_user()
+        sprint.name = name
+        sprint.version = version
+        sprint.lead_user = leader or sprint.lead_user
+        sprint.qa_user = qa_lead
+        sprint.updated_at = now
+        sprint.updated_by = user
+        upsert_sprint(sprint)
         self.refresh()
 
     # ------------------------------------------------------------------
@@ -284,14 +425,44 @@ class SprintView(QWidget):
         if sprint_id is None:
             QMessageBox.information(self, "Tarjeta", "Selecciona un sprint primero")
             return
+        sprint = self._sprints.get(sprint_id)
         title, ok = QInputDialog.getText(self, "Nueva tarjeta", "Título/Descripción")
         if not ok or not title:
             return
-        branch_name, ok = QInputDialog.getText(
-            self, "Nueva tarjeta", "Nombre de la rama (derivada):"
+        prefix = self._branch_prefix(sprint)
+        branch_label = "Nombre de la rama (derivada):"
+        if prefix:
+            branch_label = f"Sufijo de la rama (prefijo {prefix})"
+        branch_value, ok = QInputDialog.getText(
+            self,
+            "Nueva tarjeta",
+            branch_label,
         )
-        if not ok or not branch_name:
+        if not ok:
             return
+        branch_value = (branch_value or "").strip()
+        if prefix:
+            if not branch_value:
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    "Debes indicar un sufijo para la rama de la tarjeta.",
+                )
+                return
+            branch_name = (
+                branch_value
+                if branch_value.startswith(prefix)
+                else f"{prefix}{branch_value}"
+            )
+        else:
+            if not branch_value:
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    "Debes indicar un nombre para la rama de la tarjeta.",
+                )
+                return
+            branch_name = branch_value
         developer = self._prompt_user("Asignar a (desarrollador)", allow_empty=True)
         qa_user = self._prompt_user("Asignar QA", allow_empty=True)
         card = Card(
@@ -380,6 +551,87 @@ class SprintView(QWidget):
             card.qa_at = now
             card.status = "qa"
             history.update_card_status(card.id, qa_status="approved", approved_by=user)
+        upsert_card(card)
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    def _edit_card(self) -> None:
+        if self._selected_card is None:
+            QMessageBox.information(self, "Tarjeta", "Selecciona una tarjeta")
+            return
+        card = self._cards.get(self._selected_card)
+        if not card:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "La tarjeta seleccionada ya no existe. Refresca la lista.",
+            )
+            return
+        sprint = self._sprints.get(card.sprint_id)
+        title, ok = QInputDialog.getText(
+            self,
+            "Editar tarjeta",
+            "Título/Descripción",
+            text=card.title,
+        )
+        if not ok or not title:
+            return
+        prefix = self._branch_prefix(sprint)
+        suffix_default = card.branch or ""
+        if prefix and suffix_default.startswith(prefix):
+            suffix_default = suffix_default[len(prefix) :]
+        branch_label = "Nombre de la rama (derivada):"
+        if prefix:
+            branch_label = f"Sufijo de la rama (prefijo {prefix})"
+        branch_value, ok = QInputDialog.getText(
+            self,
+            "Editar tarjeta",
+            branch_label,
+            text=suffix_default,
+        )
+        if not ok:
+            return
+        branch_value = (branch_value or "").strip()
+        if prefix:
+            if not branch_value:
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    "Debes indicar un sufijo para la rama de la tarjeta.",
+                )
+                return
+            branch_name = (
+                branch_value
+                if branch_value.startswith(prefix)
+                else f"{prefix}{branch_value}"
+            )
+        else:
+            if not branch_value:
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    "Debes indicar un nombre para la rama de la tarjeta.",
+                )
+                return
+            branch_name = branch_value
+        developer, accepted = self._choose_user(
+            "Asignar a (desarrollador)",
+            current=card.assignee,
+            allow_empty=True,
+        )
+        if not accepted:
+            return
+        qa_user, accepted = self._choose_user(
+            "Asignar QA",
+            current=card.qa_assignee,
+            allow_empty=True,
+        )
+        if not accepted:
+            return
+        card.title = title
+        card.branch = branch_name
+        card.assignee = developer
+        card.qa_assignee = qa_user
         upsert_card(card)
         self.refresh()
 

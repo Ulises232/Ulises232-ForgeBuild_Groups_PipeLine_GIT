@@ -447,8 +447,25 @@ def list_cards(
     return [_row_to_card(row) for row in rows]
 
 
+def _card_branch_prefix(card: Card, base: Path) -> str:
+    if not getattr(card, "sprint_id", None):
+        return ""
+    row = _get_db(base).fetch_sprint(int(card.sprint_id))
+    if not row:
+        return ""
+    version = str(row.get("version", "")).strip()
+    if not version:
+        return ""
+    return f"v{version}_"
+
+
 def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
     base = _resolve_base(path)
+    prefix = _card_branch_prefix(card, base)
+    branch_value = (card.branch or "").strip()
+    if prefix and branch_value and not branch_value.startswith(prefix):
+        branch_value = f"{prefix}{branch_value}"
+    card.branch = branch_value
     payload = {
         "id": card.id,
         "sprint_id": card.sprint_id,

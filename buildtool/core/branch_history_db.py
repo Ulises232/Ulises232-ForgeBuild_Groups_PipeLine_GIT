@@ -533,6 +533,14 @@ class BranchHistoryDB:
             rows = conn.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_sprint(self, sprint_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sprints WHERE id = ?",
+                (int(sprint_id),),
+            ).fetchone()
+        return dict(row) if row else None
+
     def upsert_sprint(self, payload: dict) -> int:
         data = self._normalize_sprint(payload)
         with self._connect() as conn:

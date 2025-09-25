@@ -1,5 +1,6 @@
 import sqlite3
 import tempfile
+import time
 from pathlib import Path
 import unittest
 
@@ -239,6 +240,34 @@ class LoadIndexTest(unittest.TestCase):
         self.assertEqual(row[1], "pending")
         self.assertEqual(row[2], 0)
         self.assertEqual(row[3], 0)
+
+    def test_upsert_card_adds_version_prefix(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            now = int(time.time())
+            sprint = branch_store.Sprint(
+                id=None,
+                branch_key="ellis/proyecto/v2.68",
+                name="Sprint 3",
+                version="2.68",
+                created_at=now,
+                created_by="alice",
+                updated_at=now,
+                updated_by="alice",
+            )
+            branch_store.upsert_sprint(sprint, path=base)
+            self.assertIsNotNone(sprint.id)
+            card = branch_store.Card(
+                id=None,
+                sprint_id=sprint.id,
+                title="Tarjeta 1",
+                branch="feature/login",
+            )
+            branch_store.upsert_card(card, path=base)
+            self.assertTrue(card.branch.startswith("v2.68_"))
+            stored = branch_store.list_cards(path=base, sprint_ids=[sprint.id])
+            self.assertEqual(len(stored), 1)
+            self.assertEqual(stored[0].branch, "v2.68_feature/login")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,12 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La vista de sprints permite escoger la rama base a partir del grupo y maneja de forma segura
   el alta cuando la rama ya no existe, evitando violaciones de llave foránea al crear nuevos sprints.
 
+### Cambiado
+- La vista de sprints permite editar sprints solo para líderes y tarjetas para cualquier usuario,
+  añadiendo controles de permisos y edición directa desde la misma pestaña.
+- Las tarjetas nuevas y existentes normalizan el nombre de la rama para anteponer el prefijo de versión
+  (por ejemplo `v2.68_`), guiando al usuario en los diálogos y validándolo en la capa de persistencia.
+
 ## [1.5.0] - 2025-10-05
 ### Añadido
 - Módulo de planeación de sprints con tarjetas enlazadas a ramas, asignación de responsables y validación de checks antes del merge.
