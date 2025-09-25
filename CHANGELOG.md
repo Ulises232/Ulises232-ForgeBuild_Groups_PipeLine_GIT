@@ -20,6 +20,10 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La documentación describe el despliegue híbrido SQLite/SQL Server y el proceso
   de migración para entornos existentes.
 
+### Corregido
+- El backend SQL Server deja la elección del driver al entorno para evitar fallos
+  de instalación en despliegues sin acceso a las ruedas de `pyodbc`.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la

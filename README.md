@@ -202,7 +202,9 @@ Todas las acciones corren en hilos de fondo con protección de errores; la bitá
 - La aplicación crea un archivo `branches_history.sqlite3` tanto en la carpeta local (`%APPDATA%\ForgeBuild` o `~/.local/share/forgebuild`) como en la NAS definida en la configuración.
 - Al abrir una versión nueva se migra automáticamente el contenido existente de los JSON a la base de datos sin perder información.
 - Desde la versión 1.6.0 es posible apuntar el historial hacia un SQL Server 2019 centralizado declarando la variable `FORGEBUILD_BRANCH_HISTORY_URL` en un archivo `.env` (local o en `~/.forgebuild/.env`).
-  - Ejemplo: `FORGEBUILD_BRANCH_HISTORY_URL="mssql+pyodbc://usuario:contraseña@host/BasesGrupos?driver=ODBC+Driver+17+for+SQL+Server"`.
+  - Ejemplo (ODBC): `FORGEBUILD_BRANCH_HISTORY_URL="mssql+pyodbc://usuario:contraseña@host/BasesGrupos?driver=ODBC+Driver+17+for+SQL+Server"`.
+  - Ejemplo (TDS puro): `FORGEBUILD_BRANCH_HISTORY_URL="mssql+pytds://usuario:contraseña@host:1433/BasesGrupos"`.
+  - Instala por separado el driver que prefieras (`pyodbc`, `python-tds`, `aioodbc`, etc.); la aplicación sólo requiere `SQLAlchemy`.
   - La capa de persistencia usa `SQLAlchemy` con pool de conexiones y cae automáticamente en SQLite cuando la variable no está definida.
 - Las vistas **Repos**, **NAS → Ramas** y **NAS → Activity Log** leen directamente desde el backend configurado, conservando filtros, búsquedas y edición manual.
 - Para migrar una instalación existente utiliza `python -m buildtool.scripts.migrate_branch_history path/al/sqlite url-sqlserver`.
