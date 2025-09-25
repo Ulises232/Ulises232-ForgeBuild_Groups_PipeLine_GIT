@@ -93,6 +93,11 @@ build_exe.bat --deploy \\servidor\ruta\compartida
 - El historial detallado de funcionalidades, mejoras y correcciones se mantiene en `CHANGELOG.md`, siguiendo el estilo de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 - Al liberar una nueva iteración, actualiza `VERSION` y añade una sección correspondiente en el changelog con la fecha y los cambios relevantes.
 
+### 3.6 Variables de entorno (.env)
+- `buildtool.core.config` carga automáticamente un archivo `.env` si está presente en la carpeta del proyecto o en `%APPDATA%/ForgeBuild` (`~/.forgebuild` en Linux/macOS).
+- Las claves definidas ahí se exportan antes de inicializar la aplicación, permitiendo configurar credenciales o endpoints sin modificar el código.
+- El repositorio incluye `.env.example` como referencia; copia ese archivo a `.env` y ajusta los valores necesarios para tu entorno.
+
 ## 4. Configuración
 ### 4.1 Ubicación y ciclo de vida del archivo
 - Al iniciar por primera vez, la aplicación copia `buildtool/data/config.yaml` a `%APPDATA%\ForgeBuild\config.yaml` (Windows) o `~/.forgebuild/config.yaml` (otros sistemas).
@@ -150,6 +155,23 @@ Cada entrada en `deploy_targets` dentro de un grupo define adónde copiar los ar
 
 ### 4.6 Variables de entorno
 Usa `environment` para centralizar configuraciones como rutas de Maven/Java, proxies o flags internos. Al actualizar el YAML desde el asistente o manualmente, la app aplica los valores y elimina variables que ya no existan en el archivo.
+
+### 4.7 Backend del historial de ramas
+- ForgeBuild puede usar SQLite (local) o SQL Server 2019 (centralizado) para almacenar `branches_history`. El backend se selecciona automáticamente según las variables de entorno.
+- Variables principales:
+  - `FORGEBUILD_BRANCH_HISTORY_BACKEND`: `sqlite` (por defecto) o `sqlserver`.
+  - `FORGEBUILD_BRANCH_HISTORY_URL`: cadena `mssql://usuario:password@servidor:1433/base` compatible con `python-tds`.
+  - `FORGEBUILD_BRANCH_HISTORY_POOL_SIZE`: controla cuántas conexiones simultáneas se conservan en el pool (opcional).
+- Crea/edita un `.env` (ver §3.6) para definir estas variables sin exponerlas en el repositorio.
+- El script `scripts/migrate_branch_history.py` permite mover los datos existentes desde SQLite hacia SQL Server:
+  ```bash
+  python scripts/migrate_branch_history.py \
+      --sqlite-path "%APPDATA%/ForgeBuild/branches_history.sqlite3" \
+      --sqlserver-url "mssql://usuario:password@servidor:1433/forgebuild"
+  ```
+  - Añade `--pool-size` para ajustar el pool y `--batch-size` para limitar los lotes de la bitácora.
+  - Usa `--skip-wipe` si deseas conservar la información existente en el servidor.
+- Después de migrar, establece el backend en `sqlserver` y reinicia la aplicación; la capa de persistencia reutilizará automáticamente el pool de conexiones.
 
 ## 5. Uso de la aplicación
 ### 5.1 Elementos comunes de la ventana principal

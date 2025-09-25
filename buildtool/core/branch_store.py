@@ -156,6 +156,8 @@ def _get_db(base: Path) -> BranchHistoryDB:
 
 
 def _run_migrations(base: Path, db: BranchHistoryDB) -> None:
+    if getattr(db, "backend_name", "sqlite") != "sqlite":
+        return
     _migrate_index(base, db)
     _migrate_activity_log(base, db)
 

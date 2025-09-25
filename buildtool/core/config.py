@@ -100,6 +100,36 @@ def _cfg_file() -> pathlib.Path:
     return _state_dir() / "config.yaml"
 
 
+def _load_dotenv() -> None:
+    """Read .env files from the working directory and the state directory."""
+
+    candidates = []
+    try:
+        candidates.append(pathlib.Path.cwd() / ".env")
+    except Exception:
+        pass
+    candidates.append(_state_dir() / ".env")
+
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            for raw_line in candidate.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key:
+                    continue
+                cleaned = value.strip().strip("\"").strip("'")
+                os.environ.setdefault(key, cleaned)
+        except OSError:
+            continue
+
+
 def _model_to_dict(model) -> Dict:
     if hasattr(model, "dict"):
         return model.dict()
@@ -125,6 +155,7 @@ def apply_environment(cfg: Config) -> None:
 
 
 def load_config() -> Config:
+    _load_dotenv()
     cfg_path = _cfg_file()
     store = ConfigStore()
     legacy_groups_data = []
