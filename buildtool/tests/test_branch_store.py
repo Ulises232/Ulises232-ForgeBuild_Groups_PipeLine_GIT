@@ -344,6 +344,66 @@ class LoadIndexTest(unittest.TestCase):
             self.assertEqual(len(stored), 1)
             self.assertEqual(stored[0].branch_key, "ellis/proyecto/v2.68_feature/test")
 
+    def test_card_urls_and_unmarking_reset_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            now = int(time.time())
+            sprint = branch_store.Sprint(
+                id=None,
+                branch_key="ellis/proyecto/v2.68",
+                qa_branch_key="ellis/proyecto/v2.68_QA",
+                name="Sprint QA",
+                version="2.68",
+                created_at=now,
+                created_by="alice",
+                updated_at=now,
+                updated_by="alice",
+            )
+            branch_store.upsert_sprint(sprint, path=base)
+            self.assertIsNotNone(sprint.id)
+
+            card = branch_store.Card(
+                id=None,
+                sprint_id=sprint.id,
+                title="Tarjeta QA",
+                ticket_id="ELASS-50",
+                branch="feature/test",
+                unit_tests_url="https://example.test/unit",
+                qa_url="https://example.test/qa",
+                created_by="alice",
+                updated_by="alice",
+            )
+            branch_store.upsert_card(card, path=base)
+            self.assertIsNotNone(card.id)
+
+            card.unit_tests_done = True
+            card.unit_tests_by = "alice"
+            card.unit_tests_at = now
+            card.qa_done = True
+            card.qa_by = "bob"
+            card.qa_at = now
+            branch_store.upsert_card(card, path=base)
+
+            card.unit_tests_done = False
+            card.unit_tests_by = None
+            card.unit_tests_at = None
+            card.qa_done = False
+            card.qa_by = None
+            card.qa_at = None
+            branch_store.upsert_card(card, path=base)
+
+            stored_cards = branch_store.list_cards(path=base, sprint_ids=[sprint.id])
+            self.assertEqual(len(stored_cards), 1)
+            stored = stored_cards[0]
+            self.assertEqual(stored.unit_tests_url, "https://example.test/unit")
+            self.assertEqual(stored.qa_url, "https://example.test/qa")
+            self.assertFalse(stored.unit_tests_done)
+            self.assertIsNone(stored.unit_tests_by)
+            self.assertIsNone(stored.unit_tests_at)
+            self.assertFalse(stored.qa_done)
+            self.assertIsNone(stored.qa_by)
+            self.assertIsNone(stored.qa_at)
+
     def test_find_sprint_by_branch_key_returns_qa_match(self):
         with tempfile.TemporaryDirectory() as td:
             base = Path(td)

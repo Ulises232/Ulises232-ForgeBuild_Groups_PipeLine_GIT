@@ -35,6 +35,7 @@ from ..core.branch_store import (
     list_cards,
     list_sprints,
     list_users,
+    list_user_roles,
     load_index,
     upsert_card,
     upsert_sprint,
@@ -44,8 +45,8 @@ from ..core.git_tasks_local import create_branches_local
 from ..core.pipeline_history import PipelineHistory
 from ..core.session import current_username, get_active_user, require_roles
 from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
+from .sprint_helpers import filter_users_by_role
 from ..ui.icons import get_icon
-
 
 class SprintView(QWidget):
     """Single window to manage sprints and cards."""
@@ -56,6 +57,7 @@ class SprintView(QWidget):
         self._cards: Dict[int, Card] = {}
         self._branch_index: Dict[str, BranchRecord] = {}
         self._users: List[str] = []
+        self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
 
         self._selected_sprint_id: Optional[int] = None
@@ -267,6 +269,14 @@ class SprintView(QWidget):
         self.cboCardQA = QComboBox()
         form.addRow("QA", self.cboCardQA)
 
+        self.txtCardUnitUrl = QLineEdit()
+        self.txtCardUnitUrl.setPlaceholderText("https://...")
+        form.addRow("Link pruebas unitarias", self.txtCardUnitUrl)
+
+        self.txtCardQAUrl = QLineEdit()
+        self.txtCardQAUrl.setPlaceholderText("https://...")
+        form.addRow("Link QA", self.txtCardQAUrl)
+
         self.lblCardChecks = QLabel("Pruebas: pendiente | QA: pendiente")
         form.addRow("Checks", self.lblCardChecks)
 
@@ -313,9 +323,11 @@ class SprintView(QWidget):
     # ------------------------------------------------------------------
     def update_permissions(self) -> None:
         can_lead = require_roles("leader")
+        can_mark_unit = require_roles("developer", "leader")
         can_mark_qa = require_roles("qa", "leader")
         sprint_mode = self.stack.currentWidget() is self.pageSprint
         card_mode = self.stack.currentWidget() is self.pageCard
+        card = self._cards.get(self._selected_card_id or -1)
 
         self.btnNewSprint.setEnabled(can_lead)
 
@@ -325,11 +337,60 @@ class SprintView(QWidget):
         self.btnSprintDelete.setEnabled(can_lead and sprint_mode and self._selected_sprint_id is not None)
         self.chkSprintClosed.setEnabled(can_lead and sprint_mode)
 
-        self.btnCardMarkQA.setEnabled(card_mode and can_mark_qa)
-        if not can_mark_qa:
-            self.btnCardMarkQA.setToolTip("Solo QA o líderes pueden aprobar QA")
+        has_card = card is not None and card.id is not None
+        allow_unit_toggle = card_mode and has_card and can_mark_unit
+        allow_qa_toggle = card_mode and has_card and can_mark_qa
+
+        if card and card.unit_tests_done:
+            self.btnCardMarkUnit.setText("Desmarcar pruebas unitarias")
+        else:
+            self.btnCardMarkUnit.setText("Marcar pruebas unitarias")
+        self.btnCardMarkUnit.setEnabled(allow_unit_toggle)
+        if not allow_unit_toggle:
+            if card_mode and not has_card and can_mark_unit:
+                tooltip = "Guarda la tarjeta antes de actualizar las pruebas unitarias"
+            elif not can_mark_unit:
+                tooltip = (
+                    "Solo desarrolladores o líderes pueden actualizar las pruebas unitarias"
+                )
+            else:
+                tooltip = ""
+            self.btnCardMarkUnit.setToolTip(tooltip)
+        else:
+            self.btnCardMarkUnit.setToolTip("")
+
+        if card and card.qa_done:
+            self.btnCardMarkQA.setText("Desmarcar QA")
+        else:
+            self.btnCardMarkQA.setText("Marcar QA")
+        self.btnCardMarkQA.setEnabled(allow_qa_toggle)
+        if not allow_qa_toggle:
+            if card_mode and not has_card and can_mark_qa:
+                tooltip = "Guarda la tarjeta antes de actualizar las pruebas QA"
+            elif not can_mark_qa:
+                tooltip = "Solo QA o líderes pueden aprobar QA"
+            else:
+                tooltip = ""
+            self.btnCardMarkQA.setToolTip(tooltip)
         else:
             self.btnCardMarkQA.setToolTip("")
+
+        can_edit_unit_url = card_mode and can_mark_unit
+        can_edit_qa_url = card_mode and can_mark_qa
+        self.txtCardUnitUrl.setReadOnly(not can_edit_unit_url)
+        self.txtCardQAUrl.setReadOnly(not can_edit_qa_url)
+        if not can_edit_unit_url:
+            self.txtCardUnitUrl.setToolTip(
+                "Solo desarrolladores o líderes pueden registrar el enlace de pruebas unitarias"
+            )
+        else:
+            self.txtCardUnitUrl.setToolTip("")
+        if not can_edit_qa_url:
+            self.txtCardQAUrl.setToolTip(
+                "Solo QA o líderes pueden registrar el enlace de pruebas QA"
+            )
+        else:
+            self.txtCardQAUrl.setToolTip("")
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -350,12 +411,19 @@ class SprintView(QWidget):
                 self._cards[card.id] = card
 
         users = list_users(include_inactive=False)
-        self._users = [user.username for user in users]
+        self._users = sorted({user.username for user in users})
+        self._user_roles = list_user_roles()
 
         self._populate_user_combo(self.cboSprintLead, None)
-        self._populate_user_combo(self.cboSprintQA, None, allow_empty=True)
-        self._populate_user_combo(self.cboCardAssignee, None, allow_empty=True)
-        self._populate_user_combo(self.cboCardQA, None, allow_empty=True)
+        self._populate_user_combo(
+            self.cboSprintQA, None, allow_empty=True, required_role="qa"
+        )
+        self._populate_user_combo(
+            self.cboCardAssignee, None, allow_empty=True, required_role="developer"
+        )
+        self._populate_user_combo(
+            self.cboCardQA, None, allow_empty=True, required_role="qa"
+        )
 
         self._populate_tree()
         self._restore_selection()
@@ -490,14 +558,28 @@ class SprintView(QWidget):
                 return
 
     # ------------------------------------------------------------------
-    def _populate_user_combo(self, combo: QComboBox, current: Optional[str], allow_empty: bool = False) -> None:
+    def _populate_user_combo(
+        self,
+        combo: QComboBox,
+        current: Optional[str],
+        *,
+        allow_empty: bool = False,
+        required_role: Optional[str] = None,
+    ) -> None:
         combo.blockSignals(True)
         combo.clear()
-        names = list(self._users)
+        names = filter_users_by_role(self._users, self._user_roles, required_role)
+        added = set()
         if allow_empty:
             combo.addItem("", userData="")
         for name in names:
+            if name in added:
+                continue
             combo.addItem(name, userData=name)
+            added.add(name)
+        if current and current not in added:
+            combo.addItem(current, userData=current)
+            added.add(current)
         if current:
             index = combo.findText(current)
             if index >= 0:
@@ -614,7 +696,12 @@ class SprintView(QWidget):
         self.txtSprintName.setText(sprint.name)
         self.txtSprintVersion.setText(sprint.version)
         self._populate_user_combo(self.cboSprintLead, sprint.lead_user or None)
-        self._populate_user_combo(self.cboSprintQA, sprint.qa_user or None, allow_empty=True)
+        self._populate_user_combo(
+            self.cboSprintQA,
+            sprint.qa_user or None,
+            allow_empty=True,
+            required_role="qa",
+        )
         self.chkSprintClosed.setChecked(sprint.status == "closed")
         meta_lines = []
         if sprint.created_by:
@@ -642,8 +729,20 @@ class SprintView(QWidget):
         self.txtCardBranch.setText(suffix)
         self.txtCardTicket.setText(card.ticket_id or "")
         self.txtCardTitle.setText(card.title or "")
-        self._populate_user_combo(self.cboCardAssignee, card.assignee or None, allow_empty=True)
-        self._populate_user_combo(self.cboCardQA, card.qa_assignee or None, allow_empty=True)
+        self._populate_user_combo(
+            self.cboCardAssignee,
+            card.assignee or None,
+            allow_empty=True,
+            required_role="developer",
+        )
+        self._populate_user_combo(
+            self.cboCardQA,
+            card.qa_assignee or None,
+            allow_empty=True,
+            required_role="qa",
+        )
+        self.txtCardUnitUrl.setText(card.unit_tests_url or "")
+        self.txtCardQAUrl.setText(card.qa_url or "")
         checks = []
         checks.append("Pruebas: ✔" if card.unit_tests_done else "Pruebas: pendiente")
         checks.append("QA: ✔" if card.qa_done else "QA: pendiente")
@@ -898,6 +997,8 @@ class SprintView(QWidget):
         card.branch = branch_full
         card.assignee = self._combo_value(self.cboCardAssignee)
         card.qa_assignee = self._combo_value(self.cboCardQA)
+        card.unit_tests_url = self.txtCardUnitUrl.text().strip() or None
+        card.qa_url = self.txtCardQAUrl.text().strip() or None
         card.updated_at = now
         card.updated_by = user
 
@@ -960,24 +1061,57 @@ class SprintView(QWidget):
         now = int(time.time())
         history = PipelineHistory()
         if kind == "unit":
-            card.unit_tests_done = True
-            card.unit_tests_by = user
-            card.unit_tests_at = now
-            if card.status in (None, "", "pending"):
-                card.status = "unit"
-            history.update_card_status(card.id, unit_tests_status="done")
+            if not require_roles("developer", "leader"):
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    "Solo desarrolladores o líderes pueden actualizar las pruebas unitarias.",
+                )
+                return
+            toggled_on = not card.unit_tests_done
+            card.unit_tests_done = toggled_on
+            card.unit_tests_by = user if toggled_on else None
+            card.unit_tests_at = now if toggled_on else None
+            history.update_card_status(
+                card.id, unit_tests_status="done" if toggled_on else "pending"
+            )
         elif kind == "qa":
             if not require_roles("qa", "leader"):
                 QMessageBox.warning(self, "Tarjeta", "No tienes permisos para aprobar QA")
                 return
-            card.qa_done = True
-            card.qa_by = user
-            card.qa_at = now
-            card.status = "qa"
-            history.update_card_status(card.id, qa_status="approved", approved_by=user)
+            toggled_on = not card.qa_done
+            card.qa_done = toggled_on
+            card.qa_by = user if toggled_on else None
+            card.qa_at = now if toggled_on else None
+            history.update_card_status(
+                card.id,
+                qa_status="approved" if toggled_on else "pending",
+                approved_by=user if toggled_on else "",
+            )
         card.updated_at = now
         card.updated_by = user
+        if card.qa_done and card.unit_tests_done:
+            card.status = "qa"
+        elif card.unit_tests_done:
+            card.status = "unit"
+        else:
+            card.status = "pending"
         upsert_card(card)
+        if card.id is not None:
+            self._cards[card.id] = card
+        checks = []
+        checks.append("Pruebas: ✔" if card.unit_tests_done else "Pruebas: pendiente")
+        checks.append("QA: ✔" if card.qa_done else "QA: pendiente")
+        self.lblCardChecks.setText(" | ".join(checks))
+        current_item = self.tree.currentItem()
+        if current_item and current_item.data(0, Qt.UserRole) == ("card", card.id):
+            card_checks = [
+                "Unit ✔" if card.unit_tests_done else "Unit ✖",
+                "QA ✔" if card.qa_done else "QA ✖",
+                "Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖",
+            ]
+            current_item.setText(3, " / ".join(card_checks))
+        self.update_permissions()
         self._cards[card.id] = card
         self.refresh()
         if card.id:

@@ -67,6 +67,8 @@ CARD_COLUMNS = [
     "assignee",
     "qa_assignee",
     "description",
+    "unit_tests_url",
+    "qa_url",
     "unit_tests_done",
     "qa_done",
     "unit_tests_by",
@@ -115,6 +117,8 @@ CREATE TABLE {if_not_exists}{table} (
     assignee TEXT,
     qa_assignee TEXT,
     description TEXT,
+    unit_tests_url TEXT,
+    qa_url TEXT,
     unit_tests_done INTEGER NOT NULL DEFAULT 0,
     qa_done INTEGER NOT NULL DEFAULT 0,
     unit_tests_by TEXT,
@@ -167,6 +171,8 @@ class Card:
     assignee: Optional[str] = None
     qa_assignee: Optional[str] = None
     description: str = ""
+    unit_tests_url: Optional[str] = None
+    qa_url: Optional[str] = None
     unit_tests_done: bool = False
     qa_done: bool = False
     unit_tests_by: Optional[str] = None
@@ -401,6 +407,8 @@ class BranchHistoryDB:
             "assignee": "NULL",
             "qa_assignee": "NULL",
             "description": "''",
+            "unit_tests_url": "NULL",
+            "qa_url": "NULL",
             "unit_tests_done": "0",
             "qa_done": "0",
             "unit_tests_by": "NULL",
@@ -673,11 +681,11 @@ class BranchHistoryDB:
                 """
                 INSERT INTO cards (
                     id, sprint_id, branch_key, title, ticket_id, branch, assignee, qa_assignee, description,
-                    unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at, qa_at, status,
+                    unit_tests_url, qa_url, unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at, qa_at, status,
                     branch_created_by, branch_created_at, created_at, created_by, updated_at, updated_by
                 ) VALUES (
                     :id, :sprint_id, :branch_key, :title, :ticket_id, :branch, :assignee, :qa_assignee, :description,
-                    :unit_tests_done, :qa_done, :unit_tests_by, :qa_by, :unit_tests_at, :qa_at, :status,
+                    :unit_tests_url, :qa_url, :unit_tests_done, :qa_done, :unit_tests_by, :qa_by, :unit_tests_at, :qa_at, :status,
                     :branch_created_by, :branch_created_at, :created_at, :created_by, :updated_at, :updated_by
                 )
                 ON CONFLICT(id) DO UPDATE SET
@@ -689,6 +697,8 @@ class BranchHistoryDB:
                     assignee = excluded.assignee,
                     qa_assignee = excluded.qa_assignee,
                     description = excluded.description,
+                    unit_tests_url = excluded.unit_tests_url,
+                    qa_url = excluded.qa_url,
                     unit_tests_done = excluded.unit_tests_done,
                     qa_done = excluded.qa_done,
                     unit_tests_by = excluded.unit_tests_by,
@@ -859,6 +869,8 @@ class BranchHistoryDB:
             "assignee": payload.get("assignee"),
             "qa_assignee": payload.get("qa_assignee"),
             "description": payload.get("description") or "",
+            "unit_tests_url": (payload.get("unit_tests_url") or "").strip() or None,
+            "qa_url": (payload.get("qa_url") or "").strip() or None,
             "unit_tests_done": 1 if payload.get("unit_tests_done") else 0,
             "qa_done": 1 if payload.get("qa_done") else 0,
             "unit_tests_by": payload.get("unit_tests_by"),

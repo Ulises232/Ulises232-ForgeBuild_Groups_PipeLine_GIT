@@ -13,6 +13,11 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   muestran su presencia local/origin y registran al creador desde el historial NAS.
 - Los sprints almacenan también la rama QA asociada para dirigir la creación de
   tarjetas y validar los flujos de revisión.
+- Campos de evidencia para registrar los enlaces de pruebas unitarias y QA en cada
+  tarjeta, editables únicamente por el rol correspondiente o el líder del equipo.
+- Los combos de asignación filtran desarrolladores y QA según su rol e incorporan
+  toggles que permiten marcar o desmarcar las pruebas unitarias/QA respetando los
+  permisos del usuario y actualizando el historial de pipelines.
 
 ### Corregido
 - La inicialización de `branch_history_db.sqlite3` omite la creación temprana del índice de sprints
