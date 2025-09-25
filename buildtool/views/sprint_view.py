@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import time
 from dataclasses import replace
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -423,16 +423,23 @@ class SprintView(QWidget):
         return self._branch_index.get(branch_key)
 
     # ------------------------------------------------------------------
-    def _build_card_branch_key(self, card: Card, sprint: Sprint) -> Optional[str]:
-        if not sprint.branch_key:
-            return None
-        parts = sprint.branch_key.split("/", 2)
+    def _split_branch_key(
+        self, branch_key: Optional[str]
+    ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        if not branch_key:
+            return None, None, None
+        parts = branch_key.split("/", 2)
         if len(parts) == 1:
-            group, project = parts[0], ""
-        elif len(parts) == 2:
-            group, project = parts[0], parts[1]
-        else:
-            group, project = parts[0], parts[1]
+            return None, None, parts[0] or None
+        if len(parts) == 2:
+            return parts[0] or None, None, parts[1] or None
+        return parts[0] or None, parts[1] or None, parts[2] or None
+
+    # ------------------------------------------------------------------
+    def _build_card_branch_key(self, card: Card, sprint: Sprint) -> Optional[str]:
+        group, project, _ = self._split_branch_key(sprint.branch_key)
+        if group is None and project is None and not (sprint.branch_key or "").strip():
+            return None
         branch = (card.branch or "").strip()
         if not branch:
             return None
@@ -928,20 +935,28 @@ class SprintView(QWidget):
             QMessageBox.warning(self, "Tarjeta", "La tarjeta no tiene un nombre de rama válido.")
             return
         branch_key = card.branch_key or self._build_card_branch_key(card, sprint)
-        group_key, project_key = None, None
-        if branch_key:
-            parts = branch_key.split("/", 2)
-            if len(parts) >= 1:
-                group_key = parts[0] or None
-            if len(parts) >= 2:
-                project_key = parts[1] or None
+        group_key, project_key, base_branch = self._split_branch_key(branch_key)
+        if not base_branch:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "El sprint no tiene una rama base configurada para crear tarjetas.",
+            )
+            return
         logs: List[str] = []
 
         def emit(msg: str) -> None:
             logs.append(msg)
 
         try:
-            ok = create_branches_local(self._cfg, group_key, project_key, branch_name, emit=emit)
+            ok = create_branches_local(
+                self._cfg,
+                group_key,
+                project_key,
+                branch_name,
+                emit=emit,
+                base_branch=base_branch,
+            )
         except Exception as exc:  # pragma: no cover
             QMessageBox.critical(self, "Tarjeta", f"Error al crear la rama: {exc}")
             return

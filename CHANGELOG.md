@@ -27,6 +27,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   por defecto esperados por la nueva UI de planeación.
 - La vista de sprints permite escoger la rama base a partir del grupo y maneja de forma segura
   el alta cuando la rama ya no existe, evitando violaciones de llave foránea al crear nuevos sprints.
+- La creación de ramas desde tarjetas parte siempre de la rama base configurada en el sprint,
+  evitando que se generen ramas huérfanas desde `HEAD` al trabajar múltiples módulos.
 
 ### Cambiado
 - La vista de sprints permite editar sprints solo para líderes y tarjetas para cualquier usuario,
