@@ -804,6 +804,12 @@ class BranchHistoryDB:
                 sqlite_path = path
             return _SQLiteBackend(sqlite_path)
         if scheme.startswith("mssql"):
+            if pyodbc is None:
+                raise RuntimeError(
+                    "BRANCH_HISTORY_URL apunta a SQL Server pero la dependencia opcional "
+                    "'pyodbc' no está instalada. Instálala o limpia la variable para usar "
+                    "SQLite."
+                )
             if parsed.scheme.lower().startswith("mssql+pyodbc"):
                 query = parse_qs(parsed.query)
                 if "odbc_connect" in query:

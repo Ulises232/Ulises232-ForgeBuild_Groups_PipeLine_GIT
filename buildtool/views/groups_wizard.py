@@ -413,6 +413,13 @@ class GroupEditor(QWidget):
         env_form.addWidget(QLabel("Variable:"), 0, 0); env_form.addWidget(self.txtEnvKey, 0, 1)
         env_form.addWidget(QLabel("Valor:"), 1, 0); env_form.addWidget(self.txtEnvValue, 1, 1)
 
+        self.txtBranchHistoryUrl = QLineEdit()
+        self.txtBranchHistoryUrl.setPlaceholderText(
+            "mssql+pyodbc://usuario:pass@servidor/base?driver=ODBC+Driver+17+for+SQL+Server"
+        )
+        env_form.addWidget(QLabel("Branch history URL:"), 2, 0)
+        env_form.addWidget(self.txtBranchHistoryUrl, 2, 1)
+
         env_btns = QHBoxLayout()
         self.btnEnvSave = QPushButton("Guardar variable")
         self.btnEnvDelete = QPushButton("Eliminar")
@@ -421,7 +428,7 @@ class GroupEditor(QWidget):
         env_btns.addWidget(self.btnEnvDelete)
         env_btns.addWidget(self.btnEnvClear)
         env_btns.addStretch(1)
-        env_form.addLayout(env_btns, 2, 0, 1, 2)
+        env_form.addLayout(env_btns, 3, 0, 1, 2)
 
         env_grid.addLayout(env_form, 0, 1, 4, 1)
         main.addWidget(env_box)
@@ -581,6 +588,7 @@ class GroupEditor(QWidget):
         self.btnEnvClear.clicked.connect(self._clear_env_fields)
         self.txtEnvValue.editingFinished.connect(self._auto_apply_env_value)
         self.txtEnvKey.editingFinished.connect(self._auto_rename_env_key)
+        self.txtBranchHistoryUrl.editingFinished.connect(self._save_branch_history_url)
 
         self.tabs.currentChanged.connect(lambda _: self._save(silent=True))
 
@@ -603,6 +611,12 @@ class GroupEditor(QWidget):
             self.cfg.environment = env
         return env
 
+    def _branch_history_key(self) -> str:
+        return "BRANCH_HISTORY_URL"
+
+    def _branch_history_url(self) -> str:
+        return self._env_map().get(self._branch_history_key(), "")
+
     def _refresh_env_list(self, select_key: Optional[str] = None):
         env = self._env_map()
         items = sorted(env.items(), key=lambda kv: kv[0].lower())
@@ -614,6 +628,7 @@ class GroupEditor(QWidget):
             item.setData(Qt.UserRole, key)
             self.lstEnv.addItem(item)
         self.lstEnv.blockSignals(False)
+        self.txtBranchHistoryUrl.setText(self._branch_history_url())
         if select_key:
             self._select_env_key(select_key)
         elif self.lstEnv.count():
@@ -716,6 +731,24 @@ class GroupEditor(QWidget):
         self.cfg.environment = env
         save_config(self.cfg)
         self._refresh_env_list(select_key=new_key)
+
+    def _save_branch_history_url(self):
+        key = self._branch_history_key()
+        value = self.txtBranchHistoryUrl.text().strip()
+        env = dict(self._env_map())
+        changed = False
+        if value:
+            if env.get(key, "") != value:
+                env[key] = value
+                changed = True
+        elif key in env:
+            env.pop(key, None)
+            changed = True
+        if not changed:
+            return
+        self.cfg.environment = env
+        save_config(self.cfg)
+        self._refresh_env_list(select_key=key if value else None)
 
     # --------------- Group handlers ---------------
 

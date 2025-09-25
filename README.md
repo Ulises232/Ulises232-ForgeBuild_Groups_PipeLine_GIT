@@ -153,10 +153,11 @@ Usa `environment` para centralizar configuraciones como rutas de Maven/Java, pro
 
 ### 4.7 Persistencia de `branch_history`
 - Por defecto la aplicación crea `branches_history.sqlite3` en la carpeta local y en la NAS configurada. Ese comportamiento se mantiene cuando **no** defines ninguna variable adicional.
-- Para utilizar un backend centralizado (por ejemplo, SQL Server 2019) exporta la variable `BRANCH_HISTORY_URL` antes de iniciar ForgeBuild. Acepta los siguientes formatos:
+- Para utilizar un backend centralizado (por ejemplo, SQL Server 2019) define la variable `BRANCH_HISTORY_URL` antes de iniciar ForgeBuild. Puedes hacerlo desde el asistente (**Config/Wizard → Variables de entorno → Branch history URL**) o exportándola manualmente. Acepta los siguientes formatos:
   - `sqlite:///ruta/al/archivo.sqlite3`: fuerza a utilizar un archivo concreto (útil para pruebas o contenedores).
-  - `mssql+pyodbc:///?odbc_connect=Driver%3D%7BODBC+Driver+17+for+SQL+Server%7D%3BServer%3Dsql.local%3BDatabase%3Dforgebuild%3BUID%3Dusuario%3BPWD%3Dsecreto%3B`: reutiliza un DSN ODBC estándar. También puedes usar la forma `mssql+pyodbc://usuario:secreto@sql.local/forgebuild?driver=ODBC+Driver+17+for+SQL+Server`.
-- Cuando el backend apunta a SQL Server, la capa de persistencia reutiliza un pool de conexiones (`pyodbc`) y aplica `BIT`/`NVARCHAR` según el esquema soportado por SQL Server 2019.
+- `mssql+pyodbc:///?odbc_connect=Driver%3D%7BODBC+Driver+17+for+SQL+Server%7D%3BServer%3Dsql.local%3BDatabase%3Dforgebuild%3BUID%3Dusuario%3BPWD%3Dsecreto%3B`: reutiliza un DSN ODBC estándar. También puedes usar la forma `mssql+pyodbc://usuario:secreto@sql.local/forgebuild?driver=ODBC+Driver+17+for+SQL+Server`.
+- Cuando el backend apunta a SQL Server, la capa de persistencia reutiliza un pool de conexiones (`pyodbc`) y aplica `BIT`/`NVARCHAR` según el esquema soportado por SQL Server 2019. Si no quieres instalar el driver ODBC ni la librería `pyodbc`, simplemente deja vacía la variable (o usa un esquema `sqlite:///...`) y ForgeBuild seguirá operando con archivos SQLite.
+- La librería `pyodbc` es opcional y solo se requiere si vas a conectarte a SQL Server; instálala manualmente (`pip install pyodbc`) junto con el driver ODBC correspondiente en el entorno donde correrá la aplicación.
 - El repositorio incluye `buildtool/scripts/migrate_branch_history_sqlserver.py`, que copia el contenido de un `branches_history.sqlite3` existente hacia el servidor indicado. Ejecuta:
 
   ```bash
