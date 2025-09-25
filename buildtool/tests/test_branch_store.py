@@ -344,6 +344,29 @@ class LoadIndexTest(unittest.TestCase):
             self.assertEqual(len(stored), 1)
             self.assertEqual(stored[0].branch_key, "ellis/proyecto/v2.68_feature/test")
 
+    def test_find_sprint_by_branch_key_returns_qa_match(self):
+        with tempfile.TemporaryDirectory() as td:
+            base = Path(td)
+            now = int(time.time())
+            sprint = branch_store.Sprint(
+                id=None,
+                branch_key="ellis/proyecto/v2.68",
+                qa_branch_key="ellis/proyecto/v2.68_QA",
+                name="Sprint QA",
+                version="2.68",
+                created_at=now,
+                created_by="alice",
+                updated_at=now,
+                updated_by="alice",
+            )
+            branch_store.upsert_sprint(sprint, path=base)
+            found = branch_store.find_sprint_by_branch_key(
+                "ellis/proyecto/v2.68_QA", path=base
+            )
+            self.assertIsNotNone(found)
+            if found:
+                self.assertEqual(found.id, sprint.id)
+
 
 if __name__ == "__main__":
     unittest.main()

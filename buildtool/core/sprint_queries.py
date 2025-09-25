@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from .branch_store import (
@@ -8,6 +9,8 @@ from .branch_store import (
     Card,
     list_sprints,
     list_cards,
+    get_sprint as _get_sprint,
+    find_sprint_by_branch_key,
     load_index,
     BranchRecord,
 )
@@ -33,8 +36,35 @@ def cards_for_branch(branch: str) -> List[Card]:
     return list_cards(branches=[branch])
 
 
-def cards_for_sprint(sprint_id: int) -> List[Card]:
-    return list_cards(sprint_ids=[sprint_id])
+def cards_for_sprint(sprint_id: int, *, path: Optional[Path] = None) -> List[Card]:
+    return list_cards(sprint_ids=[sprint_id], path=path)
+
+
+def get_sprint(sprint_id: int, *, path: Optional[Path] = None) -> Optional[Sprint]:
+    return _get_sprint(sprint_id, path=path)
+
+
+def sprint_branch_name(sprint: Optional[Sprint]) -> Optional[str]:
+    if not sprint or not sprint.branch_key:
+        return None
+    return sprint.branch_key.split("/")[-1] or None
+
+
+def sprint_qa_branch_name(sprint: Optional[Sprint]) -> Optional[str]:
+    if not sprint or not sprint.qa_branch_key:
+        return None
+    return sprint.qa_branch_key.split("/")[-1] or None
+
+
+def find_sprint_by_branch(branch_identifier: str, *, path: Optional[Path] = None) -> Optional[Sprint]:
+    return find_sprint_by_branch_key(branch_identifier, path=path)
+
+
+def cards_pending_release(sprint_id: int, *, path: Optional[Path] = None) -> List[Card]:
+    if sprint_id is None:
+        return []
+    cards = cards_for_sprint(sprint_id, path=path)
+    return [card for card in cards if not (card.unit_tests_done and card.qa_done)]
 
 
 def find_card_by_branch(branch_name: str) -> Optional[Card]:

@@ -40,6 +40,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - El divisor de la vista de planeación mantiene más ancho el panel izquierdo (3/3 con tamaño inicial
   860/520) y amplía el máximo del panel de detalle, facilitando la lectura de columnas sin que la ficha
   se imponga por su tamaño mínimo.
+- Las validaciones de merge en la vista Git permiten integrar tarjetas a la rama QA con solo pruebas
+  unitarias aprobadas, bloquean merges directos contra la rama madre y exigen que todas las tarjetas del
+  sprint tengan QA y unitarias antes de liberar la rama QA hacia la versión.
 
 ## [1.5.0] - 2025-10-05
 ### Añadido

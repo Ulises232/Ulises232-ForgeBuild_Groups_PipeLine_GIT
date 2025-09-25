@@ -589,6 +589,17 @@ class BranchHistoryDB:
             ).fetchone()
         return dict(row) if row else None
 
+    def fetch_sprint_by_branch_key(self, branch_key: str) -> Optional[dict]:
+        key = (branch_key or "").strip()
+        if not key:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sprints WHERE branch_key = ? OR qa_branch_key = ?",
+                (key, key),
+            ).fetchone()
+        return dict(row) if row else None
+
     def upsert_sprint(self, payload: dict) -> int:
         data = self._normalize_sprint(payload)
         with self._connect() as conn:

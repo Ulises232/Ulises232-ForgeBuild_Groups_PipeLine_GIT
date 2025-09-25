@@ -424,6 +424,20 @@ def list_sprints(*, branch_keys: Optional[Iterable[str]] = None, path: Optional[
     return [_row_to_sprint(row) for row in rows]
 
 
+def get_sprint(sprint_id: int, *, path: Optional[Path] = None) -> Optional[Sprint]:
+    if sprint_id is None:
+        return None
+    base = _resolve_base(path)
+    row = _get_db(base).fetch_sprint(int(sprint_id))
+    return _row_to_sprint(row) if row else None
+
+
+def find_sprint_by_branch_key(branch_key: str, *, path: Optional[Path] = None) -> Optional[Sprint]:
+    base = _resolve_base(path)
+    row = _get_db(base).fetch_sprint_by_branch_key(branch_key)
+    return _row_to_sprint(row) if row else None
+
+
 def _split_branch_key(value: Optional[str]) -> tuple[Optional[str], Optional[str], Optional[str]]:
     if not value:
         return (None, None, None)
