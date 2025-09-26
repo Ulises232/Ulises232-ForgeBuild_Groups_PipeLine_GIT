@@ -574,7 +574,7 @@ class _SqlServerBranchHistory:
             IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'branch_local_users')
             BEGIN
                 CREATE TABLE branch_local_users (
-                    branch_key NVARCHAR(512) NOT NULL,
+                    branch_key NVARCHAR(255) NOT NULL,
                     username NVARCHAR(255) NOT NULL,
                     state NVARCHAR(32) NOT NULL DEFAULT 'absent',
                     location NVARCHAR(1024) NULL,
@@ -582,6 +582,47 @@ class _SqlServerBranchHistory:
                     CONSTRAINT pk_branch_local_users PRIMARY KEY (branch_key, username),
                     CONSTRAINT fk_branch_local_users_branch FOREIGN KEY (branch_key) REFERENCES branches([key]) ON DELETE CASCADE
                 );
+            END
+            """,
+            """
+            IF COL_LENGTH('branch_local_users', 'branch_key') IS NOT NULL
+                AND COL_LENGTH('branch_local_users', 'branch_key') <> 255
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE name = 'idx_branch_local_users_username'
+                        AND object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    DROP INDEX idx_branch_local_users_username ON branch_local_users;
+                END
+                IF EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE name = 'idx_branch_local_users_state'
+                        AND object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    DROP INDEX idx_branch_local_users_state ON branch_local_users;
+                END
+                IF EXISTS (
+                    SELECT 1 FROM sys.foreign_keys
+                    WHERE name = 'fk_branch_local_users_branch'
+                        AND parent_object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    ALTER TABLE branch_local_users DROP CONSTRAINT fk_branch_local_users_branch;
+                END
+                IF EXISTS (
+                    SELECT 1 FROM sys.key_constraints
+                    WHERE name = 'pk_branch_local_users'
+                        AND parent_object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    ALTER TABLE branch_local_users DROP CONSTRAINT pk_branch_local_users;
+                END
+                ALTER TABLE branch_local_users ALTER COLUMN branch_key NVARCHAR(255) NOT NULL;
+                ALTER TABLE branch_local_users ADD CONSTRAINT pk_branch_local_users PRIMARY KEY (branch_key, username);
+                ALTER TABLE branch_local_users WITH CHECK ADD CONSTRAINT fk_branch_local_users_branch FOREIGN KEY (branch_key) REFERENCES branches([key]) ON DELETE CASCADE;
             END
             """,
             """
