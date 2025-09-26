@@ -1312,8 +1312,12 @@ class _SqlServerBranchHistory:
         data: Dict[str, object],
         columns: Sequence[str],
     ) -> int:
-        setters = ", ".join(f"{col}=%s" for col in columns if col != key_column)
-        update_sql = f"UPDATE {table} SET {setters} WHERE {key_column}=%s"
+        quoted_table = self._quote_identifier(table)
+        quoted_key = self._quote_identifier(key_column)
+        setters = ", ".join(
+            f"{self._quote_identifier(col)}=%s" for col in columns if col != key_column
+        )
+        update_sql = f"UPDATE {quoted_table} SET {setters} WHERE {quoted_key}=%s"
         update_params = [data.get(col) for col in columns if col != key_column]
         update_params.append(data.get(key_column))
         cursor.execute(update_sql, tuple(update_params))
@@ -1328,13 +1332,23 @@ class _SqlServerBranchHistory:
         if key_column == "id" and not data.get("id"):
             insert_columns = [col for col in columns if col != "id"]
         placeholders = ",".join("%s" for _ in insert_columns)
-        insert_sql = f"INSERT INTO {table} ({', '.join(insert_columns)}) VALUES ({placeholders})"
+        quoted_insert_cols = [self._quote_identifier(col) for col in insert_columns]
+        insert_sql = (
+            f"INSERT INTO {quoted_table} ({', '.join(quoted_insert_cols)}) VALUES ({placeholders})"
+        )
         cursor.execute(insert_sql, tuple(data.get(col) for col in insert_columns))
         if key_column == "id":
             cursor.execute("SELECT SCOPE_IDENTITY() AS id")
             row = cursor.fetchone()
             return int(row["id"]) if row and row.get("id") is not None else 0
         return int(data.get(key_column) or 0)
+
+    @staticmethod
+    def _quote_identifier(identifier: str) -> str:
+        identifier = identifier.strip()
+        if identifier.startswith("[") and identifier.endswith("]"):
+            return identifier
+        return f"[{identifier}]"
 
     # ------------------------------------------------------------------
     # API pública

@@ -14,6 +14,10 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - `branch_store` detecta automáticamente cuando el backend es SQL Server y omite el modo offline/NAS, operando solo en línea.
 - `README` y `.env` documentan la nueva configuración del backend y dependencias requeridas.
 
+### Corregido
+- Las operaciones genéricas de inserción/actualización citan los identificadores en SQL Server, evitando errores de sintaxis con
+  columnas reservadas como `key` al inicializar roles y usuarios.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la
