@@ -263,7 +263,7 @@ class UserAdminView(QWidget):
             self.txtUsername.text().strip() or "nuevo",
             self,
             title="Contraseña inicial",
-            message="Define una contraseña temporal para el nuevo usuario.",
+            message="Define una contraseña temporal con al menos 7 caracteres, una letra mayúscula y un número.",
         )
         if dialog.exec() == QDialog.Accepted and dialog.password:
             self._pending_password = dialog.password

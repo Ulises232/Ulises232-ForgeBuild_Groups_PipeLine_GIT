@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Slot
@@ -35,6 +38,13 @@ _DEFAULT_ROLES = [
     Role(key="leader", name="Líder"),
     Role(key="admin", name="Administrador"),
 ]
+
+
+def _login_cache_path() -> Path:
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "ForgeBuild" / "login_cache.json"
+    return Path.home() / ".forgebuild" / "login_cache.json"
 
 
 class PasswordDialog(QDialog):
@@ -93,16 +103,12 @@ class PasswordDialog(QDialog):
         password = self.txtPassword.text()
         confirm = self.txtConfirm.text()
         errors: List[str] = []
-        if len(password) < 8:
-            errors.append("Debe tener al menos 8 caracteres.")
+        if len(password) < 7:
+            errors.append("Debe tener al menos 7 caracteres.")
         if not re.search(r"[A-Z]", password):
             errors.append("Incluye al menos una letra mayúscula.")
-        if not re.search(r"[a-z]", password):
-            errors.append("Incluye al menos una letra minúscula.")
         if not re.search(r"\d", password):
             errors.append("Incluye al menos un número.")
-        if not re.search(r"[^A-Za-z0-9]", password):
-            errors.append("Incluye al menos un carácter especial.")
         if self._forbid and password == self._forbid:
             errors.append("La nueva contraseña debe ser diferente a la anterior.")
         if password != confirm:
@@ -130,7 +136,11 @@ class UserLoginDialog(QDialog):
         self.setWindowTitle("Seleccionar usuario")
         self.resize(380, 240)
         self._users: Dict[str, User] = {}
+        self._cached_username: Optional[str] = None
+        self._cached_password: Optional[str] = None
+        self._pending_prefill: Optional[str] = None
         self._setup_ui()
+        self._load_cached_credentials()
         self._ensure_default_roles()
         self._load_users()
 
@@ -188,8 +198,16 @@ class UserLoginDialog(QDialog):
             self.cboUser.addItem(f"{user.display_name} ({user.username})", user.username)
         self.cboUser.blockSignals(False)
         if users:
-            self.cboUser.setCurrentIndex(0)
-            self._on_user_changed(0)
+            index = 0
+            if self._cached_username and self._cached_username in self._users:
+                cached_index = self.cboUser.findData(self._cached_username)
+                if cached_index != -1:
+                    index = cached_index
+                    self._pending_prefill = self._cached_password or ""
+            self.cboUser.blockSignals(True)
+            self.cboUser.setCurrentIndex(index)
+            self.cboUser.blockSignals(False)
+            self._on_user_changed(index)
         else:
             self._update_user_hint(None)
 
@@ -212,7 +230,11 @@ class UserLoginDialog(QDialog):
     def _on_user_changed(self, index: int) -> None:
         username = self.cboUser.itemData(index)
         user = self._users.get(username)
-        self.txtPassword.clear()
+        if self._pending_prefill is not None:
+            self.txtPassword.setText(self._pending_prefill)
+            self._pending_prefill = None
+        else:
+            self.txtPassword.clear()
         self.lblError.hide()
         self._update_user_hint(user)
 
@@ -235,7 +257,11 @@ class UserLoginDialog(QDialog):
                 username,
                 self,
                 title="Crear contraseña" if result.status == "password_required" else "Restablecer contraseña",
-                message="Define una contraseña segura para continuar." if result.status == "password_required" else "Debes actualizar tu contraseña antes de entrar.",
+                message=(
+                    "Define una contraseña con al menos 7 caracteres, una letra mayúscula y un número para continuar."
+                    if result.status == "password_required"
+                    else "Debes actualizar tu contraseña antes de entrar. Usa al menos 7 caracteres, una letra mayúscula y un número."
+                ),
                 forbid_password=current_password or None,
             )
             if dialog.exec() != QDialog.Accepted or not dialog.password:
@@ -268,8 +294,33 @@ class UserLoginDialog(QDialog):
         mapping = list_user_roles(username)
         roles = set(mapping.get(username, []))
         set_active_user(user, roles)
+        self._cached_username = username
+        self._cached_password = password
+        self._save_cached_credentials(username, password)
         self.txtPassword.clear()
         super().accept()
+
+    # ------------------------------------------------------------------
+    def _load_cached_credentials(self) -> None:
+        path = _login_cache_path()
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self._cached_username = data.get("username") or None
+                self._cached_password = data.get("password") or None
+        except Exception:
+            self._cached_username = None
+            self._cached_password = None
+
+    # ------------------------------------------------------------------
+    def _save_cached_credentials(self, username: str, password: str) -> None:
+        path = _login_cache_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"username": username, "password": password}
+            path.write_text(json.dumps(payload), encoding="utf-8")
+        except Exception:
+            pass
 
 
 __all__ = ["UserLoginDialog", "PasswordDialog"]

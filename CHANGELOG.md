@@ -11,6 +11,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Tabla `branch_local_users` en SQL Server para registrar la presencia local de cada rama por usuario y exponerla mediante `load_local_states` y nuevas pruebas automatizadas.
 - Autenticación de usuarios con contraseñas seguras PBKDF2, campos de hash/salt y banderas de restablecimiento obligatorio desde `branch_store.authenticate_user`.
 - Módulo de administración de usuarios (`UserAdminView`) visible sólo para el rol `admin`, con altas, edición de roles, desactivación y solicitud de restablecimiento de contraseña.
+- El diálogo de inicio de sesión recuerda las credenciales en AppData para precargarlas automáticamente al abrir la aplicación.
 
 ### Cambiado
 - `BranchHistoryView` y la pestaña Git muestran un único historial respaldado por SQL Server, eliminando los flujos de sincronización NAS y adoptando el registro de actividad renombrado.
@@ -18,6 +19,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Solo los líderes pueden eliminar ramas desde el historial y la acción borra inmediatamente el registro en SQL Server.
 - Las ramas creadas únicamente en local permanecen visibles solo para su autor hasta que existen en origin.
 - El diálogo de inicio de sesión exige contraseña, gestiona restablecimientos forzados y oculta controles de roles/altas directas.
+- Las contraseñas ahora requieren al menos 7 caracteres, una letra mayúscula y un número, sin obligar minúsculas ni caracteres especiales.
 - `list_users` excluye usuarios deshabilitados por defecto y las bajas marcan el estado inactivo en lugar de eliminar filas.
 
 ### Corregido
