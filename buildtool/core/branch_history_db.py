@@ -1221,7 +1221,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             IF OBJECT_ID('branches', 'U') IS NULL
             BEGIN
                 CREATE TABLE branches (
-                    key NVARCHAR(512) NOT NULL PRIMARY KEY,
+                    [key] NVARCHAR(512) NOT NULL PRIMARY KEY,
                     branch NVARCHAR(255) NOT NULL,
                     group_name NVARCHAR(255) NULL,
                     project NVARCHAR(255) NULL,
@@ -1387,7 +1387,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
     # ------------------------------------------------------------------
     # branches
     def fetch_branches(self, *, filter_origin: bool = False) -> List[dict]:
-        sql = "SELECT key, branch, group_name, project, created_at, created_by, exists_local, exists_origin, merge_status, diverged, stale_days, last_action, last_updated_at, last_updated_by FROM branches"
+        sql = "SELECT [key] AS key, branch, group_name, project, created_at, created_by, exists_local, exists_origin, merge_status, diverged, stale_days, last_action, last_updated_at, last_updated_by FROM branches"
         if filter_origin:
             sql += " WHERE exists_origin = 1"
         with self._connection() as conn:
@@ -1410,7 +1410,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     cursor.execute(
                         """
                         INSERT INTO branches (
-                            key, branch, group_name, project, created_at, created_by,
+                            [key], branch, group_name, project, created_at, created_by,
                             exists_local, exists_origin, merge_status, diverged,
                             stale_days, last_action, last_updated_at, last_updated_by
                         ) VALUES (
@@ -1445,7 +1445,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                         last_action = @last_action,
                         last_updated_at = @last_updated_at,
                         last_updated_by = @last_updated_by
-                    WHERE key = @key
+                    WHERE [key] = @key
                     """,
                     data,
                 )
@@ -1454,7 +1454,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     INSERT INTO branches (
-                        key, branch, group_name, project, created_at, created_by,
+                        [key], branch, group_name, project, created_at, created_by,
                         exists_local, exists_origin, merge_status, diverged,
                         stale_days, last_action, last_updated_at, last_updated_by
                     ) VALUES (
@@ -1472,7 +1472,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM branches WHERE key = @key", {"key": key})
+                cursor.execute("DELETE FROM branches WHERE [key] = @key", {"key": key})
             finally:
                 cursor.close()
 
@@ -1881,14 +1881,11 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("SELECT [key], name, description FROM roles ORDER BY name")
+                cursor.execute("SELECT [key] AS key, name, description FROM roles ORDER BY name")
                 rows = cursor.fetchall()
                 data = _rows_to_dicts(cursor, rows)
             finally:
                 cursor.close()
-        for item in data:
-            if "[key]" in item and "key" not in item:
-                item["key"] = item.pop("[key]")
         return data
 
     def upsert_role(self, payload: dict) -> None:

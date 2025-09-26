@@ -17,6 +17,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Corregido
 - Se implementa `ensure_schema` en el backend SQLite para evitar errores al inicializar la aplicación cuando se usa la base local.
 - La importación opcional de `python-tds` usa `pytds` como módulo real, eliminando el falso positivo que indicaba que el paquete no estaba instalado.
+- La tabla `branches` del backend SQL Server escapa la columna `key` y las consultas asociadas para evitar errores de sintaxis al crear el esquema.
 
 ## [1.5.1] - 2025-10-06
 
