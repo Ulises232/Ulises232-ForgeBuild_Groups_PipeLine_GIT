@@ -9,7 +9,7 @@ import hmac
 import os
 import time
 
-from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
+from .branch_history_db import BranchHistoryDB, Sprint, Card, CardStage, User, Role
 from .session import current_username
 
 
@@ -306,6 +306,8 @@ def _row_to_sprint(row: dict) -> Sprint:
 def _row_to_card(row: dict) -> Card:
     unit_ts_at = row.get("unit_tests_at")
     qa_at = row.get("qa_at")
+    stages_payload = row.get("stages") or []
+    stages = [_row_to_card_stage(stage) for stage in stages_payload]
     return Card(
         id=int(row["id"]) if row.get("id") is not None else None,
         sprint_id=int(row.get("sprint_id") or 0),
@@ -331,7 +333,62 @@ def _row_to_card(row: dict) -> Card:
         created_by=row.get("created_by") or "",
         updated_at=int(row.get("updated_at") or 0),
         updated_by=row.get("updated_by") or "",
+        stages=stages,
     )
+
+
+def _row_to_card_stage(row: dict) -> CardStage:
+    matrix_at = row.get("matrix_completed_at")
+    cycle_at = row.get("cycle_completed_at")
+    validation_at = row.get("validation_at")
+    return CardStage(
+        id=int(row.get("id") or 0) or None,
+        card_id=int(row.get("card_id") or 0),
+        stage_type=(row.get("stage_type") or "").strip().lower(),
+        assignee=row.get("assignee") or None,
+        matrix_url=row.get("matrix_url") or None,
+        matrix_completed=bool(row.get("matrix_completed")),
+        matrix_completed_by=row.get("matrix_completed_by") or None,
+        matrix_completed_at=int(matrix_at) if matrix_at else None,
+        cycle_url=row.get("cycle_url") or None,
+        cycle_completed=bool(row.get("cycle_completed")),
+        cycle_completed_by=row.get("cycle_completed_by") or None,
+        cycle_completed_at=int(cycle_at) if cycle_at else None,
+        validation_passed=bool(row.get("validation_passed")),
+        validation_notes=row.get("validation_notes") or None,
+        validation_by=row.get("validation_by") or None,
+        validation_at=int(validation_at) if validation_at else None,
+        status=(row.get("status") or "pending").strip().lower(),
+        created_at=int(row.get("created_at") or 0),
+        created_by=row.get("created_by") or None,
+        updated_at=int(row.get("updated_at") or 0),
+        updated_by=row.get("updated_by") or None,
+    )
+
+
+def _stage_to_payload(stage: CardStage) -> Dict[str, object]:
+    return {
+        "id": stage.id,
+        "stage_type": stage.stage_type,
+        "assignee": stage.assignee,
+        "matrix_url": stage.matrix_url,
+        "matrix_completed": bool(stage.matrix_completed),
+        "matrix_completed_by": stage.matrix_completed_by,
+        "matrix_completed_at": stage.matrix_completed_at,
+        "cycle_url": stage.cycle_url,
+        "cycle_completed": bool(stage.cycle_completed),
+        "cycle_completed_by": stage.cycle_completed_by,
+        "cycle_completed_at": stage.cycle_completed_at,
+        "validation_passed": bool(stage.validation_passed),
+        "validation_notes": stage.validation_notes,
+        "validation_by": stage.validation_by,
+        "validation_at": stage.validation_at,
+        "status": stage.status,
+        "created_at": stage.created_at,
+        "created_by": stage.created_by,
+        "updated_at": stage.updated_at,
+        "updated_by": stage.updated_by,
+    }
 
 
 def _row_to_user(row: dict) -> User:
@@ -692,6 +749,10 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
         "updated_at": card.updated_at,
         "updated_by": card.updated_by,
     }
+    payload["stages"] = [
+        _stage_to_payload(stage)
+        for stage in getattr(card, "stages", [])
+    ]
     card_id = _get_db(base).upsert_card(payload)
     card.id = card_id
     return card
