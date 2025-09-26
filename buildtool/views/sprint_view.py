@@ -414,7 +414,7 @@ class SprintView(QWidget):
         if sprint and branch_ready:
             branch_record = self._branch_record_for_name(sprint, branch_name)
         branch_exists = bool(
-            branch_record and (branch_record.exists_local or branch_record.exists_origin)
+            branch_record and (branch_record.has_local_copy() or branch_record.exists_origin)
         )
         sprint_closed = bool(sprint and sprint.status == "closed")
         allow_branch_create = (
@@ -540,7 +540,7 @@ class SprintView(QWidget):
         record = self._branch_record_for_card(card, sprint)
         has_branch = bool((card.branch or "").strip())
         if record:
-            local_text = "Sí" if record.exists_local else "No"
+            local_text = "Sí" if record.has_local_copy() else "No"
             origin_text = "Sí" if record.exists_origin else "No"
             creator = card.branch_created_by or record.last_updated_by or record.created_by or ""
         else:
@@ -811,7 +811,7 @@ class SprintView(QWidget):
         self.lblCardChecks.setText(" | ".join(checks))
         record = self._branch_record_for_card(card, sprint)
         if record:
-            self.lblCardLocal.setText("Local: Sí" if record.exists_local else "Local: No")
+            self.lblCardLocal.setText("Local: Sí" if record.has_local_copy() else "Local: No")
             self.lblCardOrigin.setText("Origen: Sí" if record.exists_origin else "Origen: No")
         else:
             self.lblCardLocal.setText("Local: -")
@@ -1300,7 +1300,7 @@ class SprintView(QWidget):
             )
             return
         existing_record = self._branch_record_for_name(sprint, branch_name)
-        if existing_record and (existing_record.exists_local or existing_record.exists_origin):
+        if existing_record and (existing_record.has_local_copy() or existing_record.exists_origin):
             QMessageBox.information(
                 self,
                 "Tarjeta",

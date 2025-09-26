@@ -17,6 +17,7 @@ from buildtool.core.branch_store import (
 class FakeBranchHistory:
     def __init__(self) -> None:
         self.branch_rows: dict[str, dict] = {}
+        self.branch_local_users: dict[tuple[str, str], dict] = {}
         self.activity_rows: list[dict] = []
         self.sprints: dict[int, dict] = {}
         self.cards: dict[int, dict] = {}
@@ -27,11 +28,25 @@ class FakeBranchHistory:
         self.next_card_id = 1
 
     # Branches ---------------------------------------------------------
-    def fetch_branches(self, filter_origin: bool = False) -> list[dict]:
-        rows = list(self.branch_rows.values())
-        if filter_origin:
-            rows = [row for row in rows if row.get("exists_origin")]
-        return [row.copy() for row in rows]
+    def fetch_branches(self, filter_origin: bool = False, username: str | None = None) -> list[dict]:
+        rows: list[dict] = []
+        for row in self.branch_rows.values():
+            if filter_origin and not row.get("exists_origin"):
+                continue
+            data = row.copy()
+            entry = None
+            if username:
+                entry = self.branch_local_users.get((row.get("key"), username))
+            if entry:
+                data["local_state"] = entry.get("state")
+                data["local_location"] = entry.get("location")
+                data["local_updated_at"] = entry.get("updated_at")
+            else:
+                data["local_state"] = None
+                data["local_location"] = None
+                data["local_updated_at"] = None
+            rows.append(data)
+        return rows
 
     def replace_branches(self, records: list[dict]) -> None:
         self.branch_rows = {rec["key"]: rec.copy() for rec in records}
@@ -41,6 +56,44 @@ class FakeBranchHistory:
 
     def delete_branch(self, key: str) -> None:
         self.branch_rows.pop(key, None)
+        to_remove = [entry for entry in self.branch_local_users if entry[0] == key]
+        for entry in to_remove:
+            self.branch_local_users.pop(entry, None)
+
+    def fetch_branch_local_users(
+        self,
+        branch_keys: list[str] | None = None,
+        username: str | None = None,
+    ) -> list[dict]:
+        results: list[dict] = []
+        keys = set(branch_keys or []) if branch_keys else None
+        for (branch_key, user), payload in self.branch_local_users.items():
+            if keys and branch_key not in keys:
+                continue
+            if username and user != username:
+                continue
+            entry = payload.copy()
+            entry["branch_key"] = branch_key
+            entry["username"] = user
+            results.append(entry)
+        return results
+
+    def upsert_branch_local_user(
+        self,
+        branch_key: str,
+        username: str,
+        state: str,
+        location: str | None,
+        updated_at: int,
+    ) -> None:
+        self.branch_local_users[(branch_key, username)] = {
+            "state": state,
+            "location": location,
+            "updated_at": updated_at,
+        }
+
+    def delete_branch_local_user(self, branch_key: str, username: str) -> None:
+        self.branch_local_users.pop((branch_key, username), None)
 
     # Activity ---------------------------------------------------------
     def append_activity(self, entries: list[dict]) -> None:
@@ -167,8 +220,10 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.old_appdata = os.environ.get("APPDATA")
         self.old_xdg = os.environ.get("XDG_DATA_HOME")
+        self.old_username = os.environ.get("USERNAME")
         os.environ["APPDATA"] = self.tmp.name
         os.environ["XDG_DATA_HOME"] = self.tmp.name
+        os.environ["USERNAME"] = "alice"
         self.fake = FakeBranchHistory()
         branch_store._DB_CACHE.clear()
         branch_store._DB_CACHE[branch_store._SERVER_CACHE_KEY] = self.fake
@@ -184,6 +239,10 @@ class BranchStoreSqlServerTest(unittest.TestCase):
             os.environ.pop("XDG_DATA_HOME", None)
         else:
             os.environ["XDG_DATA_HOME"] = self.old_xdg
+        if self.old_username is None:
+            os.environ.pop("USERNAME", None)
+        else:
+            os.environ["USERNAME"] = self.old_username
         self.tmp.cleanup()
 
     def test_load_index_normalizes_fields(self) -> None:
@@ -209,7 +268,7 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         rec = index["g/p/feature/x"]
         self.assertEqual(rec.branch, "feature/x")
         self.assertEqual(rec.group, "g")
-        self.assertFalse(rec.exists_local)
+        self.assertFalse(rec.has_local_copy())
         self.assertTrue(rec.exists_origin)
         self.assertEqual(rec.stale_days, 5)
         self.assertEqual(rec.last_updated_at, 1700000001)
@@ -220,8 +279,8 @@ class BranchStoreSqlServerTest(unittest.TestCase):
             group="g",
             project="p",
             created_by="alice",
-            exists_local=True,
         )
+        rec.mark_local(True)
         branch_store.record_activity("create", rec)
         self.assertEqual(len(self.fake.activity_rows), 1)
         stored = self.fake.activity_rows[0]
@@ -245,6 +304,35 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["user"], "bob")
         self.assertEqual(entries[0]["action"], "create")
+
+    def test_upsert_registers_local_user_state(self) -> None:
+        rec = BranchRecord(branch="feature/state", group="g", project="p", created_by="alice")
+        rec.mark_local(True)
+        branch_store.upsert(rec, action="test")
+
+        entry = self.fake.branch_local_users.get(("g/p/feature/state", "alice"))
+        self.assertIsNotNone(entry)
+        assert entry  # for type checker
+        self.assertEqual(entry["state"], "present")
+        self.assertGreater(entry["updated_at"], 0)
+
+    def test_save_index_synchronizes_local_states(self) -> None:
+        rec_a = BranchRecord(branch="feature/a", group="g", project="p", created_by="alice")
+        rec_a.mark_local(True)
+        rec_b = BranchRecord(branch="feature/b", group="g", project="p", created_by="alice")
+        rec_b.mark_local(False)
+        index = {
+            rec_a.key(): rec_a,
+            rec_b.key(): rec_b,
+        }
+        branch_store.save_index(index, path=self.base_path)
+
+        states = branch_store.load_local_states(username="alice", path=self.base_path)
+        state_map = {(entry["branch_key"], entry["username"]): entry for entry in states}
+        self.assertIn(("g/p/feature/a", "alice"), state_map)
+        self.assertIn(("g/p/feature/b", "alice"), state_map)
+        self.assertEqual(state_map[("g/p/feature/a", "alice")]["state"], "present")
+        self.assertEqual(state_map[("g/p/feature/b", "alice")]["state"], "absent")
 
     def test_upsert_card_adds_version_prefix(self) -> None:
         now = int(time.time())

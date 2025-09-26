@@ -455,7 +455,7 @@ def create_branches_local(
     if ok_all:
         idx = load_index()
         rec = _get_record(idx, gkey, pkey, bname)
-        rec.exists_local = True
+        rec.mark_local(True)
         rec.last_action = "create_local"
         rec.last_updated_by = _current_user()
         upsert(rec, idx, action="create_local")
@@ -571,14 +571,14 @@ def create_version_branches(
     if ok_base:
         idx = load_index()
         rec = _get_record(idx, gkey, pkey, branch_base)
-        rec.exists_local = True
+        rec.mark_local(True)
         rec.last_action = "create_local"
         rec.last_updated_by = _current_user()
         upsert(rec, idx, action="create_local")
     if create_qa and ok_base and ok_qa:
         idx = load_index()
         rec = _get_record(idx, gkey, pkey, branch_qa)
-        rec.exists_local = True
+        rec.mark_local(True)
         rec.last_action = "create_local"
         rec.last_updated_by = _current_user()
         upsert(rec, idx, action="create_local")
@@ -647,7 +647,7 @@ def switch_branch(
     if ok_all:
         idx = load_index()
         rec = _get_record(idx, gkey, pkey, bname)
-        rec.exists_local = True
+        rec.mark_local(True)
         rec.last_action = "switch"
         rec.last_updated_by = _current_user()
         upsert(rec, idx, action="switch")
@@ -708,7 +708,7 @@ def delete_local_branch_by_name(
     if exists_origin:
         if not rec:
             rec = BranchRecord(branch=bname, group=gkey, project=pkey, created_by=_current_user())
-        rec.exists_local = exists_local
+        rec.mark_local(exists_local)
         rec.exists_origin = True
         rec.last_action = "delete_local" if not exists_local else rec.last_action
         rec.last_updated_by = _current_user()
@@ -753,7 +753,7 @@ def push_branch(
 
     idx = load_index()
     rec = _get_record(idx, gkey, pkey, bname)
-    rec.exists_local = True
+    rec.mark_local(True)
     rec.exists_origin = exists_origin
     rec.last_action = "push_origin" if ok_all else "push_failed"
     rec.last_updated_by = _current_user()

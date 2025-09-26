@@ -4,6 +4,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [Unreleased]
+### Añadido
+- Tabla `branch_local_users` en SQL Server para registrar la presencia local de cada rama por usuario y exponerla mediante `load_local_states` y nuevas pruebas automatizadas.
+
+### Cambiado
+- `BranchHistoryView` y la pestaña Git muestran un único historial respaldado por SQL Server, eliminando los flujos de sincronización NAS y adoptando el registro de actividad renombrado.
+- `BranchRecord` ahora calcula la disponibilidad local por usuario activo, propagando la información al backend al guardar o sincronizar el índice.
+
 ## [1.6.0] - 2025-02-15
 ### Añadido
 - Capa de persistencia extensible para el historial de ramas con soporte a SQL Server 2019 mediante `BranchHistoryRepo`.
