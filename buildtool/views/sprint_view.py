@@ -5,7 +5,7 @@ import time
 from dataclasses import replace
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
-    QStackedWidget,
+    QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -49,6 +49,33 @@ from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
 from .sprint_helpers import filter_users_by_role
 from ..ui.icons import get_icon
 
+
+class _ScrollFormWindow(QWidget):
+    """Top-level window that wraps a form inside a scroll area."""
+
+    closed = Signal()
+
+    def __init__(self, title: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlag(Qt.Window, True)
+        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        self.setMinimumSize(520, 640)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self._scroll = QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        layout.addWidget(self._scroll)
+
+    def set_content(self, widget: QWidget) -> None:
+        self._scroll.setWidget(widget)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        self.closed.emit()
+        super().closeEvent(event)
+
+
 class SprintView(QWidget):
     """Single window to manage sprints and cards."""
 
@@ -61,6 +88,9 @@ class SprintView(QWidget):
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
         self._stage_widgets: Dict[str, Dict[str, QWidget]] = {}
+        self._active_form: Optional[str] = None
+        self._sprint_window: Optional[_ScrollFormWindow] = None
+        self._card_window: Optional[_ScrollFormWindow] = None
 
         self._selected_sprint_id: Optional[int] = None
         self._selected_card_id: Optional[int] = None
@@ -142,23 +172,27 @@ class SprintView(QWidget):
         splitter.addWidget(left_panel)
 
         right_panel = QWidget()
-        right_panel.setMinimumWidth(360)
-        right_panel.setMaximumWidth(860)
+        right_panel.setMinimumWidth(320)
+        right_panel.setMaximumWidth(420)
         right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setContentsMargins(12, 12, 12, 12)
         right_layout.setSpacing(12)
 
-        self.stack = QStackedWidget()
-        right_layout.addWidget(self.stack, 1)
-
-        self._build_empty_page()
-        self._build_sprint_form()
-        self._build_card_form()
+        hint = QLabel(
+            "Selecciona un sprint o tarjeta para abrir la ventana de edición."
+        )
+        hint.setWordWrap(True)
+        hint.setAlignment(Qt.AlignTop)
+        right_layout.addWidget(hint)
+        right_layout.addStretch(1)
 
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 3)
-        splitter.setSizes([860, 520])
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([860, 320])
+
+        self._build_sprint_form()
+        self._build_card_form()
 
         self.btnRefresh.clicked.connect(self.refresh)
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
@@ -166,17 +200,6 @@ class SprintView(QWidget):
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
 
         self.update_permissions()
-
-    # ------------------------------------------------------------------
-    def _build_empty_page(self) -> None:
-        container = QWidget()
-        box = QVBoxLayout(container)
-        box.setAlignment(Qt.AlignCenter)
-        label = QLabel("Selecciona un sprint o tarjeta para editar sus detalles.")
-        label.setAlignment(Qt.AlignCenter)
-        label.setWordWrap(True)
-        box.addWidget(label)
-        self.stack.addWidget(container)
 
     # ------------------------------------------------------------------
     def _build_sprint_form(self) -> None:
@@ -239,7 +262,9 @@ class SprintView(QWidget):
         self.btnSprintCancel.clicked.connect(self._on_cancel)
         self.btnSprintDelete.clicked.connect(self._on_delete_sprint)
 
-        self.stack.addWidget(self.pageSprint)
+        self._sprint_window = _ScrollFormWindow("Editar sprint", self)
+        self._sprint_window.set_content(self.pageSprint)
+        self._sprint_window.closed.connect(lambda: self._on_form_closed("sprint"))
 
     # ------------------------------------------------------------------
     def _build_card_form(self) -> None:
@@ -366,14 +391,38 @@ class SprintView(QWidget):
         self.btnCardMarkUnit.clicked.connect(lambda: self._mark_card("unit"))
         self.btnCardMarkQA.clicked.connect(lambda: self._mark_card("qa"))
 
-        self.stack.addWidget(self.pageCard)
+        self._card_window = _ScrollFormWindow("Editar tarjeta", self)
+        self._card_window.set_content(self.pageCard)
+        self._card_window.closed.connect(lambda: self._on_form_closed("card"))
+
+    # ------------------------------------------------------------------
+    def _hide_form_windows(self) -> None:
+        if self._sprint_window and self._sprint_window.isVisible():
+            self._sprint_window.hide()
+        if self._card_window and self._card_window.isVisible():
+            self._card_window.hide()
+        self._active_form = None
+
+    # ------------------------------------------------------------------
+    def _on_form_closed(self, kind: str) -> None:
+        if self._active_form == kind:
+            self._active_form = None
+        self.update_permissions()
 
     # ------------------------------------------------------------------
     def update_permissions(self) -> None:
         username = self._current_user()
         can_lead = require_roles("leader")
-        sprint_mode = self.stack.currentWidget() is self.pageSprint
-        card_mode = self.stack.currentWidget() is self.pageCard
+        sprint_mode = (
+            self._active_form == "sprint"
+            and self._sprint_window is not None
+            and self._sprint_window.isVisible()
+        )
+        card_mode = (
+            self._active_form == "card"
+            and self._card_window is not None
+            and self._card_window.isVisible()
+        )
         card = self._cards.get(self._selected_card_id or -1)
         sprint = None
         if card and card.sprint_id:
@@ -667,7 +716,7 @@ class SprintView(QWidget):
         if self._selected_sprint_id and self._selected_sprint_id in self._sprints:
             self._select_tree_item("sprint", self._selected_sprint_id)
             return
-        self.stack.setCurrentIndex(0)
+        self._hide_form_windows()
 
     # ------------------------------------------------------------------
     def _select_tree_item(self, kind: str, ident: int) -> None:
@@ -736,7 +785,7 @@ class SprintView(QWidget):
         if not item:
             self._selected_card_id = None
             self._selected_sprint_id = None
-            self.stack.setCurrentIndex(0)
+            self._hide_form_windows()
             self.update_permissions()
             return
 
@@ -809,7 +858,17 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _show_sprint_form(self, sprint: Sprint, new: bool = False) -> None:
-        self.stack.setCurrentWidget(self.pageSprint)
+        if not self._sprint_window:
+            return
+        self._active_form = "sprint"
+        if self._card_window and self._card_window.isVisible():
+            self._card_window.hide()
+        title = "Nuevo sprint" if new else "Editar sprint"
+        self._sprint_window.setWindowTitle(title)
+        if not self._sprint_window.isVisible():
+            self._sprint_window.show()
+        self._sprint_window.raise_()
+        self._sprint_window.activateWindow()
         self._current_sprint_branch_key = sprint.branch_key
         self._current_sprint_qa_branch_key = sprint.qa_branch_key or None
         self.txtSprintBranch.setText(sprint.branch_key)
@@ -839,7 +898,17 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _show_card_form(self, card: Card, sprint: Sprint, new: bool = False) -> None:
-        self.stack.setCurrentWidget(self.pageCard)
+        if not self._card_window:
+            return
+        self._active_form = "card"
+        if self._sprint_window and self._sprint_window.isVisible():
+            self._sprint_window.hide()
+        title = "Nueva tarjeta" if new else "Editar tarjeta"
+        self._card_window.setWindowTitle(title)
+        if not self._card_window.isVisible():
+            self._card_window.show()
+        self._card_window.raise_()
+        self._card_window.activateWindow()
         self.lblCardSprint.setText(f"{sprint.version} — {sprint.name}")
         self.txtCardTicket.blockSignals(True)
         self.txtCardTicket.setText(card.ticket_id or "")
@@ -1046,7 +1115,7 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_branch_text_changed(self) -> None:
-        if self.stack.currentWidget() is not self.pageCard:
+        if self._active_form != "card":
             return
         text = self.txtCardBranch.text().strip()
         if self._branch_override and not text:
@@ -1056,7 +1125,7 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_ticket_changed(self) -> None:
-        if self.stack.currentWidget() is not self.pageCard:
+        if self._active_form != "card":
             return
         self._update_branch_preview()
         self.update_permissions()
@@ -1280,7 +1349,7 @@ class SprintView(QWidget):
         self._selected_sprint_id = None
         self._selected_card_id = None
         self.refresh()
-        self.stack.setCurrentIndex(0)
+        self._hide_form_windows()
 
     # ------------------------------------------------------------------
     def _full_branch_name(self) -> str:
@@ -1378,12 +1447,12 @@ class SprintView(QWidget):
         delete_card(card.id)
         self._selected_card_id = None
         self.refresh()
-        self.stack.setCurrentIndex(0)
+        self._hide_form_windows()
 
     # ------------------------------------------------------------------
     def _on_cancel(self) -> None:
         self.tree.clearSelection()
-        self.stack.setCurrentIndex(0)
+        self._hide_form_windows()
         self._current_sprint_branch_key = None
         self._current_sprint_qa_branch_key = None
         self.update_permissions()
