@@ -1571,7 +1571,7 @@ class _SqlServerBranchHistory:
     def fetch_roles(self) -> List[dict]:
         with self._connect() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT [key] AS key, name, description FROM roles ORDER BY name")
+            cursor.execute("SELECT [key], name, description FROM roles ORDER BY name")
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
