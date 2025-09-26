@@ -18,6 +18,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Se implementa `ensure_schema` en el backend SQLite para evitar errores al inicializar la aplicación cuando se usa la base local.
 - La importación opcional de `python-tds` usa `pytds` como módulo real, eliminando el falso positivo que indicaba que el paquete no estaba instalado.
 - La tabla `branches` del backend SQL Server escapa la columna `key` y las consultas asociadas para evitar errores de sintaxis al crear el esquema.
+- El script `scripts/migrate_branch_history.py` ajusta automáticamente la ruta de importación para ejecutarse sin instalar `buildtool` como paquete.
 
 ## [1.5.1] - 2025-10-06
 
