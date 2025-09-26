@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -47,6 +48,21 @@ def _login_cache_path() -> Path:
     return Path.home() / ".forgebuild" / "login_cache.json"
 
 
+def _attach_password_toggle(field: QLineEdit) -> QAction:
+    action = QAction("👁", field)
+    action.setToolTip("Mostrar/ocultar contraseña")
+    action.setCheckable(True)
+
+    def _update(checked: bool) -> None:
+        field.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+        action.setText("🙈" if checked else "👁")
+
+    action.toggled.connect(_update)
+    field.addAction(action, QLineEdit.TrailingPosition)
+    _update(False)
+    return action
+
+
 class PasswordDialog(QDialog):
     def __init__(
         self,
@@ -75,11 +91,13 @@ class PasswordDialog(QDialog):
         self.txtPassword = QLineEdit()
         self.txtPassword.setEchoMode(QLineEdit.Password)
         self.txtPassword.setPlaceholderText("Nueva contraseña")
+        _attach_password_toggle(self.txtPassword)
         form.addRow(QLabel("Contraseña:"), self.txtPassword)
 
         self.txtConfirm = QLineEdit()
         self.txtConfirm.setEchoMode(QLineEdit.Password)
         self.txtConfirm.setPlaceholderText("Confirmar contraseña")
+        _attach_password_toggle(self.txtConfirm)
         form.addRow(QLabel("Confirmar:"), self.txtConfirm)
         layout.addLayout(form)
 
@@ -158,6 +176,7 @@ class UserLoginDialog(QDialog):
 
         self.txtPassword = QLineEdit()
         self.txtPassword.setEchoMode(QLineEdit.Password)
+        _attach_password_toggle(self.txtPassword)
         self.txtPassword.returnPressed.connect(self.accept)
         form.addRow(QLabel("Contraseña:"), self.txtPassword)
 

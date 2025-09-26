@@ -21,6 +21,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - El diálogo de inicio de sesión exige contraseña, gestiona restablecimientos forzados y oculta controles de roles/altas directas.
 - Las contraseñas ahora requieren al menos 7 caracteres, una letra mayúscula y un número, sin obligar minúsculas ni caracteres especiales.
 - `list_users` excluye usuarios deshabilitados por defecto y las bajas marcan el estado inactivo en lugar de eliminar filas.
+- Se agregó un botón de "ojo" para mostrar u ocultar la contraseña en el inicio de sesión y durante el restablecimiento.
 
 ### Corregido
 - La inicialización del esquema en SQL Server ajusta `branch_local_users.branch_key` a NVARCHAR(255) antes de crear la llave foránea hacia `branches.[key]`, evitando el error 1753 en instalaciones existentes.
