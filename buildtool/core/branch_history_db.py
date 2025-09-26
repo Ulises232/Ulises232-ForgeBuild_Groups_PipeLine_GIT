@@ -240,12 +240,15 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
 
 
 def _normalize_user(payload: dict) -> Dict[str, object]:
-    return {
+    data = {
         "username": payload.get("username") or "",
         "display_name": payload.get("display_name") or payload.get("username") or "",
         "email": payload.get("email"),
         "active": 1 if payload.get("active", True) else 0,
     }
+    if "require_password_reset" in payload:
+        data["require_password_reset"] = 1 if payload.get("require_password_reset") else 0
+    return data
 
 
 def _normalize_role(payload: dict) -> Dict[str, object]:
@@ -315,6 +318,10 @@ class User:
     display_name: str
     active: bool = True
     email: Optional[str] = None
+    has_password: bool = False
+    require_password_reset: bool = False
+    password_changed_at: Optional[int] = None
+    active_since: Optional[int] = None
 
 
 @dataclass(slots=True)
@@ -543,8 +550,51 @@ class _SqlServerBranchHistory:
                     username NVARCHAR(255) NOT NULL PRIMARY KEY,
                     display_name NVARCHAR(255) NOT NULL,
                     email NVARCHAR(255) NULL,
-                    active BIT NOT NULL DEFAULT 1
+                    active BIT NOT NULL DEFAULT 1,
+                    password_hash NVARCHAR(512) NULL,
+                    password_salt NVARCHAR(512) NULL,
+                    password_algo NVARCHAR(128) NULL,
+                    password_changed_at BIGINT NULL,
+                    require_password_reset BIT NOT NULL DEFAULT 0,
+                    active_since BIGINT NULL
                 );
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'password_hash') IS NULL
+            BEGIN
+                ALTER TABLE users ADD password_hash NVARCHAR(512) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'password_salt') IS NULL
+            BEGIN
+                ALTER TABLE users ADD password_salt NVARCHAR(512) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'password_algo') IS NULL
+            BEGIN
+                ALTER TABLE users ADD password_algo NVARCHAR(128) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'password_changed_at') IS NULL
+            BEGIN
+                ALTER TABLE users ADD password_changed_at BIGINT NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'require_password_reset') IS NULL
+            BEGIN
+                ALTER TABLE users ADD require_password_reset BIT NOT NULL DEFAULT 0;
+                UPDATE users SET require_password_reset = 0 WHERE require_password_reset IS NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'active_since') IS NULL
+            BEGIN
+                ALTER TABLE users ADD active_since BIGINT NULL;
             END
             """,
             """
@@ -1140,13 +1190,55 @@ class _SqlServerBranchHistory:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT username, display_name, email, active FROM users ORDER BY display_name"
+                """
+                SELECT
+                    username,
+                    display_name,
+                    email,
+                    active,
+                    require_password_reset,
+                    password_changed_at,
+                    active_since,
+                    CASE
+                        WHEN password_hash IS NULL OR password_hash = '' THEN 0
+                        ELSE 1
+                    END AS has_password
+                FROM users
+                ORDER BY display_name
+                """
             )
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_user(self, username: str) -> Optional[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    username,
+                    display_name,
+                    email,
+                    active,
+                    require_password_reset,
+                    password_changed_at,
+                    active_since,
+                    password_hash,
+                    password_salt,
+                    password_algo
+                FROM users
+                WHERE username=%s
+                """,
+                (username,),
+            )
+            row = cursor.fetchone()
+        return dict(row) if row else None
+
     def upsert_user(self, payload: dict) -> None:
         data = _normalize_user(payload)
+        columns = ["username", "display_name", "email", "active"]
+        if "require_password_reset" in payload:
+            columns.append("require_password_reset")
         with self._connect() as conn:
             cursor = conn.cursor()
             self._execute_upsert_generic(
@@ -1154,13 +1246,87 @@ class _SqlServerBranchHistory:
                 "users",
                 "username",
                 data,
-                ["username", "display_name", "email", "active"],
+                columns,
+            )
+
+    def update_user_profile(self, username: str, display_name: Optional[str], email: Optional[str]) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE users
+                SET display_name=%s, email=%s
+                WHERE username=%s
+                """,
+                (display_name, email, username),
+            )
+
+    def set_user_active(self, username: str, active: bool, *, timestamp: Optional[int] = None) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            if active:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET active = 1,
+                        active_since = CASE WHEN %s IS NOT NULL THEN %s ELSE active_since END
+                    WHERE username=%s
+                    """,
+                    (timestamp, timestamp, username),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET active = 0
+                    WHERE username=%s
+                    """,
+                    (username,),
+                )
+
+    def update_user_password(
+        self,
+        username: str,
+        *,
+        password_hash: Optional[str],
+        password_salt: Optional[str],
+        password_algo: Optional[str],
+        password_changed_at: Optional[int],
+        require_password_reset: bool,
+    ) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE users
+                SET password_hash=%s,
+                    password_salt=%s,
+                    password_algo=%s,
+                    password_changed_at=%s,
+                    require_password_reset=%s
+                WHERE username=%s
+                """,
+                (
+                    password_hash,
+                    password_salt,
+                    password_algo,
+                    password_changed_at,
+                    1 if require_password_reset else 0,
+                    username,
+                ),
+            )
+
+    def mark_password_reset(self, username: str, require_password_reset: bool) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE users SET require_password_reset=%s WHERE username=%s",
+                (1 if require_password_reset else 0, username),
             )
 
     def delete_user(self, username: str) -> None:
-        with self._connect() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM users WHERE username=%s", (username,))
+        # Soft delete: mark as inactive
+        self.set_user_active(username, False)
 
     def fetch_roles(self) -> List[dict]:
         with self._connect() as conn:

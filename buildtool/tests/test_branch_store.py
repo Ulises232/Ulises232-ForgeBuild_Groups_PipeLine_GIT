@@ -192,10 +192,67 @@ class FakeBranchHistory:
 
     # Users & roles ----------------------------------------------------
     def fetch_users(self) -> list[dict]:
-        return [row.copy() for row in self.users.values()]
+        rows: list[dict] = []
+        for data in self.users.values():
+            row = data.copy()
+            row.setdefault("active", 1)
+            row.setdefault("require_password_reset", 0)
+            row.setdefault("password_changed_at", None)
+            row.setdefault("active_since", None)
+            row.setdefault("password_hash", data.get("password_hash"))
+            row.setdefault("has_password", 1 if data.get("password_hash") else 0)
+            rows.append(row)
+        return rows
+
+    def fetch_user(self, username: str) -> dict | None:
+        data = self.users.get(username)
+        return data.copy() if data else None
 
     def upsert_user(self, payload: dict) -> None:
-        self.users[payload["username"]] = payload.copy()
+        stored = self.users.get(payload["username"], {}).copy()
+        stored.update(payload)
+        stored.setdefault("require_password_reset", 0)
+        stored.setdefault("active", 1)
+        stored.setdefault("password_hash", None)
+        stored.setdefault("password_salt", None)
+        stored.setdefault("password_algo", None)
+        stored.setdefault("password_changed_at", None)
+        stored.setdefault("active_since", int(time.time()))
+        self.users[payload["username"]] = stored
+
+    def update_user_password(
+        self,
+        username: str,
+        *,
+        password_hash: str | None,
+        password_salt: str | None,
+        password_algo: str | None,
+        password_changed_at: int | None,
+        require_password_reset: bool,
+    ) -> None:
+        user = self.users.setdefault(username, {})
+        user["password_hash"] = password_hash
+        user["password_salt"] = password_salt
+        user["password_algo"] = password_algo
+        user["password_changed_at"] = password_changed_at
+        user["require_password_reset"] = 1 if require_password_reset else 0
+
+    def mark_password_reset(self, username: str, require_password_reset: bool) -> None:
+        user = self.users.setdefault(username, {})
+        user["require_password_reset"] = 1 if require_password_reset else 0
+
+    def set_user_active(self, username: str, active: bool, *, timestamp: int | None = None) -> None:
+        user = self.users.setdefault(username, {})
+        user["active"] = 1 if active else 0
+        if active and timestamp:
+            user["active_since"] = timestamp
+
+    def update_user_profile(self, username: str, display_name: str | None, email: str | None) -> None:
+        user = self.users.setdefault(username, {})
+        if display_name is not None:
+            user["display_name"] = display_name
+        if email is not None:
+            user["email"] = email
 
     def delete_user(self, username: str) -> None:
         self.users.pop(username, None)
@@ -377,6 +434,42 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertIn(("g/p/feature/b", "alice"), state_map)
         self.assertEqual(state_map[("g/p/feature/a", "alice")]["state"], "present")
         self.assertEqual(state_map[("g/p/feature/b", "alice")]["state"], "absent")
+
+    def test_create_user_without_password_sets_reset_flag(self) -> None:
+        branch_store.create_user("ana", "Ana Pruebas")
+        users = branch_store.list_users()
+        self.assertEqual(len(users), 1)
+        user = users[0]
+        self.assertFalse(user.has_password)
+        self.assertTrue(user.require_password_reset)
+
+    def test_set_user_password_allows_authentication(self) -> None:
+        branch_store.create_user("ana", "Ana Pruebas")
+        result = branch_store.authenticate_user("ana", None)
+        self.assertEqual(result.status, "password_required")
+        branch_store.set_user_password("ana", "Segura!1A")
+        ok = branch_store.authenticate_user("ana", "Segura!1A")
+        self.assertTrue(ok.success)
+
+    def test_authenticate_requires_reset_when_flagged(self) -> None:
+        branch_store.create_user("ana", "Ana Pruebas", password="Segura!1A")
+        branch_store.mark_user_password_reset("ana", require_reset=True)
+        status = branch_store.authenticate_user("ana", "Segura!1A")
+        self.assertEqual(status.status, "reset_required")
+
+    def test_update_user_can_disable_account(self) -> None:
+        branch_store.create_user("ana", "Ana Pruebas", password="Segura!1A")
+        branch_store.update_user("ana", active=False)
+        self.assertFalse(branch_store.list_users())
+        users = branch_store.list_users(include_inactive=True)
+        self.assertFalse(users[0].active)
+        result = branch_store.authenticate_user("ana", "Segura!1A")
+        self.assertEqual(result.status, "disabled")
+
+    def test_create_user_assigns_roles(self) -> None:
+        branch_store.create_user("ana", "Ana Pruebas", roles=["developer", "qa"])
+        roles = branch_store.list_user_roles("ana")
+        self.assertEqual(set(roles.get("ana", [])), {"developer", "qa"})
 
     def test_remove_branch_deletes_backend_rows(self) -> None:
         rec = BranchRecord(branch="feature/remove", group="g", project="p", created_by="alice")

@@ -1,8 +1,11 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+import base64
 import getpass
+import hashlib
+import hmac
 import os
 import time
 
@@ -89,6 +92,78 @@ _LEGACY_FIELD_ALIASES = {
 }
 _BOOL_FIELDS = {"exists_origin"}
 _INT_FIELDS = {"created_at", "last_updated_at", "local_updated_at"}
+
+_PBKDF2_ALGO = "pbkdf2_sha256"
+_PBKDF2_DEFAULT_ITERATIONS = 480_000
+
+
+def _b64encode(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _b64decode(data: str) -> bytes:
+    return base64.b64decode(data.encode("ascii"))
+
+
+def _generate_salt(length: int = 32) -> str:
+    return _b64encode(os.urandom(length))
+
+
+def _parse_iterations(algo: Optional[str]) -> int:
+    if not algo:
+        return _PBKDF2_DEFAULT_ITERATIONS
+    try:
+        name, _, rest = algo.partition(":")
+        if name.strip().lower() != _PBKDF2_ALGO:
+            return _PBKDF2_DEFAULT_ITERATIONS
+        if rest:
+            return max(1, int(rest))
+    except (ValueError, TypeError):
+        pass
+    return _PBKDF2_DEFAULT_ITERATIONS
+
+
+def _derive_password(password: str, salt: str, *, iterations: Optional[int] = None) -> str:
+    if not iterations or iterations <= 0:
+        iterations = _PBKDF2_DEFAULT_ITERATIONS
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        _b64decode(salt),
+        iterations,
+    )
+    return _b64encode(digest)
+
+
+def _build_algo(iterations: int) -> str:
+    return f"{_PBKDF2_ALGO}:{max(1, int(iterations or _PBKDF2_DEFAULT_ITERATIONS))}"
+
+
+def _password_entry(password: str, *, iterations: int = _PBKDF2_DEFAULT_ITERATIONS) -> Tuple[str, str, str]:
+    salt = _generate_salt()
+    hashed = _derive_password(password, salt, iterations=iterations)
+    return hashed, salt, _build_algo(iterations)
+
+
+def _verify_password(password: str, stored_hash: Optional[str], salt: Optional[str], algo: Optional[str]) -> bool:
+    if not password or not stored_hash or not salt:
+        return False
+    iterations = _parse_iterations(algo)
+    derived = _derive_password(password, salt, iterations=iterations)
+    return hmac.compare_digest(stored_hash, derived)
+
+
+@dataclass
+class AuthenticationResult:
+    user: Optional[User]
+    status: str
+    message: Optional[str] = None
+    require_password_reset: bool = False
+    needs_password: bool = False
+
+    @property
+    def success(self) -> bool:
+        return self.status == "ok"
 
 
 def _normalize_record_payload(raw: Any) -> Optional[BranchRecord]:
@@ -260,11 +335,17 @@ def _row_to_card(row: dict) -> Card:
 
 
 def _row_to_user(row: dict) -> User:
+    changed_at = row.get("password_changed_at")
+    active_since = row.get("active_since")
     return User(
         username=row.get("username") or "",
         display_name=row.get("display_name") or (row.get("username") or ""),
         active=bool(row.get("active", 1)),
         email=row.get("email") or None,
+        has_password=bool(row.get("has_password") or row.get("password_hash")),
+        require_password_reset=bool(row.get("require_password_reset", 0)),
+        password_changed_at=int(changed_at) if changed_at else None,
+        active_since=int(active_since) if active_since else None,
     )
 
 
@@ -623,13 +704,27 @@ def delete_card(card_id: int, *, path: Optional[Path] = None) -> None:
 
 # ---------------- users & roles -----------------
 
-def list_users(*, include_inactive: bool = True, path: Optional[Path] = None) -> List[User]:
+def list_users(*, include_inactive: bool = False, path: Optional[Path] = None) -> List[User]:
     base = _resolve_base(path)
     rows = _get_db(base).fetch_users()
     users = [_row_to_user(row) for row in rows]
     if include_inactive:
         return users
     return [user for user in users if user.active]
+
+
+def get_user(username: str, *, path: Optional[Path] = None) -> Optional[User]:
+    base = _resolve_base(path)
+    row = _get_db(base).fetch_user(username)
+    if not row:
+        return None
+    return _row_to_user(row)
+
+
+def set_user_active(username: str, active: bool, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    timestamp = int(time.time()) if active else None
+    _get_db(base).set_user_active(username, active, timestamp=timestamp)
 
 
 def upsert_user(user: User, *, path: Optional[Path] = None) -> User:
@@ -639,14 +734,179 @@ def upsert_user(user: User, *, path: Optional[Path] = None) -> User:
         "display_name": user.display_name,
         "email": user.email,
         "active": user.active,
+        "require_password_reset": user.require_password_reset,
     }
     _get_db(base).upsert_user(payload)
-    return user
+    set_user_active(user.username, bool(user.active), path=base)
+    return get_user(user.username, path=base) or user
+
+
+def set_user_password(
+    username: str,
+    password: str,
+    *,
+    require_reset: bool = False,
+    path: Optional[Path] = None,
+) -> None:
+    base = _resolve_base(path)
+    password_hash, salt, algo = _password_entry(password)
+    changed_at = int(time.time())
+    _get_db(base).update_user_password(
+        username,
+        password_hash=password_hash,
+        password_salt=salt,
+        password_algo=algo,
+        password_changed_at=changed_at,
+        require_password_reset=require_reset,
+    )
+
+
+def clear_user_password(username: str, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).update_user_password(
+        username,
+        password_hash=None,
+        password_salt=None,
+        password_algo=None,
+        password_changed_at=None,
+        require_password_reset=True,
+    )
+
+
+def mark_user_password_reset(
+    username: str,
+    *,
+    require_reset: bool = True,
+    path: Optional[Path] = None,
+) -> None:
+    base = _resolve_base(path)
+    _get_db(base).mark_password_reset(username, require_reset)
+
+
+def authenticate_user(
+    username: str,
+    password: Optional[str],
+    *,
+    path: Optional[Path] = None,
+) -> AuthenticationResult:
+    base = _resolve_base(path)
+    row = _get_db(base).fetch_user(username)
+    if not row:
+        return AuthenticationResult(None, "not_found", "El usuario no existe.")
+
+    user = _row_to_user(row)
+    if not user.active:
+        return AuthenticationResult(user, "disabled", "El usuario está deshabilitado.")
+
+    has_password = bool(row.get("password_hash"))
+    if not has_password:
+        return AuthenticationResult(
+            user,
+            "password_required",
+            "El usuario no tiene contraseña configurada.",
+            needs_password=True,
+        )
+
+    if not password:
+        return AuthenticationResult(
+            user,
+            "password_required",
+            "Captura la contraseña.",
+            needs_password=True,
+        )
+
+    valid = _verify_password(
+        password,
+        row.get("password_hash"),
+        row.get("password_salt"),
+        row.get("password_algo"),
+    )
+    if not valid:
+        return AuthenticationResult(user, "invalid_credentials", "Contraseña incorrecta.")
+
+    if row.get("require_password_reset"):
+        return AuthenticationResult(
+            user,
+            "reset_required",
+            "Es necesario restablecer la contraseña.",
+            require_password_reset=True,
+        )
+
+    return AuthenticationResult(user, "ok")
+
+
+def update_user_profile(
+    username: str,
+    *,
+    display_name: Optional[str],
+    email: Optional[str],
+    path: Optional[Path] = None,
+) -> None:
+    base = _resolve_base(path)
+    current = get_user(username, path=base)
+    if not current:
+        return
+    new_display = display_name if display_name is not None else current.display_name
+    new_email = email if email is not None else current.email
+    _get_db(base).update_user_profile(username, new_display, new_email)
+
+
+def create_user(
+    username: str,
+    display_name: str,
+    *,
+    email: Optional[str] = None,
+    roles: Optional[Sequence[str]] = None,
+    password: Optional[str] = None,
+    active: bool = True,
+    require_password_reset: bool = False,
+    path: Optional[Path] = None,
+) -> User:
+    user = User(
+        username=username,
+        display_name=display_name,
+        email=email,
+        active=active,
+        require_password_reset=require_password_reset or not bool(password),
+    )
+    created = upsert_user(user, path=path)
+    if password:
+        set_user_password(
+            username,
+            password,
+            require_reset=require_password_reset,
+            path=path,
+        )
+    else:
+        mark_user_password_reset(username, require_reset=True, path=path)
+    if roles is not None:
+        set_user_roles(username, roles, path=path)
+    return get_user(username, path=path) or created
+
+
+def update_user(
+    username: str,
+    *,
+    display_name: Optional[str] = None,
+    email: Optional[str] = None,
+    roles: Optional[Sequence[str]] = None,
+    active: Optional[bool] = None,
+    require_password_reset: Optional[bool] = None,
+    path: Optional[Path] = None,
+) -> Optional[User]:
+    if display_name is not None or email is not None:
+        update_user_profile(username, display_name=display_name, email=email, path=path)
+    if active is not None:
+        set_user_active(username, active, path=path)
+    if require_password_reset is not None:
+        mark_user_password_reset(username, require_reset=require_password_reset, path=path)
+    if roles is not None:
+        set_user_roles(username, roles, path=path)
+    return get_user(username, path=path)
 
 
 def delete_user(username: str, *, path: Optional[Path] = None) -> None:
-    base = _resolve_base(path)
-    _get_db(base).delete_user(username)
+    set_user_active(username, False, path=path)
 
 
 def list_roles(*, path: Optional[Path] = None) -> List[Role]:
