@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSplitter,
     QScrollArea,
     QTreeWidget,
     QTreeWidgetItem,
@@ -128,9 +127,6 @@ class SprintView(QWidget):
 
         layout.addLayout(header)
 
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter, 1)
-
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -169,27 +165,12 @@ class SprintView(QWidget):
         self.tree.setUniformRowHeights(True)
         left_layout.addWidget(self.tree, 1)
 
-        splitter.addWidget(left_panel)
-
-        right_panel = QWidget()
-        right_panel.setMinimumWidth(320)
-        right_panel.setMaximumWidth(420)
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(12, 12, 12, 12)
-        right_layout.setSpacing(12)
-
-        hint = QLabel(
-            "Selecciona un sprint o tarjeta para abrir la ventana de edición."
-        )
+        hint = QLabel("Selecciona un sprint o tarjeta para abrir la ventana de edición.")
         hint.setWordWrap(True)
-        hint.setAlignment(Qt.AlignTop)
-        right_layout.addWidget(hint)
-        right_layout.addStretch(1)
+        hint.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        left_layout.addWidget(hint)
 
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([860, 320])
+        layout.addWidget(left_panel, 1)
 
         self._build_sprint_form()
         self._build_card_form()

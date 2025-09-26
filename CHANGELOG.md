@@ -16,6 +16,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - `SprintView` crea y mantiene las etapas de cada HU al guardar tarjetas y al marcar unit/QA, reflejando el progreso compuesto en la lista y el panel de detalle.
 - Las pruebas unitarias del store de tarjetas validan la persistencia y recuperación de etapas, ajustando el backend falso para simular `card_stages`.
 - Los formularios de sprint y tarjeta ahora se muestran en ventanas independientes con desplazamiento para facilitar la captura completa de datos.
+- La vista de sprints elimina el panel lateral de detalle y concentra todas las acciones en el listado principal.
 
 ## [1.7.0] - 2025-02-16
 ### Añadido
