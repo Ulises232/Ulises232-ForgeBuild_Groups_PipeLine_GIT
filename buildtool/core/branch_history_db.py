@@ -1282,8 +1282,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     action NVARCHAR(255) NULL,
                     result NVARCHAR(255) NULL,
                     message NVARCHAR(MAX) NULL,
-                    branch_key NVARCHAR(512) NULL,
-                    CONSTRAINT uq_activity UNIQUE (ts, [user], group_name, project, branch, action, result, message)
+                    branch_key NVARCHAR(512) NULL
                 )
             END
             """,
