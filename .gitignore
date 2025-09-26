@@ -7,3 +7,4 @@ build
 dist
 build_ruta_exe.bat
 assets/forgebuild.ico
+.env
