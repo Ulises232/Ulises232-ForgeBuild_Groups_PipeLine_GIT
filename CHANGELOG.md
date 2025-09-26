@@ -6,6 +6,16 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.8.0] - 2025-02-17
+### Añadido
+- Tabla `card_stages` en SQL Server con asignaciones, matrices, ciclos y validaciones por etapa para cada tarjeta, expuesta mediante la API de `BranchHistoryDB` y los dataclasses extendidos de tarjetas. 
+- Controles de UI por etapa (análisis, desarrollo, QA y demo) en la vista de sprints para capturar responsables, URLs de matrices/ciclos y banderas de validación, sincronizados automáticamente con el árbol de seguimiento.
+- Historial de pipelines operando sobre SQL Server reutilizando la cadena `BRANCH_HISTORY_DB_URL`, con inicialización de esquema e índices remotos.
+
+### Cambiado
+- `SprintView` crea y mantiene las etapas de cada HU al guardar tarjetas y al marcar unit/QA, reflejando el progreso compuesto en la lista y el panel de detalle.
+- Las pruebas unitarias del store de tarjetas validan la persistencia y recuperación de etapas, ajustando el backend falso para simular `card_stages`.
+
 ## [1.7.0] - 2025-02-16
 ### Añadido
 - Tabla `branch_local_users` en SQL Server para registrar la presencia local de cada rama por usuario y exponerla mediante `load_local_states` y nuevas pruebas automatizadas.

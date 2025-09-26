@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from ..core.branch_store import (
     BranchRecord,
     Card,
+    CardStage,
     Sprint,
     delete_card,
     delete_sprint,
@@ -59,6 +60,7 @@ class SprintView(QWidget):
         self._users: List[str] = []
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
+        self._stage_widgets: Dict[str, Dict[str, QWidget]] = {}
 
         self._selected_sprint_id: Optional[int] = None
         self._selected_card_id: Optional[int] = None
@@ -266,10 +268,9 @@ class SprintView(QWidget):
         self.txtCardBranch.textChanged.connect(self._on_branch_text_changed)
 
         self.cboCardAssignee = QComboBox()
-        form.addRow("Desarrollador", self.cboCardAssignee)
-
         self.cboCardQA = QComboBox()
-        form.addRow("QA", self.cboCardQA)
+        self.cboStageAnalysis = QComboBox()
+        self.cboStageDemo = QComboBox()
 
         self.txtCardUnitUrl = QLineEdit()
         self.txtCardUnitUrl.setPlaceholderText("https://...")
@@ -278,6 +279,51 @@ class SprintView(QWidget):
         self.txtCardQAUrl = QLineEdit()
         self.txtCardQAUrl.setPlaceholderText("https://...")
         form.addRow("Link QA", self.txtCardQAUrl)
+
+        stage_specs = [
+            ("analysis", "Análisis", self.cboStageAnalysis),
+            ("dev", "Desarrollo", self.cboCardAssignee),
+            ("qa", "QA", self.cboCardQA),
+            ("demo", "Demo", self.cboStageDemo),
+        ]
+        self._stage_widgets.clear()
+        for stage_key, title, combo in stage_specs:
+            stage_group = QGroupBox(f"Etapa: {title}")
+            stage_layout = QFormLayout(stage_group)
+            stage_layout.setLabelAlignment(Qt.AlignRight)
+            widgets: Dict[str, QWidget] = {}
+            self._stage_widgets[stage_key] = widgets
+            widgets["assignee"] = combo
+            stage_layout.addRow("Responsable", combo)
+
+            matrix_url = QLineEdit()
+            matrix_url.setPlaceholderText("https://...")
+            widgets["matrix_url"] = matrix_url
+            stage_layout.addRow("URL matriz", matrix_url)
+
+            matrix_done = QCheckBox("Completada")
+            widgets["matrix_done"] = matrix_done
+            stage_layout.addRow("Matriz lista", matrix_done)
+
+            cycle_url = QLineEdit()
+            cycle_url.setPlaceholderText("https://...")
+            widgets["cycle_url"] = cycle_url
+            stage_layout.addRow("URL ciclo", cycle_url)
+
+            cycle_done = QCheckBox("Completado")
+            widgets["cycle_done"] = cycle_done
+            stage_layout.addRow("Ciclo listo", cycle_done)
+
+            validation_done = QCheckBox("Sin incidencias")
+            widgets["validation_done"] = validation_done
+            stage_layout.addRow("Validación", validation_done)
+
+            validation_notes = QLineEdit()
+            validation_notes.setPlaceholderText("Notas o referencia")
+            widgets["validation_notes"] = validation_notes
+            stage_layout.addRow("Notas", validation_notes)
+
+            form.addRow(stage_group)
 
         self.lblCardChecks = QLabel("Pruebas: pendiente | QA: pendiente")
         form.addRow("Checks", self.lblCardChecks)
@@ -480,6 +526,12 @@ class SprintView(QWidget):
         self._populate_user_combo(
             self.cboCardQA, None, allow_empty=True, required_role="qa"
         )
+        self._populate_user_combo(
+            self.cboStageAnalysis, None, allow_empty=True
+        )
+        self._populate_user_combo(
+            self.cboStageDemo, None, allow_empty=True
+        )
 
         self._populate_tree()
         self._restore_selection()
@@ -533,6 +585,9 @@ class SprintView(QWidget):
         checks.append("Unit ✔" if card.unit_tests_done else "Unit ✖")
         checks.append("QA ✔" if card.qa_done else "QA ✖")
         checks.append("Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖")
+        stage_summary = self._stage_status_summary(card)
+        if stage_summary:
+            checks.append(stage_summary)
         item.setText(3, " / ".join(checks))
         item.setText(4, card.branch)
         item.setText(5, sprint.qa_branch_key or "")
@@ -791,23 +846,15 @@ class SprintView(QWidget):
         self.txtCardTicket.blockSignals(False)
         self.txtCardTitle.setText(card.title or "")
         self._prepare_branch_inputs(card, sprint)
-        self._populate_user_combo(
-            self.cboCardAssignee,
-            card.assignee or None,
-            allow_empty=True,
-            required_role="developer",
-        )
-        self._populate_user_combo(
-            self.cboCardQA,
-            card.qa_assignee or None,
-            allow_empty=True,
-            required_role="qa",
-        )
         self.txtCardUnitUrl.setText(card.unit_tests_url or "")
         self.txtCardQAUrl.setText(card.qa_url or "")
+        self._apply_stage_to_form(card)
         checks = []
         checks.append("Pruebas: ✔" if card.unit_tests_done else "Pruebas: pendiente")
         checks.append("QA: ✔" if card.qa_done else "QA: pendiente")
+        stage_summary = self._stage_status_summary(card)
+        if stage_summary:
+            checks.append(stage_summary)
         self.lblCardChecks.setText(" | ".join(checks))
         record = self._branch_record_for_card(card, sprint)
         if record:
@@ -826,6 +873,148 @@ class SprintView(QWidget):
             self.lblCardCreator.setText("Creada por: -")
         self._update_branch_preview()
         self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _ensure_stage_models(self, card: Card) -> Dict[str, CardStage]:
+        mapping: Dict[str, CardStage] = {stage.stage_type: stage for stage in card.stages}
+        for stage_key in ("analysis", "dev", "qa", "demo"):
+            if stage_key not in mapping:
+                mapping[stage_key] = CardStage(id=None, card_id=card.id or 0, stage_type=stage_key)
+        card.stages = list(mapping.values())
+        return mapping
+
+    # ------------------------------------------------------------------
+    def _apply_stage_to_form(self, card: Card) -> None:
+        mapping = self._ensure_stage_models(card)
+        stage_roles = {
+            "analysis": None,
+            "dev": "developer",
+            "qa": "qa",
+            "demo": None,
+        }
+        for stage_key, widgets in self._stage_widgets.items():
+            stage = mapping.get(stage_key)
+            if not stage:
+                continue
+            assignee_widget = widgets.get("assignee")
+            if isinstance(assignee_widget, QComboBox):
+                fallback = None
+                if stage_key == "dev" and card.assignee:
+                    fallback = card.assignee
+                elif stage_key == "qa" and card.qa_assignee:
+                    fallback = card.qa_assignee
+                self._populate_user_combo(
+                    assignee_widget,
+                    stage.assignee or fallback,
+                    allow_empty=True,
+                    required_role=stage_roles.get(stage_key),
+                )
+            matrix_url = widgets.get("matrix_url")
+            if isinstance(matrix_url, QLineEdit):
+                matrix_url.setText(stage.matrix_url or "")
+            matrix_done = widgets.get("matrix_done")
+            if isinstance(matrix_done, QCheckBox):
+                matrix_done.setChecked(stage.matrix_completed)
+            cycle_url = widgets.get("cycle_url")
+            if isinstance(cycle_url, QLineEdit):
+                cycle_url.setText(stage.cycle_url or "")
+            cycle_done = widgets.get("cycle_done")
+            if isinstance(cycle_done, QCheckBox):
+                cycle_done.setChecked(stage.cycle_completed)
+            validation_done = widgets.get("validation_done")
+            if isinstance(validation_done, QCheckBox):
+                validation_done.setChecked(stage.validation_passed)
+            notes_widget = widgets.get("validation_notes")
+            if isinstance(notes_widget, QLineEdit):
+                notes_widget.setText(stage.validation_notes or "")
+
+    # ------------------------------------------------------------------
+    def _collect_stage_data(self, card: Card, now: int, user: str) -> List[CardStage]:
+        mapping = self._ensure_stage_models(card)
+        stages: List[CardStage] = []
+        for stage_key, widgets in self._stage_widgets.items():
+            stage = mapping.get(stage_key)
+            if not stage:
+                continue
+            assignee_widget = widgets.get("assignee")
+            if isinstance(assignee_widget, QComboBox):
+                stage.assignee = self._combo_value(assignee_widget)
+            matrix_url = widgets.get("matrix_url")
+            if isinstance(matrix_url, QLineEdit):
+                value = matrix_url.text().strip()
+                stage.matrix_url = value or None
+            matrix_done = widgets.get("matrix_done")
+            if isinstance(matrix_done, QCheckBox):
+                checked = matrix_done.isChecked()
+                if checked:
+                    if not stage.matrix_completed_at:
+                        stage.matrix_completed_at = now
+                        stage.matrix_completed_by = user
+                else:
+                    stage.matrix_completed_at = None
+                    stage.matrix_completed_by = None
+                stage.matrix_completed = checked
+            cycle_url = widgets.get("cycle_url")
+            if isinstance(cycle_url, QLineEdit):
+                value = cycle_url.text().strip()
+                stage.cycle_url = value or None
+            cycle_done = widgets.get("cycle_done")
+            if isinstance(cycle_done, QCheckBox):
+                checked = cycle_done.isChecked()
+                if checked:
+                    if not stage.cycle_completed_at:
+                        stage.cycle_completed_at = now
+                        stage.cycle_completed_by = user
+                else:
+                    stage.cycle_completed_at = None
+                    stage.cycle_completed_by = None
+                stage.cycle_completed = checked
+            validation_done = widgets.get("validation_done")
+            if isinstance(validation_done, QCheckBox):
+                checked = validation_done.isChecked()
+                if checked:
+                    if not stage.validation_at:
+                        stage.validation_at = now
+                        stage.validation_by = user
+                else:
+                    stage.validation_at = None
+                    stage.validation_by = None
+                stage.validation_passed = checked
+            notes_widget = widgets.get("validation_notes")
+            if isinstance(notes_widget, QLineEdit):
+                value = notes_widget.text().strip()
+                stage.validation_notes = value or None
+            if not stage.created_at:
+                stage.created_at = now
+                stage.created_by = stage.created_by or user
+            stage.updated_at = now
+            stage.updated_by = user
+            stages.append(stage)
+        return stages
+
+    # ------------------------------------------------------------------
+    def _stage_status_summary(self, card: Card) -> str:
+        mapping = {stage.stage_type: stage for stage in self._ensure_stage_models(card)}
+        labels = {
+            "analysis": "Análisis",
+            "dev": "Dev",
+            "qa": "QA",
+            "demo": "Demo",
+        }
+        parts: List[str] = []
+        for stage_key in ("analysis", "dev", "qa", "demo"):
+            stage = mapping.get(stage_key)
+            if not stage:
+                continue
+            label = labels.get(stage_key, stage_key)
+            if stage.validation_passed:
+                status = "✔"
+            elif stage.cycle_completed or stage.matrix_completed:
+                status = "⚙"
+            else:
+                status = "pendiente"
+            parts.append(f"{label}: {status}")
+        return " | ".join(parts)
 
     # ------------------------------------------------------------------
     def _prepare_branch_inputs(self, card: Card, sprint: Sprint) -> None:
@@ -1147,6 +1336,12 @@ class SprintView(QWidget):
         card.qa_url = self.txtCardQAUrl.text().strip() or None
         card.updated_at = now
         card.updated_by = user
+        card.stages = self._collect_stage_data(card, now, user)
+        for stage in card.stages:
+            if stage.stage_type == "dev":
+                card.assignee = stage.assignee
+            elif stage.stage_type == "qa":
+                card.qa_assignee = stage.assignee
 
         saved = upsert_card(card)
         if saved.id is not None:
@@ -1222,6 +1417,23 @@ class SprintView(QWidget):
             card.unit_tests_done = toggled_on
             card.unit_tests_by = user if toggled_on else None
             card.unit_tests_at = now if toggled_on else None
+            stage_map = self._ensure_stage_models(card)
+            dev_stage = stage_map.get("dev")
+            if dev_stage:
+                dev_stage.matrix_completed = toggled_on
+                dev_stage.cycle_completed = toggled_on
+                if toggled_on:
+                    dev_stage.matrix_completed_at = now
+                    dev_stage.matrix_completed_by = user
+                    dev_stage.cycle_completed_at = now
+                    dev_stage.cycle_completed_by = user
+                else:
+                    dev_stage.matrix_completed_at = None
+                    dev_stage.matrix_completed_by = None
+                    dev_stage.cycle_completed_at = None
+                    dev_stage.cycle_completed_by = None
+                dev_stage.updated_at = now
+                dev_stage.updated_by = user
             history.update_card_status(
                 card.id, unit_tests_status="done" if toggled_on else "pending"
             )
@@ -1236,6 +1448,14 @@ class SprintView(QWidget):
             card.qa_done = toggled_on
             card.qa_by = user if toggled_on else None
             card.qa_at = now if toggled_on else None
+            stage_map = self._ensure_stage_models(card)
+            qa_stage = stage_map.get("qa")
+            if qa_stage:
+                qa_stage.validation_passed = toggled_on
+                qa_stage.validation_at = now if toggled_on else None
+                qa_stage.validation_by = user if toggled_on else None
+                qa_stage.updated_at = now
+                qa_stage.updated_by = user
             history.update_card_status(
                 card.id,
                 qa_status="approved" if toggled_on else "pending",
@@ -1249,12 +1469,16 @@ class SprintView(QWidget):
             card.status = "unit"
         else:
             card.status = "pending"
+        card.stages = list(self._ensure_stage_models(card).values())
         upsert_card(card)
         if card.id is not None:
             self._cards[card.id] = card
         checks = []
         checks.append("Pruebas: ✔" if card.unit_tests_done else "Pruebas: pendiente")
         checks.append("QA: ✔" if card.qa_done else "QA: pendiente")
+        stage_summary = self._stage_status_summary(card)
+        if stage_summary:
+            checks.append(stage_summary)
         self.lblCardChecks.setText(" | ".join(checks))
         current_item = self.tree.currentItem()
         if current_item and current_item.data(0, Qt.UserRole) == ("card", card.id):
@@ -1263,6 +1487,9 @@ class SprintView(QWidget):
                 "QA ✔" if card.qa_done else "QA ✖",
                 "Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖",
             ]
+            summary = self._stage_status_summary(card)
+            if summary:
+                card_checks.append(summary)
             current_item.setText(3, " / ".join(card_checks))
         self.update_permissions()
         self._cards[card.id] = card

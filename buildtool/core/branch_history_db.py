@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 import os
 import queue
@@ -96,6 +96,31 @@ CARD_COLUMNS = [
     "status",
     "branch_created_by",
     "branch_created_at",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
+]
+
+
+CARD_STAGE_COLUMNS = [
+    "id",
+    "card_id",
+    "stage_type",
+    "assignee",
+    "matrix_url",
+    "matrix_completed",
+    "matrix_completed_by",
+    "matrix_completed_at",
+    "cycle_url",
+    "cycle_completed",
+    "cycle_completed_by",
+    "cycle_completed_at",
+    "validation_passed",
+    "validation_notes",
+    "validation_by",
+    "validation_at",
+    "status",
     "created_at",
     "created_by",
     "updated_at",
@@ -239,6 +264,38 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
     return data
 
 
+def _normalize_card_stage(payload: dict, *, card_id: int) -> Dict[str, object]:
+    stage_type = (payload.get("stage_type") or "").strip().lower()
+    if not stage_type:
+        raise ValueError("Cada etapa requiere el tipo de etapa (stage_type).")
+    data = {
+        "id": payload.get("id"),
+        "card_id": int(card_id),
+        "stage_type": stage_type,
+        "assignee": payload.get("assignee") or None,
+        "matrix_url": (payload.get("matrix_url") or "").strip() or None,
+        "matrix_completed": 1 if payload.get("matrix_completed") else 0,
+        "matrix_completed_by": payload.get("matrix_completed_by") or None,
+        "matrix_completed_at": int(payload.get("matrix_completed_at") or 0) or None,
+        "cycle_url": (payload.get("cycle_url") or "").strip() or None,
+        "cycle_completed": 1 if payload.get("cycle_completed") else 0,
+        "cycle_completed_by": payload.get("cycle_completed_by") or None,
+        "cycle_completed_at": int(payload.get("cycle_completed_at") or 0) or None,
+        "validation_passed": 1 if payload.get("validation_passed") else 0,
+        "validation_notes": payload.get("validation_notes") or None,
+        "validation_by": payload.get("validation_by") or None,
+        "validation_at": int(payload.get("validation_at") or 0) or None,
+        "status": (payload.get("status") or "pending").strip().lower(),
+        "created_at": int(payload.get("created_at") or 0),
+        "created_by": payload.get("created_by") or None,
+        "updated_at": int(payload.get("updated_at") or 0),
+        "updated_by": payload.get("updated_by") or None,
+    }
+    if data["id"] in ("", None):
+        data["id"] = None
+    return data
+
+
 def _normalize_user(payload: dict) -> Dict[str, object]:
     data = {
         "username": payload.get("username") or "",
@@ -308,6 +365,34 @@ class Card:
     created_by: str = ""
     updated_at: int = 0
     updated_by: str = ""
+    stages: List["CardStage"] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class CardStage:
+    """Detailed information about each workflow stage for a card."""
+
+    id: Optional[int]
+    card_id: int
+    stage_type: str
+    assignee: Optional[str] = None
+    matrix_url: Optional[str] = None
+    matrix_completed: bool = False
+    matrix_completed_by: Optional[str] = None
+    matrix_completed_at: Optional[int] = None
+    cycle_url: Optional[str] = None
+    cycle_completed: bool = False
+    cycle_completed_by: Optional[str] = None
+    cycle_completed_at: Optional[int] = None
+    validation_passed: bool = False
+    validation_notes: Optional[str] = None
+    validation_by: Optional[str] = None
+    validation_at: Optional[int] = None
+    status: str = "pending"
+    created_at: int = 0
+    created_by: Optional[str] = None
+    updated_at: int = 0
+    updated_by: Optional[str] = None
 
 
 @dataclass(slots=True)
@@ -540,6 +625,36 @@ class _SqlServerBranchHistory:
                     updated_at BIGINT NOT NULL DEFAULT 0,
                     updated_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'card_stages')
+            BEGIN
+                CREATE TABLE card_stages (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    card_id INT NOT NULL,
+                    stage_type NVARCHAR(64) NOT NULL,
+                    assignee NVARCHAR(255) NULL,
+                    matrix_url NVARCHAR(1024) NULL,
+                    matrix_completed BIT NOT NULL DEFAULT 0,
+                    matrix_completed_by NVARCHAR(255) NULL,
+                    matrix_completed_at BIGINT NULL,
+                    cycle_url NVARCHAR(1024) NULL,
+                    cycle_completed BIT NOT NULL DEFAULT 0,
+                    cycle_completed_by NVARCHAR(255) NULL,
+                    cycle_completed_at BIGINT NULL,
+                    validation_passed BIT NOT NULL DEFAULT 0,
+                    validation_notes NVARCHAR(MAX) NULL,
+                    validation_by NVARCHAR(255) NULL,
+                    validation_at BIGINT NULL,
+                    status NVARCHAR(32) NOT NULL DEFAULT 'pending',
+                    created_at BIGINT NOT NULL DEFAULT 0,
+                    created_by NVARCHAR(255) NULL,
+                    updated_at BIGINT NOT NULL DEFAULT 0,
+                    updated_by NVARCHAR(255) NULL,
+                    CONSTRAINT fk_card_stage_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                    CONSTRAINT uq_card_stage UNIQUE(card_id, stage_type)
                 );
             END
             """,
@@ -1169,14 +1284,20 @@ class _SqlServerBranchHistory:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(params))
             rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        cards = [dict(row) for row in rows]
+        self._attach_stages(cards)
+        return cards
 
     def fetch_card(self, card_id: int) -> Optional[dict]:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM cards WHERE id=%s", (int(card_id),))
             row = cursor.fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        record = dict(row)
+        self._attach_stages([record])
+        return record
 
     def upsert_card(self, payload: dict) -> int:
         data = _normalize_card(payload)
@@ -1208,7 +1329,11 @@ class _SqlServerBranchHistory:
         ]
         with self._connect() as conn:
             cursor = conn.cursor()
-            return self._execute_upsert_generic(cursor, "cards", "id", data, columns)
+            card_id = self._execute_upsert_generic(cursor, "cards", "id", data, columns)
+            stages = payload.get("stages")
+            if stages is not None:
+                self._sync_card_stages(cursor, card_id, stages)
+            return card_id
 
     def delete_card(self, card_id: int) -> None:
         with self._connect() as conn:
@@ -1238,6 +1363,68 @@ class _SqlServerBranchHistory:
             )
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+    def _attach_stages(self, cards: List[Dict[str, object]]) -> None:
+        ids = [int(card.get("id") or 0) for card in cards if card.get("id")]
+        if not ids:
+            for card in cards:
+                card.setdefault("stages", [])
+            return
+        placeholders = ",".join("%s" for _ in ids)
+        sql = f"SELECT * FROM card_stages WHERE card_id IN ({placeholders}) ORDER BY id"
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, tuple(ids))
+            rows = cursor.fetchall()
+        stage_map: Dict[int, List[dict]] = {card_id: [] for card_id in ids}
+        for row in rows:
+            data = dict(row)
+            data["matrix_completed"] = bool(data.get("matrix_completed"))
+            data["cycle_completed"] = bool(data.get("cycle_completed"))
+            data["validation_passed"] = bool(data.get("validation_passed"))
+            stage_map.setdefault(int(data.get("card_id") or 0), []).append(data)
+        for card in cards:
+            card_id = int(card.get("id") or 0)
+            card["stages"] = stage_map.get(card_id, [])
+
+    def _sync_card_stages(
+        self,
+        cursor: "pymssql.Cursor",
+        card_id: int,
+        stages: Iterable[dict],
+    ) -> None:
+        cursor.execute(
+            "SELECT id, stage_type FROM card_stages WHERE card_id=%s",
+            (int(card_id),),
+        )
+        existing_rows = cursor.fetchall()
+        existing: Dict[str, int] = {}
+        for row in existing_rows:
+            stage_type = (row.get("stage_type") or "").strip().lower()
+            if stage_type:
+                existing[stage_type] = int(row.get("id"))
+        seen: set[str] = set()
+        for stage in stages:
+            normalized = _normalize_card_stage(stage, card_id=int(card_id))
+            stage_type = normalized["stage_type"]
+            seen.add(stage_type)
+            if not normalized.get("id") and stage_type in existing:
+                normalized["id"] = existing[stage_type]
+            stage_id = self._execute_upsert_generic(
+                cursor,
+                "card_stages",
+                "id",
+                normalized,
+                CARD_STAGE_COLUMNS,
+            )
+            existing[stage_type] = int(stage_id or 0)
+        to_remove = [
+            stage_id for stage_type, stage_id in existing.items() if stage_type not in seen
+        ]
+        if to_remove:
+            placeholders = ",".join("%s" for _ in to_remove)
+            delete_sql = f"DELETE FROM card_stages WHERE id IN ({placeholders})"
+            cursor.execute(delete_sql, tuple(to_remove))
 
     def fetch_user(self, username: str) -> Optional[dict]:
         with self._connect() as conn:

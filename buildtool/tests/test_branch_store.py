@@ -8,6 +8,7 @@ from buildtool.core import branch_store
 from buildtool.core.branch_store import (
     BranchRecord,
     Card,
+    CardStage,
     Sprint,
     load_activity_log,
     load_index,
@@ -21,6 +22,7 @@ class FakeBranchHistory:
         self.activity_rows: list[dict] = []
         self.sprints: dict[int, dict] = {}
         self.cards: dict[int, dict] = {}
+        self.card_stages: dict[tuple[int, str], dict] = {}
         self.users: dict[str, dict] = {}
         self.roles: dict[str, dict] = {}
         self.user_roles: list[dict] = []
@@ -173,7 +175,16 @@ class FakeBranchHistory:
                 for row in rows
                 if row.get("branch") in allowed or row.get("branch_key") in allowed
             ]
-        return [row.copy() for row in rows]
+        result: list[dict] = []
+        for row in rows:
+            payload = row.copy()
+            payload["stages"] = [
+                stage.copy()
+                for stage_key, stage in self.card_stages.items()
+                if stage_key[0] == payload.get("id")
+            ]
+            result.append(payload)
+        return result
 
     def upsert_card(self, payload: dict) -> int:
         ident = payload.get("id")
@@ -185,10 +196,28 @@ class FakeBranchHistory:
         stored = payload.copy()
         stored["id"] = ident
         self.cards[ident] = stored
+        stages = payload.get("stages") or []
+        seen: set[tuple[int, str]] = set()
+        for stage in stages:
+            stage_type = (stage.get("stage_type") or "").strip().lower()
+            if not stage_type:
+                continue
+            key = (ident, stage_type)
+            seen.add(key)
+            entry = stage.copy()
+            entry["id"] = entry.get("id") or len(self.card_stages) + 1
+            entry["card_id"] = ident
+            self.card_stages[key] = entry
+        to_remove = [key for key in list(self.card_stages) if key[0] == ident and key not in seen]
+        for key in to_remove:
+            self.card_stages.pop(key, None)
         return ident
 
     def delete_card(self, card_id: int) -> None:
         self.cards.pop(int(card_id), None)
+        to_remove = [key for key in list(self.card_stages) if key[0] == int(card_id)]
+        for key in to_remove:
+            self.card_stages.pop(key, None)
 
     # Users & roles ----------------------------------------------------
     def fetch_users(self) -> list[dict]:
@@ -546,6 +575,72 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertEqual(card.branch_key, expected_key)
         stored = branch_store.list_cards(path=self.base_path, sprint_ids=[sprint.id])
         self.assertEqual(stored[0].branch_key, expected_key)
+
+    def test_card_stage_roundtrip(self) -> None:
+        now = int(time.time())
+        sprint = Sprint(
+            id=None,
+            branch_key="ellis/proyecto/v2.68",
+            qa_branch_key="ellis/proyecto/v2.68_QA",
+            name="Sprint QA",
+            version="2.68",
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+        branch_store.upsert_sprint(sprint, path=self.base_path)
+        card = Card(
+            id=None,
+            sprint_id=sprint.id,
+            title="Tarjeta QA",
+            ticket_id="ELASS-51",
+            branch="feature/test",
+            created_by="alice",
+            updated_by="alice",
+        )
+        card.stages = [
+            CardStage(
+                id=None,
+                card_id=0,
+                stage_type="analysis",
+                assignee="alice",
+                matrix_completed=True,
+                matrix_completed_at=now,
+                created_at=now,
+                created_by="alice",
+                updated_at=now,
+                updated_by="alice",
+            ),
+            CardStage(
+                id=None,
+                card_id=0,
+                stage_type="dev",
+                assignee="bob",
+                cycle_completed=True,
+                cycle_completed_at=now,
+                validation_passed=True,
+                validation_at=now,
+                created_at=now,
+                created_by="bob",
+                updated_at=now,
+                updated_by="bob",
+            ),
+        ]
+        branch_store.upsert_card(card, path=self.base_path)
+        stored_cards = branch_store.list_cards(path=self.base_path, sprint_ids=[sprint.id])
+        self.assertEqual(len(stored_cards), 1)
+        stored = stored_cards[0]
+        self.assertEqual(len(stored.stages), 2)
+        stage_types = {stage.stage_type: stage for stage in stored.stages}
+        self.assertIn("analysis", stage_types)
+        self.assertIn("dev", stage_types)
+        analysis = stage_types["analysis"]
+        self.assertTrue(analysis.matrix_completed)
+        self.assertEqual(analysis.assignee, "alice")
+        dev = stage_types["dev"]
+        self.assertTrue(dev.cycle_completed)
+        self.assertTrue(dev.validation_passed)
 
     def test_card_urls_and_unmarking_reset_fields(self) -> None:
         now = int(time.time())
