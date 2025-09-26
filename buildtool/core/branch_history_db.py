@@ -587,8 +587,37 @@ class _SqlServerBranchHistory:
             """
             IF COL_LENGTH('users', 'require_password_reset') IS NULL
             BEGIN
-                ALTER TABLE users ADD require_password_reset BIT NOT NULL DEFAULT 0;
-                UPDATE users SET require_password_reset = 0 WHERE require_password_reset IS NULL;
+                ALTER TABLE users ADD require_password_reset BIT NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'require_password_reset') IS NOT NULL
+            BEGIN
+                UPDATE users
+                   SET require_password_reset = 0
+                 WHERE require_password_reset IS NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'require_password_reset') IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM sys.default_constraints dc
+                      JOIN sys.columns c
+                        ON c.object_id = dc.parent_object_id
+                       AND c.column_id = dc.parent_column_id
+                     WHERE dc.parent_object_id = OBJECT_ID('users')
+                       AND c.name = 'require_password_reset'
+                )
+            BEGIN
+                ALTER TABLE users
+                ADD CONSTRAINT DF_users_require_password_reset DEFAULT (0) FOR require_password_reset;
+            END
+            """,
+            """
+            IF COL_LENGTH('users', 'require_password_reset') IS NOT NULL
+            BEGIN
+                ALTER TABLE users ALTER COLUMN require_password_reset BIT NOT NULL;
             END
             """,
             """

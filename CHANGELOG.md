@@ -23,6 +23,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Corregido
 - La inicialización del esquema en SQL Server ajusta `branch_local_users.branch_key` a NVARCHAR(255) antes de crear la llave foránea hacia `branches.[key]`, evitando el error 1753 en instalaciones existentes.
 - Cobertura automatizada para la autenticación, restablecimiento y asignación de roles al crear o deshabilitar usuarios.
+- La migración de `users.require_password_reset` maneja instalaciones previas añadiendo la columna en pasos separados y forzando el valor 0, eliminando el error "Invalid column name" al iniciar.
 
 ## [1.6.0] - 2025-02-15
 ### Añadido
