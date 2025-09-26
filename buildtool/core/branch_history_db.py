@@ -1386,7 +1386,7 @@ class _SqlServerBranchHistory:
         return [dict(row) for row in rows]
 
     def fetch_activity(self, *, branch_keys: Optional[Iterable[str]] = None) -> List[dict]:
-        sql = "SELECT ts, [user] AS user, group_name, project, branch, action, result, message, branch_key FROM activity_log"
+        sql = "SELECT ts, [user] AS [user], group_name, project, branch, action, result, message, branch_key FROM activity_log"
         params: List[str] = []
         keys = [key for key in (branch_keys or []) if key]
         if keys:

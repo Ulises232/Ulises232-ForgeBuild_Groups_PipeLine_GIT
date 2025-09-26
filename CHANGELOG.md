@@ -19,6 +19,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
   columnas reservadas como `key` al inicializar roles y usuarios.
 - La lectura de roles en SQL Server deja de aliasar la columna reservada `key`, previniendo fallos al abrir el diálogo de inicio de sesión.
 - La inserción/actualización genérica devuelve las claves alfanuméricas sin forzarlas a enteros, evitando el fallo `invalid literal for int()` al crear roles predeterminados en SQL Server.
+- La consulta del historial de actividades cita el alias `user`, eliminando el error `Incorrect syntax near the keyword 'user'` al cargar la vista NAS en SQL Server.
 
 ## [1.5.1] - 2025-10-06
 ### Añadido
