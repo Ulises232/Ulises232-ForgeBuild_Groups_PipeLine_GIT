@@ -908,6 +908,11 @@ class _SqlServerBranchHistory:
         where_clauses: List[str] = []
         if filter_origin:
             where_clauses.append("b.exists_origin = 1")
+        if username:
+            where_clauses.append(
+                "(b.exists_origin = 1 OR u.username IS NOT NULL OR b.created_by = %s OR b.last_updated_by = %s)"
+            )
+            params.extend([username, username])
         if where_clauses:
             sql += " WHERE " + " AND ".join(where_clauses)
         sql += " ORDER BY b.last_updated_at DESC, b.[key]"

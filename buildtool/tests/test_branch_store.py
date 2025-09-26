@@ -37,6 +37,12 @@ class FakeBranchHistory:
             entry = None
             if username:
                 entry = self.branch_local_users.get((row.get("key"), username))
+                is_owner = (
+                    (row.get("created_by") or "") == username
+                    or (row.get("last_updated_by") or "") == username
+                )
+                if not row.get("exists_origin") and not entry and not is_owner:
+                    continue
             if entry:
                 data["local_state"] = entry.get("state")
                 data["local_location"] = entry.get("location")
@@ -273,6 +279,44 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertEqual(rec.stale_days, 5)
         self.assertEqual(rec.last_updated_at, 1700000001)
 
+    def test_load_index_hides_local_only_branches_for_other_users(self) -> None:
+        key = "g/p/feature/local"
+        self.fake.branch_rows = {
+            key: {
+                "key": key,
+                "branch": "feature/local",
+                "group_name": "g",
+                "project": "p",
+                "created_at": int(time.time()),
+                "created_by": "alice",
+                "exists_origin": 0,
+                "exists_local": 1,
+                "merge_status": None,
+                "diverged": 0,
+                "stale_days": None,
+                "last_action": "create",
+                "last_updated_at": int(time.time()),
+                "last_updated_by": "alice",
+            }
+        }
+        self.fake.branch_local_users[(key, "alice")] = {
+            "state": "present",
+            "location": None,
+            "updated_at": int(time.time()),
+        }
+
+        original_user = os.environ.get("USERNAME", "")
+        try:
+            os.environ["USERNAME"] = "alice"
+            owner_index = load_index(self.base_path)
+            self.assertIn(key, owner_index)
+
+            os.environ["USERNAME"] = "bob"
+            other_index = load_index(self.base_path)
+            self.assertNotIn(key, other_index)
+        finally:
+            os.environ["USERNAME"] = original_user or "alice"
+
     def test_record_activity_appends_entry(self) -> None:
         rec = BranchRecord(
             branch="feature/new",
@@ -333,6 +377,20 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertIn(("g/p/feature/b", "alice"), state_map)
         self.assertEqual(state_map[("g/p/feature/a", "alice")]["state"], "present")
         self.assertEqual(state_map[("g/p/feature/b", "alice")]["state"], "absent")
+
+    def test_remove_branch_deletes_backend_rows(self) -> None:
+        rec = BranchRecord(branch="feature/remove", group="g", project="p", created_by="alice")
+        rec.mark_local(True)
+        branch_store.upsert(rec)
+
+        key = rec.key()
+        self.assertIn(key, self.fake.branch_rows)
+        self.assertIn((key, "alice"), self.fake.branch_local_users)
+
+        branch_store.remove(rec)
+
+        self.assertNotIn(key, self.fake.branch_rows)
+        self.assertNotIn((key, "alice"), self.fake.branch_local_users)
 
     def test_upsert_card_adds_version_prefix(self) -> None:
         now = int(time.time())

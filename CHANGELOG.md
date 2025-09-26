@@ -11,6 +11,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - `BranchHistoryView` y la pestaña Git muestran un único historial respaldado por SQL Server, eliminando los flujos de sincronización NAS y adoptando el registro de actividad renombrado.
 - `BranchRecord` ahora calcula la disponibilidad local por usuario activo, propagando la información al backend al guardar o sincronizar el índice.
+- Solo los líderes pueden eliminar ramas desde el historial y la acción borra inmediatamente el registro en SQL Server.
+- Las ramas creadas únicamente en local permanecen visibles solo para su autor hasta que existen en origin.
 
 ### Corregido
 - La inicialización del esquema en SQL Server ajusta `branch_local_users.branch_key` a NVARCHAR(255) antes de crear la llave foránea hacia `branches.[key]`, evitando el error 1753 en instalaciones existentes.

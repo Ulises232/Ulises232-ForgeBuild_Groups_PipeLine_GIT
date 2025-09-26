@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ..core.session import current_username
+from ..core.session import current_username, require_roles
 
 from ..core.branch_store import (
     BranchRecord,
@@ -32,6 +32,7 @@ from ..core.branch_store import (
     load_index,
     record_activity,
     save_index,
+    remove,
 )
 from ..ui.widgets import combo_with_arrow
 from .shared_filters import (
@@ -52,6 +53,7 @@ class BranchHistoryView(QWidget):
         self._user_default = current_username(
             os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
         )
+        self._can_delete = require_roles("leader")
         self._group_getter = attrgetter("group")
         self._project_getter = attrgetter("project")
         self._setup_ui()
@@ -146,6 +148,10 @@ class BranchHistoryView(QWidget):
         buttons.addWidget(self.btnReset)
         form_layout.addRow(buttons)
 
+        if not self._can_delete:
+            self.btnDelete.setEnabled(False)
+            self.btnDelete.setToolTip("Solo los líderes pueden eliminar ramas del historial.")
+
         splitter.addWidget(form_box)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -185,6 +191,9 @@ class BranchHistoryView(QWidget):
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         for widget in self._togglable_controls:
+            if widget is self.btnDelete and not self._can_delete:
+                widget.setEnabled(False)
+                continue
             widget.setEnabled(enabled)
 
     @Slot()
@@ -397,12 +406,19 @@ class BranchHistoryView(QWidget):
         )
         if confirm != QMessageBox.Yes:
             return
-        backup = rec
-        self._index.pop(self._current_key, None)
-        if not self._persist_index():
-            self._index[self._current_key] = backup
+        if not self._can_delete:
+            QMessageBox.warning(
+                self,
+                self._title,
+                "Requiere rol de líder para eliminar ramas del historial.",
+            )
             return
-        self._record_activity("manual_delete", rec)
+        now = int(time.time())
+        actor = current_username(self._user_default)
+        rec.last_updated_at = now
+        rec.last_updated_by = actor
+        rec.last_action = "manual_delete"
+        self._index = remove(rec, self._index)
         self._current_key = None
         sync_group_project_filters(
             self.cboGroup,
