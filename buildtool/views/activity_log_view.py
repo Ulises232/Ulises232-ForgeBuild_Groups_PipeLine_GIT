@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.branch_store import load_nas_activity_log
+from ..core.branch_store import load_activity_log
 from ..ui.widgets import combo_with_arrow
 from .shared_filters import (
     iter_filtered_records,
@@ -27,8 +27,8 @@ from .shared_filters import (
 )
 
 
-class NasActivityLogView(QWidget):
-    """Visualiza el registro de actividad NAS persistido en SQLite."""
+class ActivityLogView(QWidget):
+    """Visualiza el registro de actividad del backend SQL Server."""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -92,7 +92,7 @@ class NasActivityLogView(QWidget):
     # ----- data -----
     @Slot()
     def _load_entries(self) -> None:
-        self._entries = load_nas_activity_log()
+        self._entries = load_activity_log()
         self._entries.sort(key=lambda e: e.get("ts") or 0, reverse=True)
         sync_group_project_filters(
             self.cboGroup,

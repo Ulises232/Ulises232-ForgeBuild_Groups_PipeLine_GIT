@@ -1,9 +1,9 @@
 import getpass
 import os
 import time
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
-from typing import Callable, Literal, Optional, Sequence, Tuple
+from typing import Optional
 
 from operator import attrgetter
 
@@ -24,17 +24,15 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from ..core.session import current_username
+from ..core.session import current_username, require_roles
 
 from ..core.branch_store import (
     BranchRecord,
     Index,
-    NasUnavailableError,
     load_index,
-    load_nas_index,
     record_activity,
     save_index,
-    save_nas_index,
+    remove,
 )
 from ..ui.widgets import combo_with_arrow
 from .shared_filters import (
@@ -44,59 +42,22 @@ from .shared_filters import (
 )
 
 
-@dataclass(frozen=True)
-class BranchHistoryBackend:
-    """Configura el origen de datos para la vista de historial de ramas."""
-
-    storage: Literal["local", "nas"]
-    title: str
-    load: Callable[[], Index]
-    save: Callable[[Index], None]
-    activity_targets: Sequence[str]
-    activity_message: str
-    unavailable_exceptions: Tuple[type[BaseException], ...] = ()
-
-    def is_unavailable_error(self, exc: BaseException) -> bool:
-        return bool(self.unavailable_exceptions) and isinstance(exc, self.unavailable_exceptions)
-
-
 class BranchHistoryView(QWidget):
-    """Permite consultar y editar el historial de ramas tanto local como en NAS."""
+    """Permite consultar y editar el historial de ramas persistido en SQL Server."""
 
-    def __init__(self, storage: Literal["local", "nas"], parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.backend = self._build_backend(storage)
+        self._title = "Historial"
         self._index: Index = {}
         self._current_key: Optional[str] = None
         self._user_default = current_username(
             os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
         )
+        self._can_delete = require_roles("leader")
         self._group_getter = attrgetter("group")
         self._project_getter = attrgetter("project")
         self._setup_ui()
         self._load_index()
-
-    def _build_backend(self, storage: Literal["local", "nas"]) -> BranchHistoryBackend:
-        if storage == "local":
-            return BranchHistoryBackend(
-                storage="local",
-                title="Historial local",
-                load=load_index,
-                save=save_index,
-                activity_targets=("local",),
-                activity_message="Local manual",
-            )
-        if storage == "nas":
-            return BranchHistoryBackend(
-                storage="nas",
-                title="NAS",
-                load=load_nas_index,
-                save=save_nas_index,
-                activity_targets=("local", "nas"),
-                activity_message="NAS manual",
-                unavailable_exceptions=(NasUnavailableError,),
-            )
-        raise ValueError(f"Storage '{storage}' is not supported")
 
     # ----- setup -----
     def _setup_ui(self) -> None:
@@ -141,7 +102,7 @@ class BranchHistoryView(QWidget):
                 "Rama",
                 "Grupo",
                 "Proyecto",
-                "Local",
+                "Local (usuario actual)",
                 "Origin",
                 "Merge",
                 "Actualizado",
@@ -162,7 +123,7 @@ class BranchHistoryView(QWidget):
         self.txtBranch = QLineEdit()
         form_layout.addRow("Rama", self.txtBranch)
 
-        self.chkLocal = QCheckBox("Existe local")
+        self.chkLocal = QCheckBox("Disponible localmente")
         form_layout.addRow("Local", self.chkLocal)
         self.chkOrigin = QCheckBox("Existe origin")
         form_layout.addRow("Origin", self.chkOrigin)
@@ -187,6 +148,10 @@ class BranchHistoryView(QWidget):
         buttons.addWidget(self.btnReset)
         form_layout.addRow(buttons)
 
+        if not self._can_delete:
+            self.btnDelete.setEnabled(False)
+            self.btnDelete.setToolTip("Solo los líderes pueden eliminar ramas del historial.")
+
         splitter.addWidget(form_box)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -208,12 +173,9 @@ class BranchHistoryView(QWidget):
     @Slot(bool)
     def _load_index(self, *_args: object) -> None:
         try:
-            self._index = self.backend.load()
-        except Exception as exc:  # noqa: BLE001 - Queremos distinguir indisponibilidad NAS
-            if self.backend.is_unavailable_error(exc):
-                self._handle_unavailable(exc)
-                return
-            QMessageBox.critical(self, self.backend.title, f"No se pudo cargar el índice: {exc}")
+            self._index = load_index()
+        except Exception as exc:  # noqa: BLE001 - interfaz resiliente
+            QMessageBox.critical(self, self._title, f"No se pudo cargar el índice: {exc}")
             self._index = {}
         self._set_controls_enabled(True)
         self._current_key = None
@@ -227,23 +189,11 @@ class BranchHistoryView(QWidget):
         self._refresh_tree()
         self._clear_form()
 
-    def _handle_unavailable(self, exc: BaseException) -> None:
-        self._index = {}
-        self._current_key = None
-        self._set_controls_enabled(False)
-        QMessageBox.warning(self, f"{self.backend.title} no disponible", str(exc))
-        sync_group_project_filters(
-            self.cboGroup,
-            self.cboProject,
-            self._index.values(),
-            group_getter=self._group_getter,
-            project_getter=self._project_getter,
-        )
-        self._refresh_tree()
-        self._clear_form()
-
     def _set_controls_enabled(self, enabled: bool) -> None:
         for widget in self._togglable_controls:
+            if widget is self.btnDelete and not self._can_delete:
+                widget.setEnabled(False)
+                continue
             widget.setEnabled(enabled)
 
     @Slot()
@@ -288,7 +238,7 @@ class BranchHistoryView(QWidget):
                     rec.branch,
                     rec.group or "",
                     rec.project or "",
-                    "Sí" if rec.exists_local else "No",
+                    "Sí" if rec.has_local_copy() else "No",
                     "Sí" if rec.exists_origin else "No",
                     rec.merge_status or "",
                     self._fmt_ts(rec.last_updated_at or rec.created_at),
@@ -330,7 +280,7 @@ class BranchHistoryView(QWidget):
         self.txtGroup.setText(rec.group or "")
         self.txtProject.setText(rec.project or "")
         self.txtBranch.setText(rec.branch)
-        self.chkLocal.setChecked(bool(rec.exists_local))
+        self.chkLocal.setChecked(rec.has_local_copy())
         self.chkOrigin.setChecked(bool(rec.exists_origin))
         self.txtMerge.setText(rec.merge_status or "")
         self.txtUser.setText(rec.created_by or rec.last_updated_by or "")
@@ -362,7 +312,7 @@ class BranchHistoryView(QWidget):
         project = (self.txtProject.text() or "").strip() or None
         branch = (self.txtBranch.text() or "").strip()
         if not branch:
-            QMessageBox.warning(self, self.backend.title, "El nombre de la rama es obligatorio.")
+            QMessageBox.warning(self, self._title, "El nombre de la rama es obligatorio.")
             return
         user = (self.txtUser.text() or "").strip() or self._user_default
 
@@ -381,7 +331,6 @@ class BranchHistoryView(QWidget):
             branch=branch,
             group=group,
             project=project,
-            exists_local=bool(self.chkLocal.isChecked()),
             exists_origin=bool(self.chkOrigin.isChecked()),
             merge_status=(self.txtMerge.text() or "").strip(),
             last_action=action,
@@ -392,6 +341,7 @@ class BranchHistoryView(QWidget):
             rec.created_at = now
         if not rec.created_by:
             rec.created_by = user
+        rec.set_local_state("present" if self.chkLocal.isChecked() else "absent", updated_at=now)
 
         new_key = rec.key()
         if self._current_key and self._current_key != new_key:
@@ -413,19 +363,14 @@ class BranchHistoryView(QWidget):
 
     def _persist_index(self) -> bool:
         try:
-            self.backend.save(self._index)
-        except Exception as exc:  # noqa: BLE001 - diferenciamos indisponibilidad NAS
-            if self.backend.is_unavailable_error(exc):
-                QMessageBox.warning(self, self.backend.title, str(exc))
-                return False
-            QMessageBox.critical(self, self.backend.title, f"No se pudo guardar el índice: {exc}")
+            save_index(self._index)
+        except Exception as exc:  # noqa: BLE001 - reporte controlado
+            QMessageBox.critical(self, self._title, f"No se pudo guardar el índice: {exc}")
             return False
         return True
 
     def _record_activity(self, action: str, rec: BranchRecord) -> None:
-        if not self.backend.activity_targets:
-            return
-        record_activity(action, rec, targets=tuple(self.backend.activity_targets), message=self.backend.activity_message)
+        record_activity(action, rec, message="Registro manual")
 
     def _select_current(self) -> None:
         if not self._current_key:
@@ -456,17 +401,24 @@ class BranchHistoryView(QWidget):
         rec = self._index[self._current_key]
         confirm = QMessageBox.question(
             self,
-            self.backend.title,
+            self._title,
             f"¿Eliminar la rama '{rec.branch}' del proyecto '{rec.project or ''}'?",
         )
         if confirm != QMessageBox.Yes:
             return
-        backup = rec
-        self._index.pop(self._current_key, None)
-        if not self._persist_index():
-            self._index[self._current_key] = backup
+        if not self._can_delete:
+            QMessageBox.warning(
+                self,
+                self._title,
+                "Requiere rol de líder para eliminar ramas del historial.",
+            )
             return
-        self._record_activity("manual_delete", rec)
+        now = int(time.time())
+        actor = current_username(self._user_default)
+        rec.last_updated_at = now
+        rec.last_updated_by = actor
+        rec.last_action = "manual_delete"
+        self._index = remove(rec, self._index)
         self._current_key = None
         sync_group_project_filters(
             self.cboGroup,

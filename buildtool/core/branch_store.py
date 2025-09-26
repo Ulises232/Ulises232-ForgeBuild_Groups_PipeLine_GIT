@@ -1,15 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict, fields
 from pathlib import Path
-from typing import Dict, Optional, List, Any, Iterable
+from typing import Any, Dict, Iterable, List, Optional
+import getpass
 import os
 import time
 
 from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
-
-
-class NasUnavailableError(RuntimeError):
-    """Raised when the configured NAS directory cannot be accessed."""
+from .session import current_username
 
 
 # ---------------- paths helpers -----------------
@@ -25,6 +23,11 @@ def _state_dir() -> Path:
     return d
 
 
+def _current_username() -> str:
+    fallback = os.environ.get("USERNAME") or os.environ.get("USER") or getpass.getuser()
+    return current_username(fallback)
+
+
 
 # ---------------- data structures -----------------
 
@@ -35,7 +38,6 @@ class BranchRecord:
     project: Optional[str] = None
     created_at: int = 0
     created_by: str = ""
-    exists_local: bool = True
     exists_origin: bool = False
     merge_status: str = "none"
     diverged: Optional[bool] = None
@@ -43,9 +45,38 @@ class BranchRecord:
     last_action: str = "create"
     last_updated_at: int = 0
     last_updated_by: str = ""
+    local_state: str = "absent"
+    local_location: Optional[str] = None
+    local_updated_at: int = 0
 
     def key(self) -> str:
         return f"{self.group or ''}/{self.project or ''}/{self.branch}"
+
+    def has_local_copy(self) -> bool:
+        return (self.local_state or "").lower() in {"present", "available", "synced"}
+
+    def set_local_state(
+        self,
+        state: str,
+        *,
+        location: Optional[str] = None,
+        updated_at: Optional[int] = None,
+    ) -> None:
+        normalized = (state or "").strip().lower() or "absent"
+        self.local_state = normalized
+        if location is not None:
+            trimmed = location.strip()
+            self.local_location = trimmed or None
+        if updated_at:
+            try:
+                self.local_updated_at = int(updated_at)
+            except (TypeError, ValueError):
+                self.local_updated_at = int(time.time())
+        else:
+            self.local_updated_at = int(time.time())
+
+    def mark_local(self, present: bool, *, location: Optional[str] = None) -> None:
+        self.set_local_state("present" if present else "absent", location=location)
 
 
 Index = Dict[str, BranchRecord]
@@ -56,8 +87,8 @@ _LEGACY_FIELD_ALIASES = {
     "last_update": "last_updated_at",
     "last_update_by": "last_updated_by",
 }
-_BOOL_FIELDS = {"exists_local", "exists_origin"}
-_INT_FIELDS = {"created_at", "last_updated_at"}
+_BOOL_FIELDS = {"exists_origin"}
+_INT_FIELDS = {"created_at", "last_updated_at", "local_updated_at"}
 
 
 def _normalize_record_payload(raw: Any) -> Optional[BranchRecord]:
@@ -117,24 +148,42 @@ def _get_db(base: Path) -> BranchHistoryDB:
     return db
 
 
+def _branch_payload(rec: BranchRecord) -> dict:
+    data = asdict(rec)
+    data.pop("local_state", None)
+    data.pop("local_location", None)
+    data.pop("local_updated_at", None)
+    data["group_name"] = data.pop("group", None)
+    data["key"] = rec.key()
+    data["exists_local"] = 1 if rec.has_local_copy() else 0
+    return data
+
+
 def _records_to_payloads(records: Iterable[BranchRecord]) -> List[dict]:
-    payloads: List[dict] = []
-    for rec in records:
-        data = asdict(rec)
-        data["group_name"] = data.pop("group", None)
-        data["key"] = rec.key()
-        payloads.append(data)
-    return payloads
+    return [_branch_payload(rec) for rec in records]
+
+
+def _sync_local_binding(db: BranchHistoryDB, rec: BranchRecord, username: str) -> None:
+    state = (rec.local_state or "").strip().lower() or "absent"
+    location = rec.local_location or None
+    ts = int(rec.local_updated_at or 0)
+    if not ts:
+        ts = int(time.time())
+        rec.local_updated_at = ts
+    db.upsert_branch_local_user(rec.key(), username, state, location, ts)
 
 
 def _row_to_record(row: dict) -> BranchRecord:
+    raw_state = (row.get("local_state") or "").strip().lower()
+    if not raw_state:
+        raw_state = "present" if row.get("exists_local") else "absent"
+    location = row.get("local_location") or None
     data = {
         "branch": row.get("branch"),
         "group": row.get("group_name"),
         "project": row.get("project"),
         "created_at": int(row.get("created_at") or 0),
         "created_by": row.get("created_by") or "",
-        "exists_local": bool(row.get("exists_local")),
         "exists_origin": bool(row.get("exists_origin")),
         "merge_status": row.get("merge_status") or "",
         "diverged": None if row.get("diverged") is None else bool(row.get("diverged")),
@@ -142,6 +191,9 @@ def _row_to_record(row: dict) -> BranchRecord:
         "last_action": row.get("last_action") or "",
         "last_updated_at": int(row.get("last_updated_at") or 0),
         "last_updated_by": row.get("last_updated_by") or "",
+        "local_state": raw_state,
+        "local_location": location,
+        "local_updated_at": int(row.get("local_updated_at") or 0),
     }
     if data["stale_days"] not in (None, ""):
         try:
@@ -237,7 +289,8 @@ def _resolve_base(path: Optional[Path]) -> Path:
 def load_index(path: Optional[Path] = None, *, filter_origin: bool = False) -> Index:
     base = _resolve_base(path)
     db = _get_db(base)
-    records = db.fetch_branches(filter_origin=filter_origin)
+    username = _current_username()
+    records = db.fetch_branches(filter_origin=filter_origin, username=username)
     items: Index = {}
     for row in records:
         rec = _row_to_record(row)
@@ -249,6 +302,32 @@ def save_index(index: Index, path: Optional[Path] = None) -> None:
     base = _resolve_base(path)
     db = _get_db(base)
     db.replace_branches(_records_to_payloads(index.values()))
+    username = _current_username()
+    for rec in index.values():
+        _sync_local_binding(db, rec, username)
+
+
+def load_local_states(
+    *,
+    branch_keys: Optional[Iterable[str]] = None,
+    username: Optional[str] = None,
+    path: Optional[Path] = None,
+) -> List[dict]:
+    base = _resolve_base(path)
+    keys = list(branch_keys) if branch_keys else None
+    rows = _get_db(base).fetch_branch_local_users(branch_keys=keys, username=username)
+    entries: List[dict] = []
+    for row in rows:
+        entries.append(
+            {
+                "branch_key": row.get("branch_key"),
+                "username": row.get("username"),
+                "state": row.get("state"),
+                "location": row.get("location"),
+                "updated_at": int(row.get("updated_at") or 0),
+            }
+        )
+    return entries
 
 
 # ---------------- activity log -----------------
@@ -288,7 +367,11 @@ def upsert(rec: BranchRecord, index: Optional[Index] = None, action: str = "upse
     rec.last_updated_at = now
     if not rec.created_at:
         rec.created_at = now
-    _get_db(_state_dir()).upsert_branch(_records_to_payloads([rec])[0])
+    base = _state_dir()
+    db = _get_db(base)
+    db.upsert_branch(_branch_payload(rec))
+    username = _current_username()
+    _sync_local_binding(db, rec, username)
     if index is None:
         idx = load_index()
     else:
@@ -604,38 +687,6 @@ def set_user_roles(username: str, roles: Iterable[str], *, path: Optional[Path] 
 
 
 # ---------------- filtering helpers -----------------
-
-
-# ---------------- NAS sync -----------------
-
-def recover_from_nas() -> Index:
-    """Mantiene compatibilidad devolviendo el índice actual."""
-    return load_index()
-
-
-
-def publish_to_nas() -> Index:
-    """Publicar en NAS ahora equivale a sincronizar el backend en línea."""
-    return load_index()
-
-
-
-def load_nas_index() -> Index:
-    """Alias del índice principal mientras la NAS deja de existir."""
-    return load_index()
-
-
-
-def save_nas_index(index: Index) -> None:
-    """Persistencia simplificada: delega en la base en línea."""
-    save_index(index)
-
-
-
-def load_nas_activity_log() -> List[dict[str, Any]]:
-    """Obtiene las actividades desde el backend en línea."""
-    return load_activity_log()
-
 
 
 

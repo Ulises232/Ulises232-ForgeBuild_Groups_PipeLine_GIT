@@ -44,13 +44,8 @@ from PySide6 import QtCore, QtWidgets
 from datetime import datetime
 from ..core.git_fast import get_current_branch_fast
 import shiboken6
-from ..core.branch_store import (
-    NasUnavailableError,
-    load_index,
-    publish_to_nas,
-    recover_from_nas,
-)
-from .nas_activity_log_view import NasActivityLogView
+from ..core.branch_store import load_index
+from .activity_log_view import ActivityLogView
 from .branch_history_view import BranchHistoryView
 from ..ui.icons import get_icon
 from ..ui.widgets import combo_with_arrow, set_combo_enabled
@@ -119,9 +114,16 @@ class GitView(QWidget):
         return btn
 
     def _set_busy(self, busy: bool, note: str = ""):
-        for w in (self.btnCreateLocal, self.btnPushBranch, self.btnDeleteBranch,
-                  self.btnRunCreateVersion, self.btnSwitch, self.btnMerge, self.btnRefresh,
-                  self.btnReconcile, self.btnNasRecover, self.btnNasPublish):
+        for w in (
+            self.btnCreateLocal,
+            self.btnPushBranch,
+            self.btnDeleteBranch,
+            self.btnRunCreateVersion,
+            self.btnSwitch,
+            self.btnMerge,
+            self.btnRefresh,
+            self.btnReconcile,
+        ):
             try: w.setEnabled(not busy)
             except Exception: pass
         for combo in (self.cboProject, self.cboHistorySwitch, self.cboDeleteBranch, self.cboHistoryMerge):
@@ -271,11 +273,7 @@ class GitView(QWidget):
 
         misc = QHBoxLayout()
         misc.setSpacing(10)
-        self.btnNasRecover = self._make_tool_button("Recuperar NAS", "cloud-download")
-        self.btnNasPublish = self._make_tool_button("Publicar NAS", "cloud-upload")
         self.btnReconcile = self._make_tool_button("Reconciliar con Git (solo local)", "sync")
-        misc.addWidget(self.btnNasRecover)
-        misc.addWidget(self.btnNasPublish)
         misc.addStretch(1)
         misc.addWidget(self.btnReconcile)
         opsl.addLayout(misc, 3, 0, 1, 2)
@@ -342,12 +340,10 @@ class GitView(QWidget):
         clog_layout.addLayout(hcl)
         bottom_tabs.addTab(console, get_icon("log"), "Consola")
 
-        self.localBranchesView = BranchHistoryView("local", self)
-        bottom_tabs.addTab(self.localBranchesView, get_icon("branch"), "Historial local")
-        self.nasBranchesView = BranchHistoryView("nas", self)
-        bottom_tabs.addTab(self.nasBranchesView, get_icon("branch"), "Historial NAS")
-        self.nasActivityView = NasActivityLogView(self)
-        bottom_tabs.addTab(self.nasActivityView, get_icon("history"), "Activity NAS")
+        self.historyView = BranchHistoryView(self)
+        bottom_tabs.addTab(self.historyView, get_icon("branch"), "Historial")
+        self.activityView = ActivityLogView(self)
+        bottom_tabs.addTab(self.activityView, get_icon("history"), "Actividad")
 
         self.logger = Logger()
         self.logger.line.connect(self.log.append)
@@ -364,8 +360,6 @@ class GitView(QWidget):
         self.btnDeleteBranch.clicked.connect(self._do_delete_branch)
         self.btnRunCreateVersion.clicked.connect(self._do_create_version)
         self.btnMerge.clicked.connect(self._do_merge)
-        self.btnNasRecover.clicked.connect(self._do_recover_nas)
-        self.btnNasPublish.clicked.connect(self._do_publish_nas)
         self.btnClearLog.clicked.connect(self.log.clear)
 
 
@@ -547,7 +541,7 @@ class GitView(QWidget):
             records = [r for r in idx.values() if r.group == gkey and r.project == pkey]
             records.sort(key=lambda r: r.last_updated_at, reverse=True)
             for rec in records:
-                loc = "Sí" if rec.exists_local else ""
+                loc = "Sí" if rec.has_local_copy() else ""
                 orig = "Sí" if rec.exists_origin else ""
                 fecha = ""
                 if rec.created_at:
@@ -854,61 +848,5 @@ class GitView(QWidget):
             "Reconciliar con Git (local)", reconcile_task, None, self.cfg, gkey, pkey,
             success="Reconciliación completa",
             error="Error al reconciliar"
-        )
-
-    @safe_slot
-    def _do_recover_nas(self):
-        error_state: dict[str, Optional[str]] = {"text": None}
-
-        def task():
-            emit = self.logger.line.emit
-            emit("[task] Recuperar NAS")
-            try:
-                recover_from_nas()
-            except NasUnavailableError as exc:
-                msg = str(exc)
-                error_state["text"] = msg
-                emit(f"[task][WARN] {msg}")
-                self._dbg(msg, force=True)
-                return False
-            emit("[task] DONE")
-            return True
-        def _after(ok: bool):
-            if not ok and error_state["text"]:
-                self._pending_error = error_state["text"]
-        self._start_task(
-            "Recuperar NAS",
-            task,
-            _after,
-            success="Historial recuperado de NAS",
-            error="Error al recuperar NAS",
-        )
-
-    @safe_slot
-    def _do_publish_nas(self):
-        error_state: dict[str, Optional[str]] = {"text": None}
-
-        def task():
-            emit = self.logger.line.emit
-            emit("[task] Publicar NAS")
-            try:
-                publish_to_nas()
-            except NasUnavailableError as exc:
-                msg = str(exc)
-                error_state["text"] = msg
-                emit(f"[task][WARN] {msg}")
-                self._dbg(msg, force=True)
-                return False
-            emit("[task] DONE")
-            return True
-        def _after(ok: bool):
-            if not ok and error_state["text"]:
-                self._pending_error = error_state["text"]
-        self._start_task(
-            "Publicar NAS",
-            task,
-            _after,
-            success="Historial publicado en NAS",
-            error="Error al publicar NAS",
         )
 

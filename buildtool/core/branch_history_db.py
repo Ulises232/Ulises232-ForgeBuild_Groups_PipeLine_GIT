@@ -571,6 +571,61 @@ class _SqlServerBranchHistory:
             END
             """,
             """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'branch_local_users')
+            BEGIN
+                CREATE TABLE branch_local_users (
+                    branch_key NVARCHAR(255) NOT NULL,
+                    username NVARCHAR(255) NOT NULL,
+                    state NVARCHAR(32) NOT NULL DEFAULT 'absent',
+                    location NVARCHAR(1024) NULL,
+                    updated_at BIGINT NOT NULL DEFAULT 0,
+                    CONSTRAINT pk_branch_local_users PRIMARY KEY (branch_key, username),
+                    CONSTRAINT fk_branch_local_users_branch FOREIGN KEY (branch_key) REFERENCES branches([key]) ON DELETE CASCADE
+                );
+            END
+            """,
+            """
+            IF COL_LENGTH('branch_local_users', 'branch_key') IS NOT NULL
+                AND COL_LENGTH('branch_local_users', 'branch_key') <> 255
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE name = 'idx_branch_local_users_username'
+                        AND object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    DROP INDEX idx_branch_local_users_username ON branch_local_users;
+                END
+                IF EXISTS (
+                    SELECT 1 FROM sys.indexes
+                    WHERE name = 'idx_branch_local_users_state'
+                        AND object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    DROP INDEX idx_branch_local_users_state ON branch_local_users;
+                END
+                IF EXISTS (
+                    SELECT 1 FROM sys.foreign_keys
+                    WHERE name = 'fk_branch_local_users_branch'
+                        AND parent_object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    ALTER TABLE branch_local_users DROP CONSTRAINT fk_branch_local_users_branch;
+                END
+                IF EXISTS (
+                    SELECT 1 FROM sys.key_constraints
+                    WHERE name = 'pk_branch_local_users'
+                        AND parent_object_id = OBJECT_ID('branch_local_users')
+                )
+                BEGIN
+                    ALTER TABLE branch_local_users DROP CONSTRAINT pk_branch_local_users;
+                END
+                ALTER TABLE branch_local_users ALTER COLUMN branch_key NVARCHAR(255) NOT NULL;
+                ALTER TABLE branch_local_users ADD CONSTRAINT pk_branch_local_users PRIMARY KEY (branch_key, username);
+                ALTER TABLE branch_local_users WITH CHECK ADD CONSTRAINT fk_branch_local_users_branch FOREIGN KEY (branch_key) REFERENCES branches([key]) ON DELETE CASCADE;
+            END
+            """,
+            """
             IF NOT EXISTS (
                 SELECT name FROM sys.indexes WHERE name = 'idx_activity_branch_key'
                     AND object_id = OBJECT_ID('activity_log')
@@ -613,6 +668,24 @@ class _SqlServerBranchHistory:
             )
             BEGIN
                 CREATE INDEX idx_cards_branch ON cards(branch);
+            END
+            """,
+            """
+            IF NOT EXISTS (
+                SELECT name FROM sys.indexes WHERE name = 'idx_branch_local_users_username'
+                    AND object_id = OBJECT_ID('branch_local_users')
+            )
+            BEGIN
+                CREATE INDEX idx_branch_local_users_username ON branch_local_users(username);
+            END
+            """,
+            """
+            IF NOT EXISTS (
+                SELECT name FROM sys.indexes WHERE name = 'idx_branch_local_users_state'
+                    AND object_id = OBJECT_ID('branch_local_users')
+            )
+            BEGIN
+                CREATE INDEX idx_branch_local_users_state ON branch_local_users(state);
             END
             """,
         ]
@@ -681,6 +754,42 @@ class _SqlServerBranchHistory:
                 data.get("last_action"),
                 data.get("last_updated_at"),
                 data.get("last_updated_by"),
+            ),
+        )
+
+    def _execute_upsert_branch_local_user(
+        self,
+        cursor: "pymssql.Cursor",
+        data: Dict[str, object],
+    ) -> None:
+        update_sql = """
+            UPDATE branch_local_users
+               SET state=%s, location=%s, updated_at=%s
+             WHERE branch_key=%s AND username=%s
+        """
+        params = (
+            data.get("state"),
+            data.get("location"),
+            data.get("updated_at"),
+            data.get("branch_key"),
+            data.get("username"),
+        )
+        cursor.execute(update_sql, params)
+        if cursor.rowcount:
+            return
+        insert_sql = """
+            INSERT INTO branch_local_users (
+                branch_key, username, state, location, updated_at
+            ) VALUES (%s, %s, %s, %s, %s)
+        """
+        cursor.execute(
+            insert_sql,
+            (
+                data.get("branch_key"),
+                data.get("username"),
+                data.get("state"),
+                data.get("location"),
+                data.get("updated_at"),
             ),
         )
 
@@ -777,16 +886,96 @@ class _SqlServerBranchHistory:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM branches WHERE [key]=%s", (key,))
 
-    def fetch_branches(self, *, filter_origin: bool = False) -> List[dict]:
-        sql = "SELECT [key], branch, group_name, project, created_at, created_by, exists_local, exists_origin, merge_status, diverged, stale_days, last_action, last_updated_at, last_updated_by FROM branches"
+    def fetch_branches(
+        self,
+        *,
+        filter_origin: bool = False,
+        username: Optional[str] = None,
+    ) -> List[dict]:
+        sql = (
+            "SELECT b.[key], b.branch, b.group_name, b.project, b.created_at, b.created_by,"
+            " b.exists_local, b.exists_origin, b.merge_status, b.diverged, b.stale_days,"
+            " b.last_action, b.last_updated_at, b.last_updated_by,"
+            " u.state AS local_state, u.location AS local_location, u.updated_at AS local_updated_at"
+            " FROM branches AS b"
+        )
+        params: List[object] = []
+        if username:
+            sql += " LEFT JOIN branch_local_users AS u ON u.branch_key = b.[key] AND u.username = %s"
+            params.append(username)
+        else:
+            sql += " LEFT JOIN branch_local_users AS u ON u.branch_key = b.[key]"
+        where_clauses: List[str] = []
         if filter_origin:
-            sql += " WHERE exists_origin = 1"
-        sql += " ORDER BY last_updated_at DESC, [key]"
+            where_clauses.append("b.exists_origin = 1")
+        if username:
+            where_clauses.append(
+                "(b.exists_origin = 1 OR u.username IS NOT NULL OR b.created_by = %s OR b.last_updated_by = %s)"
+            )
+            params.extend([username, username])
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+        sql += " ORDER BY b.last_updated_at DESC, b.[key]"
         with self._connect() as conn:
             cursor = conn.cursor()
-            cursor.execute(sql)
+            cursor.execute(sql, tuple(params))
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
+
+    def fetch_branch_local_users(
+        self,
+        *,
+        branch_keys: Optional[Sequence[str]] = None,
+        username: Optional[str] = None,
+    ) -> List[dict]:
+        sql = (
+            "SELECT branch_key, username, state, location, updated_at"
+            " FROM branch_local_users"
+        )
+        params: List[object] = []
+        conditions: List[str] = []
+        keys = [key for key in (branch_keys or []) if key]
+        if keys:
+            placeholders = ",".join("%s" for _ in keys)
+            conditions.append(f"branch_key IN ({placeholders})")
+            params.extend(keys)
+        if username:
+            conditions.append("username=%s")
+            params.append(username)
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, tuple(params))
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert_branch_local_user(
+        self,
+        branch_key: str,
+        username: str,
+        state: str,
+        location: Optional[str],
+        updated_at: int,
+    ) -> None:
+        data = {
+            "branch_key": branch_key,
+            "username": username,
+            "state": state,
+            "location": location,
+            "updated_at": updated_at,
+        }
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute_upsert_branch_local_user(cursor, data)
+
+    def delete_branch_local_user(self, branch_key: str, username: str) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM branch_local_users WHERE branch_key=%s AND username=%s",
+                (branch_key, username),
+            )
 
     def fetch_activity(self, *, branch_keys: Optional[Iterable[str]] = None) -> List[dict]:
         sql = "SELECT ts, [user] AS [user], group_name, project, branch, action, result, message, branch_key FROM activity_log"
