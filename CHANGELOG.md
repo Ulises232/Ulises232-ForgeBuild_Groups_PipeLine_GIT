@@ -5,17 +5,28 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 ## [Unreleased]
+
+## [1.7.0] - 2025-02-16
 ### Añadido
 - Tabla `branch_local_users` en SQL Server para registrar la presencia local de cada rama por usuario y exponerla mediante `load_local_states` y nuevas pruebas automatizadas.
+- Autenticación de usuarios con contraseñas seguras PBKDF2, campos de hash/salt y banderas de restablecimiento obligatorio desde `branch_store.authenticate_user`.
+- Módulo de administración de usuarios (`UserAdminView`) visible sólo para el rol `admin`, con altas, edición de roles, desactivación y solicitud de restablecimiento de contraseña.
+- El diálogo de inicio de sesión recuerda las credenciales en AppData para precargarlas automáticamente al abrir la aplicación.
 
 ### Cambiado
 - `BranchHistoryView` y la pestaña Git muestran un único historial respaldado por SQL Server, eliminando los flujos de sincronización NAS y adoptando el registro de actividad renombrado.
 - `BranchRecord` ahora calcula la disponibilidad local por usuario activo, propagando la información al backend al guardar o sincronizar el índice.
 - Solo los líderes pueden eliminar ramas desde el historial y la acción borra inmediatamente el registro en SQL Server.
 - Las ramas creadas únicamente en local permanecen visibles solo para su autor hasta que existen en origin.
+- El diálogo de inicio de sesión exige contraseña, gestiona restablecimientos forzados y oculta controles de roles/altas directas.
+- Las contraseñas ahora requieren al menos 7 caracteres, una letra mayúscula y un número, sin obligar minúsculas ni caracteres especiales.
+- `list_users` excluye usuarios deshabilitados por defecto y las bajas marcan el estado inactivo en lugar de eliminar filas.
+- Se agregó un botón de "ojo" para mostrar u ocultar la contraseña en el inicio de sesión y durante el restablecimiento.
 
 ### Corregido
 - La inicialización del esquema en SQL Server ajusta `branch_local_users.branch_key` a NVARCHAR(255) antes de crear la llave foránea hacia `branches.[key]`, evitando el error 1753 en instalaciones existentes.
+- Cobertura automatizada para la autenticación, restablecimiento y asignación de roles al crear o deshabilitar usuarios.
+- La migración de `users.require_password_reset` maneja instalaciones previas añadiendo la columna en pasos separados y forzando el valor 0, eliminando el error "Invalid column name" al iniciar.
 
 ## [1.6.0] - 2025-02-15
 ### Añadido

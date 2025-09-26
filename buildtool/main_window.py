@@ -15,10 +15,12 @@ from PySide6.QtWidgets import (
 from buildtool import __version__
 from buildtool.core.thread_tracker import TRACKER
 from .core.config import load_config, Config
+from .core.session import require_roles
 from .views.pipeline_view import PipelineView
 from .views.git_view import GitView
 from .views.groups_wizard import GroupsWizard
 from .views.sprint_view import SprintView
+from .views.user_admin import UserAdminView
 from .ui.icons import get_icon
 from .ui.theme import apply_theme, ThemeMode
 
@@ -26,6 +28,7 @@ from .ui.theme import apply_theme, ThemeMode
 TAB_PIPELINE = "Pipeline"
 TAB_GIT = "Repos (Git)"
 TAB_SPRINTS = "Sprints"
+TAB_USERS = "Usuarios"
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -91,9 +94,11 @@ class MainWindow(QWidget):
         self.pipeline = PipelineView(self.cfg, self.reload_config)
         self.git = GitView(self.cfg, self)
         self.sprints = SprintView(self)
+        self.user_admin: Optional[UserAdminView] = None
         self.tabs.addTab(self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
         self.tabs.addTab(self.git, get_icon("git"), TAB_GIT)
         self.tabs.addTab(self.sprints, get_icon("history"), TAB_SPRINTS)
+        self._ensure_admin_tab()
 
         splitter.addWidget(content)
         splitter.setStretchFactor(0, 0)
@@ -104,7 +109,13 @@ class MainWindow(QWidget):
     def reload_config(self):
         self.cfg = load_config()
         idx = self.tabs.currentIndex()
-        for widget in (getattr(self, "sprints", None), getattr(self, "git", None), getattr(self, "pipeline", None)):
+        current_title = self.tabs.tabText(idx) if idx >= 0 else None
+        for widget in (
+            getattr(self, "user_admin", None),
+            getattr(self, "sprints", None),
+            getattr(self, "git", None),
+            getattr(self, "pipeline", None),
+        ):
             if widget is None:
                 continue
             tab_index = self.tabs.indexOf(widget)
@@ -114,10 +125,32 @@ class MainWindow(QWidget):
         self.pipeline = PipelineView(self.cfg, self.reload_config)
         self.git = GitView(self.cfg, self)
         self.sprints = SprintView(self)
+        self.user_admin = None
         self.tabs.insertTab(0, self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
         self.tabs.insertTab(1, self.git, get_icon("git"), TAB_GIT)
         self.tabs.insertTab(2, self.sprints, get_icon("history"), TAB_SPRINTS)
-        self.tabs.setCurrentIndex(idx if idx < self.tabs.count() else 0)
+        self._ensure_admin_tab()
+        target_index = 0
+        if current_title:
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == current_title:
+                    target_index = i
+                    break
+        self.tabs.setCurrentIndex(target_index)
+
+    def _ensure_admin_tab(self) -> None:
+        if self.user_admin is not None:
+            tab_index = self.tabs.indexOf(self.user_admin)
+            if tab_index >= 0 and not require_roles("admin"):
+                self.tabs.removeTab(tab_index)
+                self.user_admin.deleteLater()
+                self.user_admin = None
+        if require_roles("admin"):
+            if self.user_admin is None:
+                self.user_admin = UserAdminView(self)
+                self.tabs.addTab(self.user_admin, get_icon("config"), TAB_USERS)
+            else:
+                self.user_admin.reload()
 
     def open_groups(self):
         if self._groups_win is None:
