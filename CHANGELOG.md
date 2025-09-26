@@ -19,6 +19,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La importación opcional de `python-tds` usa `pytds` como módulo real, eliminando el falso positivo que indicaba que el paquete no estaba instalado.
 - Se detectan automáticamente los clientes `python-tds`/`pymssql` y se informa el error real del cargador cuando ninguno está disponible.
 - La tabla `branches` del backend SQL Server escapa la columna `key` y las consultas asociadas para evitar errores de sintaxis al crear el esquema.
+- Todas las tablas y consultas del backend SQL Server ahora delimitan los nombres de columnas sensibles (por ejemplo `key`, `user`, `status`) evitando nuevos errores de sintaxis durante la migración desde SQLite.
 - El script `scripts/migrate_branch_history.py` ajusta automáticamente la ruta de importación para ejecutarse sin instalar `buildtool` como paquete.
 - `BranchHistoryDB` respeta los parámetros explícitos de backend y URL, permitiendo inicializar el backend SQL Server sin requerir rutas SQLite ni variables de entorno adicionales.
 - La creación del `activity_log` en SQL Server deja de forzar una restricción `UNIQUE` sobre la columna `message` (tipo `NVARCHAR(MAX)`), evitando el error de índice durante la inicialización del esquema.

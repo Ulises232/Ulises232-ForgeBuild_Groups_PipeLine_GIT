@@ -1253,19 +1253,19 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             BEGIN
                 CREATE TABLE branches (
                     [key] NVARCHAR(512) NOT NULL PRIMARY KEY,
-                    branch NVARCHAR(255) NOT NULL,
-                    group_name NVARCHAR(255) NULL,
-                    project NVARCHAR(255) NULL,
-                    created_at BIGINT NOT NULL DEFAULT 0,
-                    created_by NVARCHAR(255) NULL,
-                    exists_local BIT NOT NULL DEFAULT 0,
-                    exists_origin BIT NOT NULL DEFAULT 0,
-                    merge_status NVARCHAR(255) NULL,
-                    diverged BIT NULL,
-                    stale_days INT NULL,
-                    last_action NVARCHAR(255) NULL,
-                    last_updated_at BIGINT NOT NULL DEFAULT 0,
-                    last_updated_by NVARCHAR(255) NULL
+                    [branch] NVARCHAR(255) NOT NULL,
+                    [group_name] NVARCHAR(255) NULL,
+                    [project] NVARCHAR(255) NULL,
+                    [created_at] BIGINT NOT NULL DEFAULT 0,
+                    [created_by] NVARCHAR(255) NULL,
+                    [exists_local] BIT NOT NULL DEFAULT 0,
+                    [exists_origin] BIT NOT NULL DEFAULT 0,
+                    [merge_status] NVARCHAR(255) NULL,
+                    [diverged] BIT NULL,
+                    [stale_days] INT NULL,
+                    [last_action] NVARCHAR(255) NULL,
+                    [last_updated_at] BIGINT NOT NULL DEFAULT 0,
+                    [last_updated_by] NVARCHAR(255) NULL
                 )
             END
             """,
@@ -1273,16 +1273,16 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             IF OBJECT_ID('activity_log', 'U') IS NULL
             BEGIN
                 CREATE TABLE activity_log (
-                    id INT IDENTITY(1,1) PRIMARY KEY,
-                    ts BIGINT NOT NULL,
+                    [id] INT IDENTITY(1,1) PRIMARY KEY,
+                    [ts] BIGINT NOT NULL,
                     [user] NVARCHAR(255) NULL,
-                    group_name NVARCHAR(255) NULL,
-                    project NVARCHAR(255) NULL,
-                    branch NVARCHAR(255) NULL,
-                    action NVARCHAR(255) NULL,
-                    result NVARCHAR(255) NULL,
-                    message NVARCHAR(MAX) NULL,
-                    branch_key NVARCHAR(512) NULL
+                    [group_name] NVARCHAR(255) NULL,
+                    [project] NVARCHAR(255) NULL,
+                    [branch] NVARCHAR(255) NULL,
+                    [action] NVARCHAR(255) NULL,
+                    [result] NVARCHAR(255) NULL,
+                    [message] NVARCHAR(MAX) NULL,
+                    [branch_key] NVARCHAR(512) NULL
                 )
             END
             """,
@@ -1290,21 +1290,21 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             IF OBJECT_ID('sprints', 'U') IS NULL
             BEGIN
                 CREATE TABLE sprints (
-                    id INT IDENTITY(1,1) PRIMARY KEY,
-                    branch_key NVARCHAR(512) NOT NULL DEFAULT '',
-                    qa_branch_key NVARCHAR(512) NULL,
-                    name NVARCHAR(255) NOT NULL DEFAULT '',
-                    version NVARCHAR(255) NOT NULL DEFAULT '',
-                    lead_user NVARCHAR(255) NULL,
-                    qa_user NVARCHAR(255) NULL,
-                    description NVARCHAR(MAX) NULL,
-                    status NVARCHAR(64) NOT NULL DEFAULT 'open',
-                    closed_at BIGINT NULL,
-                    closed_by NVARCHAR(255) NULL,
-                    created_at BIGINT NOT NULL DEFAULT 0,
-                    created_by NVARCHAR(255) NULL,
-                    updated_at BIGINT NOT NULL DEFAULT 0,
-                    updated_by NVARCHAR(255) NULL
+                    [id] INT IDENTITY(1,1) PRIMARY KEY,
+                    [branch_key] NVARCHAR(512) NOT NULL DEFAULT '',
+                    [qa_branch_key] NVARCHAR(512) NULL,
+                    [name] NVARCHAR(255) NOT NULL DEFAULT '',
+                    [version] NVARCHAR(255) NOT NULL DEFAULT '',
+                    [lead_user] NVARCHAR(255) NULL,
+                    [qa_user] NVARCHAR(255) NULL,
+                    [description] NVARCHAR(MAX) NULL,
+                    [status] NVARCHAR(64) NOT NULL DEFAULT 'open',
+                    [closed_at] BIGINT NULL,
+                    [closed_by] NVARCHAR(255) NULL,
+                    [created_at] BIGINT NOT NULL DEFAULT 0,
+                    [created_by] NVARCHAR(255) NULL,
+                    [updated_at] BIGINT NOT NULL DEFAULT 0,
+                    [updated_by] NVARCHAR(255) NULL
                 )
             END
             """,
@@ -1312,31 +1312,31 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             IF OBJECT_ID('cards', 'U') IS NULL
             BEGIN
                 CREATE TABLE cards (
-                    id INT IDENTITY(1,1) PRIMARY KEY,
-                    sprint_id INT NOT NULL,
-                    branch_key NVARCHAR(512) NULL,
-                    title NVARCHAR(255) NOT NULL DEFAULT '',
-                    ticket_id NVARCHAR(255) NULL,
-                    branch NVARCHAR(255) NOT NULL DEFAULT '',
-                    assignee NVARCHAR(255) NULL,
-                    qa_assignee NVARCHAR(255) NULL,
-                    description NVARCHAR(MAX) NULL,
-                    unit_tests_url NVARCHAR(1024) NULL,
-                    qa_url NVARCHAR(1024) NULL,
-                    unit_tests_done BIT NOT NULL DEFAULT 0,
-                    qa_done BIT NOT NULL DEFAULT 0,
-                    unit_tests_by NVARCHAR(255) NULL,
-                    qa_by NVARCHAR(255) NULL,
-                    unit_tests_at BIGINT NULL,
-                    qa_at BIGINT NULL,
-                    status NVARCHAR(64) NOT NULL DEFAULT 'pending',
-                    branch_created_by NVARCHAR(255) NULL,
-                    branch_created_at BIGINT NULL,
-                    created_at BIGINT NOT NULL DEFAULT 0,
-                    created_by NVARCHAR(255) NULL,
-                    updated_at BIGINT NOT NULL DEFAULT 0,
-                    updated_by NVARCHAR(255) NULL,
-                    CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+                    [id] INT IDENTITY(1,1) PRIMARY KEY,
+                    [sprint_id] INT NOT NULL,
+                    [branch_key] NVARCHAR(512) NULL,
+                    [title] NVARCHAR(255) NOT NULL DEFAULT '',
+                    [ticket_id] NVARCHAR(255) NULL,
+                    [branch] NVARCHAR(255) NOT NULL DEFAULT '',
+                    [assignee] NVARCHAR(255) NULL,
+                    [qa_assignee] NVARCHAR(255) NULL,
+                    [description] NVARCHAR(MAX) NULL,
+                    [unit_tests_url] NVARCHAR(1024) NULL,
+                    [qa_url] NVARCHAR(1024) NULL,
+                    [unit_tests_done] BIT NOT NULL DEFAULT 0,
+                    [qa_done] BIT NOT NULL DEFAULT 0,
+                    [unit_tests_by] NVARCHAR(255) NULL,
+                    [qa_by] NVARCHAR(255) NULL,
+                    [unit_tests_at] BIGINT NULL,
+                    [qa_at] BIGINT NULL,
+                    [status] NVARCHAR(64) NOT NULL DEFAULT 'pending',
+                    [branch_created_by] NVARCHAR(255) NULL,
+                    [branch_created_at] BIGINT NULL,
+                    [created_at] BIGINT NOT NULL DEFAULT 0,
+                    [created_by] NVARCHAR(255) NULL,
+                    [updated_at] BIGINT NOT NULL DEFAULT 0,
+                    [updated_by] NVARCHAR(255) NULL,
+                    CONSTRAINT fk_cards_sprint FOREIGN KEY ([sprint_id]) REFERENCES sprints([id]) ON DELETE CASCADE
                 )
             END
             """,
@@ -1344,10 +1344,10 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             IF OBJECT_ID('users', 'U') IS NULL
             BEGIN
                 CREATE TABLE users (
-                    username NVARCHAR(255) NOT NULL PRIMARY KEY,
-                    display_name NVARCHAR(255) NOT NULL,
-                    email NVARCHAR(255) NULL,
-                    active BIT NOT NULL DEFAULT 1
+                    [username] NVARCHAR(255) NOT NULL PRIMARY KEY,
+                    [display_name] NVARCHAR(255) NOT NULL,
+                    [email] NVARCHAR(255) NULL,
+                    [active] BIT NOT NULL DEFAULT 1
                 )
             END
             """,
@@ -1356,8 +1356,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             BEGIN
                 CREATE TABLE roles (
                     [key] NVARCHAR(255) NOT NULL PRIMARY KEY,
-                    name NVARCHAR(255) NOT NULL,
-                    description NVARCHAR(MAX) NULL
+                    [name] NVARCHAR(255) NOT NULL,
+                    [description] NVARCHAR(MAX) NULL
                 )
             END
             """,
@@ -1365,12 +1365,12 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             IF OBJECT_ID('user_roles', 'U') IS NULL
             BEGIN
                 CREATE TABLE user_roles (
-                    id INT IDENTITY(1,1) PRIMARY KEY,
-                    username NVARCHAR(255) NOT NULL,
-                    role_key NVARCHAR(255) NOT NULL,
-                    CONSTRAINT uq_user_roles UNIQUE (username, role_key),
-                    CONSTRAINT fk_user_roles_user FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,
-                    CONSTRAINT fk_user_roles_role FOREIGN KEY (role_key) REFERENCES roles([key]) ON DELETE CASCADE
+                    [id] INT IDENTITY(1,1) PRIMARY KEY,
+                    [username] NVARCHAR(255) NOT NULL,
+                    [role_key] NVARCHAR(255) NOT NULL,
+                    CONSTRAINT uq_user_roles UNIQUE ([username], [role_key]),
+                    CONSTRAINT fk_user_roles_user FOREIGN KEY ([username]) REFERENCES users([username]) ON DELETE CASCADE,
+                    CONSTRAINT fk_user_roles_role FOREIGN KEY ([role_key]) REFERENCES roles([key]) ON DELETE CASCADE
                 )
             END
             """,
@@ -1383,31 +1383,31 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             """
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_activity_branch_key' AND object_id = OBJECT_ID('activity_log'))
             BEGIN
-                CREATE INDEX idx_activity_branch_key ON activity_log(branch_key)
+                CREATE INDEX idx_activity_branch_key ON activity_log([branch_key])
             END
             """,
             """
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_activity_ts' AND object_id = OBJECT_ID('activity_log'))
             BEGIN
-                CREATE INDEX idx_activity_ts ON activity_log(ts DESC)
+                CREATE INDEX idx_activity_ts ON activity_log([ts] DESC)
             END
             """,
             """
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_sprints_branch' AND object_id = OBJECT_ID('sprints'))
             BEGIN
-                CREATE INDEX idx_sprints_branch ON sprints(branch_key)
+                CREATE INDEX idx_sprints_branch ON sprints([branch_key])
             END
             """,
             """
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_cards_sprint' AND object_id = OBJECT_ID('cards'))
             BEGIN
-                CREATE INDEX idx_cards_sprint ON cards(sprint_id)
+                CREATE INDEX idx_cards_sprint ON cards([sprint_id])
             END
             """,
             """
             IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_cards_branch' AND object_id = OBJECT_ID('cards'))
             BEGIN
-                CREATE INDEX idx_cards_branch ON cards(branch)
+                CREATE INDEX idx_cards_branch ON cards([branch])
             END
             """,
         ]
@@ -1417,9 +1417,13 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
     # ------------------------------------------------------------------
     # branches
     def fetch_branches(self, *, filter_origin: bool = False) -> List[dict]:
-        sql = "SELECT [key] AS key, branch, group_name, project, created_at, created_by, exists_local, exists_origin, merge_status, diverged, stale_days, last_action, last_updated_at, last_updated_by FROM branches"
+        sql = (
+            "SELECT [key] AS key, [branch], [group_name], [project], [created_at], [created_by], "
+            "[exists_local], [exists_origin], [merge_status], [diverged], [stale_days], "
+            "[last_action], [last_updated_at], [last_updated_by] FROM branches"
+        )
         if filter_origin:
-            sql += " WHERE exists_origin = 1"
+            sql += " WHERE [exists_origin] = 1"
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
@@ -1440,9 +1444,9 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     cursor.execute(
                         """
                         INSERT INTO branches (
-                            [key], branch, group_name, project, created_at, created_by,
-                            exists_local, exists_origin, merge_status, diverged,
-                            stale_days, last_action, last_updated_at, last_updated_by
+                            [key], [branch], [group_name], [project], [created_at], [created_by],
+                            [exists_local], [exists_origin], [merge_status], [diverged],
+                            [stale_days], [last_action], [last_updated_at], [last_updated_by]
                         ) VALUES (
                             @key, @branch, @group_name, @project, @created_at, @created_by,
                             @exists_local, @exists_origin, @merge_status, @diverged,
@@ -1462,19 +1466,19 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     UPDATE branches SET
-                        branch = @branch,
-                        group_name = @group_name,
-                        project = @project,
-                        created_at = @created_at,
-                        created_by = @created_by,
-                        exists_local = @exists_local,
-                        exists_origin = @exists_origin,
-                        merge_status = @merge_status,
-                        diverged = @diverged,
-                        stale_days = @stale_days,
-                        last_action = @last_action,
-                        last_updated_at = @last_updated_at,
-                        last_updated_by = @last_updated_by
+                        [branch] = @branch,
+                        [group_name] = @group_name,
+                        [project] = @project,
+                        [created_at] = @created_at,
+                        [created_by] = @created_by,
+                        [exists_local] = @exists_local,
+                        [exists_origin] = @exists_origin,
+                        [merge_status] = @merge_status,
+                        [diverged] = @diverged,
+                        [stale_days] = @stale_days,
+                        [last_action] = @last_action,
+                        [last_updated_at] = @last_updated_at,
+                        [last_updated_by] = @last_updated_by
                     WHERE [key] = @key
                     """,
                     data,
@@ -1484,9 +1488,9 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     INSERT INTO branches (
-                        [key], branch, group_name, project, created_at, created_by,
-                        exists_local, exists_origin, merge_status, diverged,
-                        stale_days, last_action, last_updated_at, last_updated_by
+                        [key], [branch], [group_name], [project], [created_at], [created_by],
+                        [exists_local], [exists_origin], [merge_status], [diverged],
+                        [stale_days], [last_action], [last_updated_at], [last_updated_by]
                     ) VALUES (
                         @key, @branch, @group_name, @project, @created_at, @created_by,
                         @exists_local, @exists_origin, @merge_status, @diverged,
@@ -1520,18 +1524,18 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                         """
                         IF NOT EXISTS (
                             SELECT 1 FROM activity_log
-                            WHERE ts = @ts
+                            WHERE [ts] = @ts
                               AND ISNULL([user], '') = ISNULL(@user, '')
-                              AND ISNULL(group_name, '') = ISNULL(@group_name, '')
-                              AND ISNULL(project, '') = ISNULL(@project, '')
-                              AND ISNULL(branch, '') = ISNULL(@branch, '')
-                              AND ISNULL(action, '') = ISNULL(@action, '')
-                              AND ISNULL(result, '') = ISNULL(@result, '')
-                              AND ISNULL(message, '') = ISNULL(@message, '')
+                              AND ISNULL([group_name], '') = ISNULL(@group_name, '')
+                              AND ISNULL([project], '') = ISNULL(@project, '')
+                              AND ISNULL([branch], '') = ISNULL(@branch, '')
+                              AND ISNULL([action], '') = ISNULL(@action, '')
+                              AND ISNULL([result], '') = ISNULL(@result, '')
+                              AND ISNULL([message], '') = ISNULL(@message, '')
                         )
                         BEGIN
                             INSERT INTO activity_log (
-                                ts, [user], group_name, project, branch, action, result, message, branch_key
+                                [ts], [user], [group_name], [project], [branch], [action], [result], [message], [branch_key]
                             ) VALUES (
                                 @ts, @user, @group_name, @project, @branch, @action, @result, @message, @branch_key
                             )
@@ -1557,15 +1561,15 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 name = f"bk{idx}"
                 placeholders.append(f"@{name}")
                 params[name] = key
-            where.append(f"branch_key IN ({', '.join(placeholders)})")
+            where.append(f"[branch_key] IN ({', '.join(placeholders)})")
         top_clause = f"TOP {int(limit)} " if limit else ""
         sql = (
-            f"SELECT {top_clause}id, ts, [user], group_name, project, branch, action, result, message, branch_key "
+            f"SELECT {top_clause}[id], [ts], [user], [group_name], [project], [branch], [action], [result], [message], [branch_key] "
             "FROM activity_log"
         )
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY ts DESC, id DESC"
+        sql += " ORDER BY [ts] DESC, [id] DESC"
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
@@ -1591,7 +1595,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                         placeholders.append(f"@{name}")
                         params[name] = key
                     cursor.execute(
-                        f"DELETE FROM activity_log WHERE branch_key NOT IN ({', '.join(placeholders)})",
+                        f"DELETE FROM activity_log WHERE [branch_key] NOT IN ({', '.join(placeholders)})",
                         params,
                     )
             finally:
@@ -1601,8 +1605,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
     # sprints
     def fetch_sprints(self, branch_keys: Optional[Sequence[str]] = None) -> List[dict]:
         sql = (
-            "SELECT id, branch_key, qa_branch_key, name, version, lead_user, qa_user, description, status, "
-            "closed_at, closed_by, created_at, created_by, updated_at, updated_by FROM sprints"
+            "SELECT [id], [branch_key], [qa_branch_key], [name], [version], [lead_user], [qa_user], [description], [status], "
+            "[closed_at], [closed_by], [created_at], [created_by], [updated_at], [updated_by] FROM sprints"
         )
         params: Dict[str, Any] = {}
         if branch_keys:
@@ -1612,7 +1616,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 name = f"bk{idx}"
                 placeholders.append(f"@{name}")
                 params[name] = key
-            sql += f" WHERE branch_key IN ({', '.join(placeholders)})"
+            sql += f" WHERE [branch_key] IN ({', '.join(placeholders)})"
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
@@ -1625,8 +1629,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
 
     def fetch_sprint(self, sprint_id: int) -> Optional[dict]:
         sql = (
-            "SELECT TOP 1 id, branch_key, qa_branch_key, name, version, lead_user, qa_user, description, status, "
-            "closed_at, closed_by, created_at, created_by, updated_at, updated_by FROM sprints WHERE id = @id"
+            "SELECT TOP 1 [id], [branch_key], [qa_branch_key], [name], [version], [lead_user], [qa_user], [description], [status], "
+            "[closed_at], [closed_by], [created_at], [created_by], [updated_at], [updated_by] FROM sprints WHERE [id] = @id"
         )
         with self._connection() as conn:
             cursor = conn.cursor()
@@ -1642,8 +1646,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
 
     def fetch_sprint_by_branch_key(self, branch_key: str) -> Optional[dict]:
         sql = (
-            "SELECT TOP 1 id, branch_key, qa_branch_key, name, version, lead_user, qa_user, description, status, "
-            "closed_at, closed_by, created_at, created_by, updated_at, updated_by FROM sprints WHERE branch_key = @branch_key"
+            "SELECT TOP 1 [id], [branch_key], [qa_branch_key], [name], [version], [lead_user], [qa_user], [description], [status], "
+            "[closed_at], [closed_by], [created_at], [created_by], [updated_at], [updated_by] FROM sprints WHERE [branch_key] = @branch_key"
         )
         with self._connection() as conn:
             cursor = conn.cursor()
@@ -1667,21 +1671,21 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     cursor.execute(
                         """
                         UPDATE sprints SET
-                            branch_key = @branch_key,
-                            qa_branch_key = @qa_branch_key,
-                            name = @name,
-                            version = @version,
-                            lead_user = @lead_user,
-                            qa_user = @qa_user,
-                            description = @description,
-                            status = @status,
-                            closed_at = @closed_at,
-                            closed_by = @closed_by,
-                            created_at = @created_at,
-                            created_by = @created_by,
-                            updated_at = @updated_at,
-                            updated_by = @updated_by
-                        WHERE id = @id
+                            [branch_key] = @branch_key,
+                            [qa_branch_key] = @qa_branch_key,
+                            [name] = @name,
+                            [version] = @version,
+                            [lead_user] = @lead_user,
+                            [qa_user] = @qa_user,
+                            [description] = @description,
+                            [status] = @status,
+                            [closed_at] = @closed_at,
+                            [closed_by] = @closed_by,
+                            [created_at] = @created_at,
+                            [created_by] = @created_by,
+                            [updated_at] = @updated_at,
+                            [updated_by] = @updated_by
+                        WHERE [id] = @id
                         """,
                         data,
                     )
@@ -1692,8 +1696,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                         cursor.execute(
                             """
                             INSERT INTO sprints (
-                                id, branch_key, qa_branch_key, name, version, lead_user, qa_user, description,
-                                status, closed_at, closed_by, created_at, created_by, updated_at, updated_by
+                                [id], [branch_key], [qa_branch_key], [name], [version], [lead_user], [qa_user], [description],
+                                [status], [closed_at], [closed_by], [created_at], [created_by], [updated_at], [updated_by]
                             ) VALUES (
                                 @id, @branch_key, @qa_branch_key, @name, @version, @lead_user, @qa_user, @description,
                                 @status, @closed_at, @closed_by, @created_at, @created_by, @updated_at, @updated_by
@@ -1708,8 +1712,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     INSERT INTO sprints (
-                        branch_key, qa_branch_key, name, version, lead_user, qa_user, description,
-                        status, closed_at, closed_by, created_at, created_by, updated_at, updated_by
+                        [branch_key], [qa_branch_key], [name], [version], [lead_user], [qa_user], [description],
+                        [status], [closed_at], [closed_by], [created_at], [created_by], [updated_at], [updated_by]
                     ) OUTPUT INSERTED.id VALUES (
                         @branch_key, @qa_branch_key, @name, @version, @lead_user, @qa_user, @description,
                         @status, @closed_at, @closed_by, @created_at, @created_by, @updated_at, @updated_by
@@ -1726,7 +1730,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM sprints WHERE id = @id", {"id": int(sprint_id)})
+                cursor.execute("DELETE FROM sprints WHERE [id] = @id", {"id": int(sprint_id)})
             finally:
                 cursor.close()
 
@@ -1739,8 +1743,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         branches: Optional[Sequence[str]] = None,
     ) -> List[dict]:
         sql = (
-            "SELECT id, sprint_id, branch_key, title, ticket_id, branch, assignee, qa_assignee, description, unit_tests_url, qa_url, "
-            "unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at, qa_at, status, branch_created_by, branch_created_at, created_at, created_by, updated_at, updated_by "
+            "SELECT [id], [sprint_id], [branch_key], [title], [ticket_id], [branch], [assignee], [qa_assignee], [description], [unit_tests_url], [qa_url], "
+            "[unit_tests_done], [qa_done], [unit_tests_by], [qa_by], [unit_tests_at], [qa_at], [status], [branch_created_by], [branch_created_at], [created_at], [created_by], [updated_at], [updated_by] "
             "FROM cards"
         )
         clauses = []
@@ -1751,14 +1755,14 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 name = f"sid{idx}"
                 placeholders.append(f"@{name}")
                 params[name] = int(sprint_id)
-            clauses.append(f"sprint_id IN ({', '.join(placeholders)})")
+            clauses.append(f"[sprint_id] IN ({', '.join(placeholders)})")
         if branches:
             placeholders = []
             for idx, branch in enumerate(dict.fromkeys(branches)):
                 name = f"br{idx}"
                 placeholders.append(f"@{name}")
                 params[name] = branch
-            clauses.append(f"branch IN ({', '.join(placeholders)})")
+            clauses.append(f"[branch] IN ({', '.join(placeholders)})")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         with self._connection() as conn:
@@ -1781,30 +1785,30 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     cursor.execute(
                         """
                         UPDATE cards SET
-                            sprint_id = @sprint_id,
-                            branch_key = @branch_key,
-                            title = @title,
-                            ticket_id = @ticket_id,
-                            branch = @branch,
-                            assignee = @assignee,
-                            qa_assignee = @qa_assignee,
-                            description = @description,
-                            unit_tests_url = @unit_tests_url,
-                            qa_url = @qa_url,
-                            unit_tests_done = @unit_tests_done,
-                            qa_done = @qa_done,
-                            unit_tests_by = @unit_tests_by,
-                            qa_by = @qa_by,
-                            unit_tests_at = @unit_tests_at,
-                            qa_at = @qa_at,
-                            status = @status,
-                            branch_created_by = @branch_created_by,
-                            branch_created_at = @branch_created_at,
-                            created_at = @created_at,
-                            created_by = @created_by,
-                            updated_at = @updated_at,
-                            updated_by = @updated_by
-                        WHERE id = @id
+                            [sprint_id] = @sprint_id,
+                            [branch_key] = @branch_key,
+                            [title] = @title,
+                            [ticket_id] = @ticket_id,
+                            [branch] = @branch,
+                            [assignee] = @assignee,
+                            [qa_assignee] = @qa_assignee,
+                            [description] = @description,
+                            [unit_tests_url] = @unit_tests_url,
+                            [qa_url] = @qa_url,
+                            [unit_tests_done] = @unit_tests_done,
+                            [qa_done] = @qa_done,
+                            [unit_tests_by] = @unit_tests_by,
+                            [qa_by] = @qa_by,
+                            [unit_tests_at] = @unit_tests_at,
+                            [qa_at] = @qa_at,
+                            [status] = @status,
+                            [branch_created_by] = @branch_created_by,
+                            [branch_created_at] = @branch_created_at,
+                            [created_at] = @created_at,
+                            [created_by] = @created_by,
+                            [updated_at] = @updated_at,
+                            [updated_by] = @updated_by
+                        WHERE [id] = @id
                         """,
                         data,
                     )
@@ -1815,9 +1819,9 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                         cursor.execute(
                             """
                             INSERT INTO cards (
-                                id, sprint_id, branch_key, title, ticket_id, branch, assignee, qa_assignee, description,
-                                unit_tests_url, qa_url, unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at,
-                                qa_at, status, branch_created_by, branch_created_at, created_at, created_by, updated_at, updated_by
+                                [id], [sprint_id], [branch_key], [title], [ticket_id], [branch], [assignee], [qa_assignee], [description],
+                                [unit_tests_url], [qa_url], [unit_tests_done], [qa_done], [unit_tests_by], [qa_by], [unit_tests_at],
+                                [qa_at], [status], [branch_created_by], [branch_created_at], [created_at], [created_by], [updated_at], [updated_by]
                             ) VALUES (
                                 @id, @sprint_id, @branch_key, @title, @ticket_id, @branch, @assignee, @qa_assignee, @description,
                                 @unit_tests_url, @qa_url, @unit_tests_done, @qa_done, @unit_tests_by, @qa_by, @unit_tests_at,
@@ -1833,9 +1837,9 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     INSERT INTO cards (
-                        sprint_id, branch_key, title, ticket_id, branch, assignee, qa_assignee, description,
-                        unit_tests_url, qa_url, unit_tests_done, qa_done, unit_tests_by, qa_by, unit_tests_at,
-                        qa_at, status, branch_created_by, branch_created_at, created_at, created_by, updated_at, updated_by
+                        [sprint_id], [branch_key], [title], [ticket_id], [branch], [assignee], [qa_assignee], [description],
+                        [unit_tests_url], [qa_url], [unit_tests_done], [qa_done], [unit_tests_by], [qa_by], [unit_tests_at],
+                        [qa_at], [status], [branch_created_by], [branch_created_at], [created_at], [created_by], [updated_at], [updated_by]
                     ) OUTPUT INSERTED.id VALUES (
                         @sprint_id, @branch_key, @title, @ticket_id, @branch, @assignee, @qa_assignee, @description,
                         @unit_tests_url, @qa_url, @unit_tests_done, @qa_done, @unit_tests_by, @qa_by, @unit_tests_at,
@@ -1853,7 +1857,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM cards WHERE id = @id", {"id": int(card_id)})
+                cursor.execute("DELETE FROM cards WHERE [id] = @id", {"id": int(card_id)})
             finally:
                 cursor.close()
 
@@ -1864,7 +1868,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
             cursor = conn.cursor()
             try:
                 cursor.execute(
-                    "SELECT username, display_name, email, active FROM users ORDER BY display_name"
+                    "SELECT [username], [display_name], [email], [active] FROM users ORDER BY [display_name]"
                 )
                 rows = cursor.fetchall()
                 result = _rows_to_dicts(cursor, rows)
@@ -1880,10 +1884,10 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     UPDATE users SET
-                        display_name = @display_name,
-                        email = @email,
-                        active = @active
-                    WHERE username = @username
+                        [display_name] = @display_name,
+                        [email] = @email,
+                        [active] = @active
+                    WHERE [username] = @username
                     """,
                     data,
                 )
@@ -1891,7 +1895,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     return
                 cursor.execute(
                     """
-                    INSERT INTO users (username, display_name, email, active)
+                    INSERT INTO users ([username], [display_name], [email], [active])
                     VALUES (@username, @display_name, @email, @active)
                     """,
                     data,
@@ -1903,7 +1907,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM users WHERE username = @username", {"username": username})
+                cursor.execute("DELETE FROM users WHERE [username] = @username", {"username": username})
             finally:
                 cursor.close()
 
@@ -1911,7 +1915,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("SELECT [key] AS key, name, description FROM roles ORDER BY name")
+                cursor.execute("SELECT [key] AS key, [name], [description] FROM roles ORDER BY [name]")
                 rows = cursor.fetchall()
                 data = _rows_to_dicts(cursor, rows)
             finally:
@@ -1926,8 +1930,8 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.execute(
                     """
                     UPDATE roles SET
-                        name = @name,
-                        description = @description
+                        [name] = @name,
+                        [description] = @description
                     WHERE [key] = @key
                     """,
                     data,
@@ -1936,7 +1940,7 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                     return
                 cursor.execute(
                     """
-                    INSERT INTO roles ([key], name, description)
+                    INSERT INTO roles ([key], [name], [description])
                     VALUES (@key, @name, @description)
                     """,
                     data,
@@ -1953,10 +1957,10 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
                 cursor.close()
 
     def fetch_user_roles(self, username: Optional[str] = None) -> List[dict]:
-        sql = "SELECT username, role_key FROM user_roles"
+        sql = "SELECT [username], [role_key] FROM user_roles"
         params: Dict[str, Any] = {}
         if username:
-            sql += " WHERE username = @username"
+            sql += " WHERE [username] = @username"
             params["username"] = username
         with self._connection() as conn:
             cursor = conn.cursor()
@@ -1973,13 +1977,13 @@ class SqlServerBranchHistoryBackend(BranchHistoryBackend):
         with self._connection() as conn:
             cursor = conn.cursor()
             try:
-                cursor.execute("DELETE FROM user_roles WHERE username = @username", {"username": username})
+                cursor.execute("DELETE FROM user_roles WHERE [username] = @username", {"username": username})
                 for role_key in normalized:
                     cursor.execute(
                         """
-                        IF NOT EXISTS (SELECT 1 FROM user_roles WHERE username = @username AND role_key = @role_key)
+                        IF NOT EXISTS (SELECT 1 FROM user_roles WHERE [username] = @username AND [role_key] = @role_key)
                         BEGIN
-                            INSERT INTO user_roles (username, role_key) VALUES (@username, @role_key)
+                            INSERT INTO user_roles ([username], [role_key]) VALUES (@username, @role_key)
                         END
                         """,
                         {"username": username, "role_key": role_key},
