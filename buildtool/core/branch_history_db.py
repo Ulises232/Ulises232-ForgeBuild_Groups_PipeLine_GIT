@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
 import logging
 import os
 import sqlite3
@@ -12,10 +13,28 @@ from queue import Empty, Full, Queue
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, urlparse
 
-try:  # pragma: no cover - optional dependency, exercised in integration flows
-    import pytds as tds
-except Exception:  # pragma: no cover - tests run without SQL Server driver
-    tds = None
+_SQLSERVER_IMPORT_ERRORS: List[str] = []
+_SQLSERVER_DRIVER: Optional[str] = None
+tds = None
+
+for _candidate in ("pytds", "pymssql", "tds"):
+    try:  # pragma: no cover - optional dependency, exercised in integration flows
+        _module = importlib.import_module(_candidate)
+    except Exception as exc:  # pragma: no cover - tests run without SQL Server driver
+        _SQLSERVER_IMPORT_ERRORS.append(f"{_candidate}: {exc}")
+        continue
+
+    if not hasattr(_module, "connect"):
+        _SQLSERVER_IMPORT_ERRORS.append(
+            f"{_candidate}: el módulo no expone la función 'connect' esperada"
+        )
+        continue
+
+    tds = _module
+    _SQLSERVER_DRIVER = _candidate
+    break
+
+del _candidate
 
 
 BRANCH_COLUMNS = [
@@ -369,7 +388,15 @@ class BranchHistorySettings:
 
 def _parse_sqlserver_url(url: str) -> Dict[str, Any]:
     parsed = urlparse(url)
-    if parsed.scheme not in {"mssql", "sqlserver", "tds"}:
+    scheme = (parsed.scheme or "").lower()
+    if "+" in scheme:
+        base, _, driver = scheme.partition("+")
+        if base in {"mssql", "sqlserver", "tds"} and driver in {"pytds", "pymssql"}:
+            scheme = base
+        else:
+            raise ValueError(f"Esquema de URL no soportado para SQL Server: {parsed.scheme}")
+
+    if scheme not in {"mssql", "sqlserver", "tds"}:
         raise ValueError(f"Esquema de URL no soportado para SQL Server: {parsed.scheme}")
 
     if not parsed.hostname:
@@ -445,8 +472,12 @@ class _SqlServerConnectionPool:
 
     def __init__(self, connect_kwargs: Mapping[str, Any], size: int) -> None:
         if tds is None:  # pragma: no cover - validated during runtime configuration
+            detail = "; ".join(_SQLSERVER_IMPORT_ERRORS)
+            if detail:
+                detail = f" Detalles: {detail}"
             raise RuntimeError(
-                "python-tds no está instalado; instálalo para utilizar SQL Server como backend"
+                "No se encontró un cliente SQL Server compatible (python-tds o pymssql)."
+                + detail
             )
         self._connect_kwargs = dict(connect_kwargs)
         self._pool: "Queue[Any]" = Queue(maxsize=max(1, size))
@@ -1178,7 +1209,7 @@ class SQLiteBranchHistoryBackend(BranchHistoryBackend):
 
 
 class SqlServerBranchHistoryBackend(BranchHistoryBackend):
-    """SQL Server persistence backed by python-tds."""
+    """SQL Server persistence backed by python-tds/pymssql."""
 
     def __init__(self, url: str, *, pool_size: int = 5) -> None:
         self._connect_kwargs = _parse_sqlserver_url(url)
