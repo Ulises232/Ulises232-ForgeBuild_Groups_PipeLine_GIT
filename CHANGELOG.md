@@ -4,6 +4,23 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.6.0] - 2025-02-15
+### Añadido
+- Capa de persistencia extensible para el historial de ramas con soporte a SQL Server 2019 mediante `BranchHistoryRepo`.
+- Pool reutilizable de conexiones TDS (`pymssql`) y carga de credenciales desde `.env` para entornos centralizados.
+- Script `scripts/migrate_branch_history.py` para migrar datos desde SQLite y documentación `docs/sqlserver_migration.md` con el procedimiento completo.
+
+### Cambiado
+- `branch_store` detecta automáticamente cuando el backend es SQL Server y omite el modo offline/NAS, operando solo en línea.
+- `README` y `.env` documentan la nueva configuración del backend y dependencias requeridas.
+
+### Corregido
+- Las operaciones genéricas de inserción/actualización citan los identificadores en SQL Server, evitando errores de sintaxis con
+  columnas reservadas como `key` al inicializar roles y usuarios.
+- La lectura de roles en SQL Server deja de aliasar la columna reservada `key`, previniendo fallos al abrir el diálogo de inicio de sesión.
+- La inserción/actualización genérica devuelve las claves alfanuméricas sin forzarlas a enteros, evitando el fallo `invalid literal for int()` al crear roles predeterminados en SQL Server.
+- La consulta del historial de actividades cita el alias `user`, eliminando el error `Incorrect syntax near the keyword 'user'` al cargar la vista NAS en SQL Server.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la

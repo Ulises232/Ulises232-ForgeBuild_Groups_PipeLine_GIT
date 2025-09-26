@@ -24,6 +24,8 @@ El proyecto depende de:
 - `PyYAML` 6.0.2
 - `rich` 13.7.1
 - `pydantic` 1.10.14
+- `python-dotenv` 1.0.1 (carga de variables desde `.env`)
+- `pymssql` 2.3+ (cliente nativo para SQL Server 2019)
 
 Se instalan automáticamente con los scripts descritos más adelante.
 
@@ -66,6 +68,12 @@ pip install -r requirements.txt
 export QT_LOGGING_RULES='*.debug=false;*.info=false;*.warning=true;*.critical=true'
 python -m buildtool.app
 ```
+
+#### Configuración del historial en SQL Server 2019
+
+- Copia `.env.example` como `.env` y define `BRANCH_HISTORY_DB_URL` con la cadena de conexión del servidor.
+- Opcionalmente fija `BRANCH_HISTORY_BACKEND=sqlserver` cuando quieras forzar el modo en línea.
+- Sigue los pasos detallados en `docs/sqlserver_migration.md` para migrar el contenido existente desde SQLite y validar los privilegios del usuario en la base de datos destino.
 
 ### 3.4 Generar ejecutable con PyInstaller
 Para crear un ejecutable independiente (Windows), ejecuta:
