@@ -2068,24 +2068,37 @@ class BranchHistoryDB:
         pool_size: Optional[int] = None,
     ) -> None:
         default_path = Path(path) if path is not None else None
-        settings = BranchHistorySettings.resolve(default_path)
+        overrides_provided = any(value is not None for value in (backend, url, pool_size))
 
-        backend_name = (backend or settings.backend).strip().lower()
+        settings: Optional[BranchHistorySettings]
+        if not overrides_provided:
+            settings = BranchHistorySettings.resolve(default_path)
+        else:
+            try:
+                settings = BranchHistorySettings.resolve(default_path)
+            except ValueError:
+                settings = None
+
+        resolved_backend = backend or (settings.backend if settings else None)
+        if not resolved_backend:
+            resolved_backend = "sqlserver" if (url or (settings and settings.sqlserver_url)) else "sqlite"
+
+        backend_name = resolved_backend.strip().lower()
         if backend_name not in {"sqlite", "sqlserver"}:
             raise ValueError(f"Backend de historial no soportado: {backend_name}")
 
         if backend_name == "sqlite":
-            sqlite_path = Path(path) if path is not None else settings.sqlite_path
+            sqlite_path = Path(path) if path is not None else (settings.sqlite_path if settings else None)
             if url and not path:
                 sqlite_path = Path(url)
             if sqlite_path is None:
                 raise ValueError("No se pudo determinar la ruta SQLite para el historial")
             self._backend: BranchHistoryBackend = SQLiteBranchHistoryBackend(Path(sqlite_path))
         else:
-            connection_url = url or settings.sqlserver_url
+            connection_url = url or (settings.sqlserver_url if settings else None)
             if not connection_url:
                 raise ValueError("Se requiere FORGEBUILD_BRANCH_HISTORY_URL para SQL Server")
-            size = pool_size or settings.pool_size
+            size = pool_size or (settings.pool_size if settings else 5)
             self._backend = SqlServerBranchHistoryBackend(connection_url, pool_size=size)
 
         self.backend_name = backend_name

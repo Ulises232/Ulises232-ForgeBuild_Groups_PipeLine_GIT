@@ -19,6 +19,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - La importación opcional de `python-tds` usa `pytds` como módulo real, eliminando el falso positivo que indicaba que el paquete no estaba instalado.
 - La tabla `branches` del backend SQL Server escapa la columna `key` y las consultas asociadas para evitar errores de sintaxis al crear el esquema.
 - El script `scripts/migrate_branch_history.py` ajusta automáticamente la ruta de importación para ejecutarse sin instalar `buildtool` como paquete.
+- `BranchHistoryDB` respeta los parámetros explícitos de backend y URL, permitiendo inicializar el backend SQL Server sin requerir rutas SQLite ni variables de entorno adicionales.
 
 ## [1.5.1] - 2025-10-06
 
