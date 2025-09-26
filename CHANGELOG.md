@@ -18,6 +18,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Las operaciones genéricas de inserción/actualización citan los identificadores en SQL Server, evitando errores de sintaxis con
   columnas reservadas como `key` al inicializar roles y usuarios.
 - La lectura de roles en SQL Server deja de aliasar la columna reservada `key`, previniendo fallos al abrir el diálogo de inicio de sesión.
+- La inserción/actualización genérica devuelve las claves alfanuméricas sin forzarlas a enteros, evitando el fallo `invalid literal for int()` al crear roles predeterminados en SQL Server.
 
 ## [1.5.1] - 2025-10-06
 ### Añadido

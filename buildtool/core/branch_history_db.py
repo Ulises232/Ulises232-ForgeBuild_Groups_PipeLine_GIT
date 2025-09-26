@@ -1311,7 +1311,7 @@ class _SqlServerBranchHistory:
         key_column: str,
         data: Dict[str, object],
         columns: Sequence[str],
-    ) -> int:
+    ) -> object:
         quoted_table = self._quote_identifier(table)
         quoted_key = self._quote_identifier(key_column)
         setters = ", ".join(
@@ -1326,7 +1326,9 @@ class _SqlServerBranchHistory:
                 cursor.execute("SELECT SCOPE_IDENTITY() AS id")
                 row = cursor.fetchone()
                 return int(row["id"]) if row and row.get("id") is not None else 0
-            return int(data.get(key_column) or 0)
+            if key_column == "id":
+                return int(data.get(key_column) or 0)
+            return data.get(key_column)
 
         insert_columns = list(columns)
         if key_column == "id" and not data.get("id"):
@@ -1341,7 +1343,7 @@ class _SqlServerBranchHistory:
             cursor.execute("SELECT SCOPE_IDENTITY() AS id")
             row = cursor.fetchone()
             return int(row["id"]) if row and row.get("id") is not None else 0
-        return int(data.get(key_column) or 0)
+        return data.get(key_column)
 
     @staticmethod
     def _quote_identifier(identifier: str) -> str:
