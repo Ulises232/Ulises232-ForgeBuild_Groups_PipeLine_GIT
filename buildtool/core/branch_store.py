@@ -4,9 +4,7 @@ from pathlib import Path
 from typing import Dict, Optional, List, Any, Iterable
 import os
 import time
-import json
 
-from .config import load_config
 from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
 
 
@@ -15,12 +13,6 @@ class NasUnavailableError(RuntimeError):
 
 
 # ---------------- paths helpers -----------------
-
-def _root_dir() -> Path:
-    try:
-        return Path(__file__).resolve().parents[2]
-    except Exception:
-        return Path.cwd()
 
 
 def _state_dir() -> Path:
@@ -32,35 +24,6 @@ def _state_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-
-def _nas_dir() -> Path:
-    cfg = load_config()
-    base = getattr(getattr(cfg, "paths", {}), "nas_dir", "")
-    if not base:
-        base = os.environ.get("NAS_DIR")
-    if not base:
-        base = str(_root_dir() / "_nas_dev")
-    p = Path(base)
-    try:
-        p.mkdir(parents=True, exist_ok=True)
-    except (FileNotFoundError, OSError) as exc:
-        detail = getattr(exc, "strerror", "") or str(exc)
-        raise NasUnavailableError(
-            f"El recurso NAS en '{base}' no está disponible: {detail}"
-        ) from exc
-    return p
-
-
-def _db_path(base: Path) -> Path:
-    return base / "branches_history.sqlite3"
-
-
-def _legacy_index_path(base: Path) -> Path:
-    return base / "branches_index.json"
-
-
-def _legacy_log_path(base: Path) -> Path:
-    return base / "activity_log.jsonl"
 
 
 # ---------------- data structures -----------------
@@ -146,96 +109,12 @@ _DB_CACHE: Dict[str, BranchHistoryDB] = {}
 _SERVER_CACHE_KEY = "__sqlserver__"
 
 
-def _is_server_backend() -> bool:
-    backend = (os.environ.get("BRANCH_HISTORY_BACKEND") or "").strip().lower()
-    if backend == "sqlserver":
-        return True
-    if backend == "sqlite":
-        return False
-    return bool(os.environ.get("BRANCH_HISTORY_DB_URL"))
-
-
-def _cache_key(base: Path) -> str:
-    if _is_server_backend():
-        return _SERVER_CACHE_KEY
-    return str(base.resolve())
-
-
 def _get_db(base: Path) -> BranchHistoryDB:
-    key = _cache_key(base)
-    db = _DB_CACHE.get(key)
+    db = _DB_CACHE.get(_SERVER_CACHE_KEY)
     if not db:
-        if _is_server_backend():
-            db = BranchHistoryDB(_db_path(base), backend="sqlserver")
-        else:
-            db = BranchHistoryDB(_db_path(base), backend="sqlite")
-            _run_migrations(base, db)
-        _DB_CACHE[key] = db
+        db = BranchHistoryDB(url=os.environ.get("BRANCH_HISTORY_DB_URL"))
+        _DB_CACHE[_SERVER_CACHE_KEY] = db
     return db
-
-
-def _run_migrations(base: Path, db: BranchHistoryDB) -> None:
-    if getattr(db, "backend_name", "sqlite") == "sqlserver":
-        return
-    _migrate_index(base, db)
-    _migrate_activity_log(base, db)
-
-
-def _retire_legacy_file(path: Path) -> None:
-    if not path.exists():
-        return
-    try:
-        backup = path.with_suffix(path.suffix + ".migrated")
-        if backup.exists():
-            path.unlink()
-        else:
-            path.rename(backup)
-    except Exception:
-        try:
-            path.unlink()
-        except Exception:
-            pass
-
-
-def _migrate_index(base: Path, db: BranchHistoryDB) -> None:
-    legacy = _legacy_index_path(base)
-    if not legacy.exists():
-        return
-    if db.fetch_branches():
-        return
-    try:
-        raw = json.loads(legacy.read_text(encoding="utf-8"))
-    except Exception:
-        return
-    index: Dict[str, BranchRecord] = {}
-    for rec in raw.get("items", []):
-        br = _normalize_record_payload(rec)
-        if not br:
-            continue
-        index[br.key()] = br
-    if index:
-        db.replace_branches(_records_to_payloads(index.values()))
-        _retire_legacy_file(legacy)
-
-
-def _migrate_activity_log(base: Path, db: BranchHistoryDB) -> None:
-    legacy = _legacy_log_path(base)
-    if not legacy.exists():
-        return
-    entries: List[dict] = []
-    try:
-        for line in legacy.read_text(encoding="utf-8").splitlines():
-            try:
-                entry = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(entry, dict):
-                entries.append(entry)
-    except Exception:
-        return
-    if entries:
-        db.append_activity(entries)
-        _retire_legacy_file(legacy)
 
 
 def _records_to_payloads(records: Iterable[BranchRecord]) -> List[dict]:
@@ -381,6 +260,7 @@ def record_activity(
     message: str = "",
     targets: Iterable[str] = ("local",),
 ) -> None:
+    """Registra la actividad en el backend en línea."""
     entry = {
         "ts": int(time.time()),
         "user": rec.last_updated_by or rec.created_by,
@@ -391,24 +271,14 @@ def record_activity(
         "result": result,
         "message": message,
     }
-    seen: set[str] = set()
-    for target in targets:
-        if target in seen:
-            continue
-        seen.add(target)
-        if target == "nas" and not _is_server_backend():
-            try:
-                base = _nas_dir()
-            except NasUnavailableError as exc:
-                raise NasUnavailableError(
-                    f"No se pudo registrar la actividad en la NAS: {exc}"
-                ) from exc
-        else:
-            base = _state_dir()
-        payload = dict(entry)
-        payload["group_name"] = entry.get("group")
-        payload["branch_key"] = f"{entry.get('group') or ''}/{entry.get('project') or ''}/{entry.get('branch') or ''}"
-        _get_db(base).append_activity([payload])
+    payload = dict(entry)
+    payload["group_name"] = entry.get("group")
+    payload["branch_key"] = (
+        f"{entry.get('group') or ''}/{entry.get('project') or ''}/{entry.get('branch') or ''}"
+    )
+    _get_db(_state_dir()).append_activity([payload])
+
+
 
 
 # ---------------- basic mutations -----------------
@@ -735,80 +605,38 @@ def set_user_roles(username: str, roles: Iterable[str], *, path: Optional[Path] 
 
 # ---------------- filtering helpers -----------------
 
-def _filter_origin(index: Index) -> Index:
-    """Keep only records that were pushed to origin."""
-    return {k: v for k, v in index.items() if v.exists_origin}
-
 
 # ---------------- NAS sync -----------------
 
-LOCK_NAME = "branches.lock"
-
-
-def _acquire_lock(base: Path, timeout: int = 10) -> bool:
-    lock = base / LOCK_NAME
-    start = time.time()
-    while lock.exists() and time.time() - start < timeout:
-        time.sleep(0.1)
-    try:
-        lock.write_text(str(os.getpid()))
-        return True
-    except Exception:
-        return False
-
-
-def _release_lock(base: Path) -> None:
-    try:
-        (base / LOCK_NAME).unlink()
-    except Exception:
-        pass
-
-
 def recover_from_nas() -> Index:
-    if _is_server_backend():
-        return load_index()
-    try:
-        base = _nas_dir()
-    except NasUnavailableError as exc:
-        raise NasUnavailableError(
-            f"No se pudo acceder a la NAS para recuperar el historial: {exc}"
-        ) from exc
-    local = load_index()
-    nas = load_index(base, filter_origin=True)
-    merged = merge_indexes(local, nas)
-    save_index(merged)
-    if nas:
-        nas_entries = _get_db(base).fetch_activity(branch_keys=nas.keys())
-        if nas_entries:
-            _get_db(_state_dir()).append_activity(nas_entries)
-    return merged
+    """Mantiene compatibilidad devolviendo el índice actual."""
+    return load_index()
+
 
 
 def publish_to_nas() -> Index:
-    if _is_server_backend():
-        return load_index()
-    try:
-        base = _nas_dir()
-    except NasUnavailableError as exc:
-        raise NasUnavailableError(
-            f"No se pudo acceder a la NAS para publicar el historial: {exc}"
-        ) from exc
-    if not _acquire_lock(base):
-        raise RuntimeError("NAS lock busy")
-    try:
-        local_origin = _filter_origin(load_index())
-        remote_origin = load_index(base, filter_origin=True)
-        merged = merge_indexes(remote_origin, local_origin)
-        save_index(merged, base)
+    """Publicar en NAS ahora equivale a sincronizar el backend en línea."""
+    return load_index()
 
-        remote_db = _get_db(base)
-        remote_db.prune_activity(merged.keys())
-        if local_origin:
-            entries = _get_db(_state_dir()).fetch_activity(branch_keys=local_origin.keys())
-            remote_db.append_activity(entries)
-        return merged
-    finally:
-        _release_lock(base)
+
+
+def load_nas_index() -> Index:
+    """Alias del índice principal mientras la NAS deja de existir."""
+    return load_index()
+
+
+
+def save_nas_index(index: Index) -> None:
+    """Persistencia simplificada: delega en la base en línea."""
+    save_index(index)
+
+
+
+def load_nas_activity_log() -> List[dict[str, Any]]:
+    """Obtiene las actividades desde el backend en línea."""
+    return load_activity_log()
+
+
 
 
 # ---------------- merging -----------------
@@ -824,31 +652,6 @@ def merge_indexes(a: Index, b: Index) -> Index:
         if rec.last_updated_at >= existing.last_updated_at:
             out[key] = rec
     return out
-
-
-def load_nas_index() -> Index:
-    """Load the branches index stored in the NAS directory."""
-    if _is_server_backend():
-        return load_index()
-    try:
-        base = _nas_dir()
-    except NasUnavailableError:
-        return {}
-    return load_index(base)
-
-
-def save_nas_index(index: Index) -> None:
-    """Persist the NAS index to disk."""
-    if _is_server_backend():
-        save_index(index)
-        return
-    try:
-        base = _nas_dir()
-    except NasUnavailableError as exc:
-        raise NasUnavailableError(
-            f"No se pudo guardar el índice en la NAS: {exc}"
-        ) from exc
-    save_index(index, base)
 
 
 def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
@@ -871,13 +674,3 @@ def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
         )
     return entries
 
-
-def load_nas_activity_log() -> List[dict[str, Any]]:
-    """Return parsed activity log entries stored in the NAS directory."""
-    if _is_server_backend():
-        return load_activity_log()
-    try:
-        base = _nas_dir()
-    except NasUnavailableError:
-        return []
-    return load_activity_log(base)

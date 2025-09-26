@@ -11,7 +11,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Script `scripts/migrate_branch_history.py` para migrar datos desde SQLite y documentación `docs/sqlserver_migration.md` con el procedimiento completo.
 
 ### Cambiado
-- `branch_store` detecta automáticamente cuando el backend es SQL Server y omite el modo offline/NAS, operando solo en línea.
+- `branch_store` opera exclusivamente contra SQL Server, eliminando migraciones locales, archivos SQLite y flujos offline/NAS.
+- `BranchHistoryDB` retira el backend SQLite y exige una cadena `BRANCH_HISTORY_DB_URL` para inicializar la persistencia.
 - `README` y `.env` documentan la nueva configuración del backend y dependencias requeridas.
 
 ### Corregido
