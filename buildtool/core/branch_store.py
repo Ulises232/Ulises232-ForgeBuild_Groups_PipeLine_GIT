@@ -142,20 +142,41 @@ def _normalize_record_payload(raw: Any) -> Optional[BranchRecord]:
     return rec
 
 
-_DB_CACHE: Dict[Path, BranchHistoryDB] = {}
+_DB_CACHE: Dict[str, BranchHistoryDB] = {}
+_SERVER_CACHE_KEY = "__sqlserver__"
+
+
+def _is_server_backend() -> bool:
+    backend = (os.environ.get("BRANCH_HISTORY_BACKEND") or "").strip().lower()
+    if backend == "sqlserver":
+        return True
+    if backend == "sqlite":
+        return False
+    return bool(os.environ.get("BRANCH_HISTORY_DB_URL"))
+
+
+def _cache_key(base: Path) -> str:
+    if _is_server_backend():
+        return _SERVER_CACHE_KEY
+    return str(base.resolve())
 
 
 def _get_db(base: Path) -> BranchHistoryDB:
-    base = base.resolve()
-    db = _DB_CACHE.get(base)
+    key = _cache_key(base)
+    db = _DB_CACHE.get(key)
     if not db:
-        db = BranchHistoryDB(_db_path(base))
-        _DB_CACHE[base] = db
-        _run_migrations(base, db)
+        if _is_server_backend():
+            db = BranchHistoryDB(_db_path(base), backend="sqlserver")
+        else:
+            db = BranchHistoryDB(_db_path(base), backend="sqlite")
+            _run_migrations(base, db)
+        _DB_CACHE[key] = db
     return db
 
 
 def _run_migrations(base: Path, db: BranchHistoryDB) -> None:
+    if getattr(db, "backend_name", "sqlite") == "sqlserver":
+        return
     _migrate_index(base, db)
     _migrate_activity_log(base, db)
 
@@ -375,7 +396,7 @@ def record_activity(
         if target in seen:
             continue
         seen.add(target)
-        if target == "nas":
+        if target == "nas" and not _is_server_backend():
             try:
                 base = _nas_dir()
             except NasUnavailableError as exc:
@@ -744,6 +765,8 @@ def _release_lock(base: Path) -> None:
 
 
 def recover_from_nas() -> Index:
+    if _is_server_backend():
+        return load_index()
     try:
         base = _nas_dir()
     except NasUnavailableError as exc:
@@ -762,6 +785,8 @@ def recover_from_nas() -> Index:
 
 
 def publish_to_nas() -> Index:
+    if _is_server_backend():
+        return load_index()
     try:
         base = _nas_dir()
     except NasUnavailableError as exc:
@@ -803,6 +828,8 @@ def merge_indexes(a: Index, b: Index) -> Index:
 
 def load_nas_index() -> Index:
     """Load the branches index stored in the NAS directory."""
+    if _is_server_backend():
+        return load_index()
     try:
         base = _nas_dir()
     except NasUnavailableError:
@@ -812,6 +839,9 @@ def load_nas_index() -> Index:
 
 def save_nas_index(index: Index) -> None:
     """Persist the NAS index to disk."""
+    if _is_server_backend():
+        save_index(index)
+        return
     try:
         base = _nas_dir()
     except NasUnavailableError as exc:
@@ -844,6 +874,8 @@ def load_activity_log(path: Optional[Path] = None) -> List[dict[str, Any]]:
 
 def load_nas_activity_log() -> List[dict[str, Any]]:
     """Return parsed activity log entries stored in the NAS directory."""
+    if _is_server_backend():
+        return load_activity_log()
     try:
         base = _nas_dir()
     except NasUnavailableError:

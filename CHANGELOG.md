@@ -4,6 +4,16 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [1.6.0] - 2025-02-15
+### Añadido
+- Capa de persistencia extensible para el historial de ramas con soporte a SQL Server 2019 mediante `BranchHistoryRepo`.
+- Pool reutilizable de conexiones TDS (`pymssql`) y carga de credenciales desde `.env` para entornos centralizados.
+- Script `scripts/migrate_branch_history.py` para migrar datos desde SQLite y documentación `docs/sqlserver_migration.md` con el procedimiento completo.
+
+### Cambiado
+- `branch_store` detecta automáticamente cuando el backend es SQL Server y omite el modo offline/NAS, operando solo en línea.
+- `README` y `.env` documentan la nueva configuración del backend y dependencias requeridas.
+
 ## [1.5.1] - 2025-10-06
 ### Añadido
 - Pestaña de planeación unificada para altas/ediciones de sprints y tarjetas en la
