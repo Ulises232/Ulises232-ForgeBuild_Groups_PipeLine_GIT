@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .ui.icons import get_icon
+from ..ui.icons import get_icon
 
 
 class SprintFormWidget(QWidget):
