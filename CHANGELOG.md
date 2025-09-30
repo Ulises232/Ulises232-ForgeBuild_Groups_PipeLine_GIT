@@ -16,6 +16,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Los sprints almacenan y muestran la empresa asociada tanto en la tabla como en el formulario de edición.
 - El formulario de planeación de sprints incorpora selección de grupo/empresa sincronizada y asignación guiada al mover tarjetas.
 
+### Corregido
+- La relación `card_sprint_links` deja de propagar eliminaciones en cascada hacia `sprints`, evitando la ruta múltiple que impedía inicializar el esquema en SQL Server.
+
 ## [1.7.0] - 2025-02-16
 ### Añadido
 - Tabla `branch_local_users` en SQL Server para registrar la presencia local de cada rama por usuario y exponerla mediante `load_local_states` y nuevas pruebas automatizadas.
