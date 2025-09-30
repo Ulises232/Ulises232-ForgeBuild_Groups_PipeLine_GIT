@@ -4,14 +4,21 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
-## [Unreleased]
+
+## [1.8.0] - 2025-02-17
 
 ### Añadido
 - Ventana de edición de sprints con listado reutilizable de tarjetas pendientes por empresa, permitiendo asignar varias al sprint en un solo paso.
+- Panel de administración con pestañas para usuarios y catálogos accesible a roles de administrador y líder.
+- Catálogo inicial de empresas con captura de nombre, grupo, autor y fechas de actualización reutilizable al planear sprints.
+- Pestaña dedicada para explorar tarjetas con filtros por grupo, empresa, sprint y estado desde la vista de planeación.
 
 ### Cambiado
 - La relación entre sprints y grupos se almacena en la tabla `sprint_groups`, migrando los datos existentes y manteniendo la compatibilidad con SQL Server.
 - Los formularios de sprints y tarjetas ahora se muestran en diálogos reutilizables definidos en `editor_forms.py`, facilitando su uso desde otras vistas.
+- Los sprints almacenan y muestran la empresa asociada tanto en la tabla como en el formulario de edición.
+- El formulario de planeación de sprints incorpora selección de grupo/empresa sincronizada y asignación guiada al mover tarjetas.
+- La pestaña de tarjetas ahora permite crear tarjetas independientes de un sprint, precargando grupo y empresa según los filtros activos y aplazando la asignación del sprint hasta la planeación.
 
 ### Corregido
 - La llave foránea `fk_card_sprint_sprint` ahora se crea sin acciones en cascada para evitar que SQL Server rechace el esquema por rutas múltiples al inicializar la base.
@@ -21,19 +28,6 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Evitado el fallo al cargar la vista de planeación inicial verificando la existencia de los combos antes de poblarlos durante el refresco automático.
 - Al eliminar un sprint ahora se liberan sus tarjetas asociadas y permanecen en el catálogo, dejando el campo `sprint_id` en blanco en lugar de eliminarlas.
 - Guardar una tarjeta desde el planificador valida que el formulario siga activo y limita el combo de sprints a la empresa correspondiente, evitando errores y asignaciones cruzadas.
-
-## [1.8.0] - 2025-02-17
-### Añadido
-- Panel de administración con pestañas para usuarios y catálogos accesible a roles de administrador y líder.
-- Catálogo inicial de empresas con captura de nombre, grupo, autor y fechas de actualización reutilizable al planear sprints.
-- Pestaña dedicada para explorar tarjetas con filtros por grupo, empresa, sprint y estado desde la vista de planeación.
-
-### Cambiado
-- Los sprints almacenan y muestran la empresa asociada tanto en la tabla como en el formulario de edición.
-- El formulario de planeación de sprints incorpora selección de grupo/empresa sincronizada y asignación guiada al mover tarjetas.
-- La pestaña de tarjetas ahora permite crear tarjetas independientes de un sprint, precargando grupo y empresa según los filtros activos y aplazando la asignación del sprint hasta la planeación.
-
-### Corregido
 - La relación `card_sprint_links` deja de propagar eliminaciones en cascada hacia `sprints`, evitando la ruta múltiple que impedía inicializar el esquema en SQL Server.
 - Se restauró la acción "Crear rama" en la vista de planeación para que vuelva a enlazar el botón con su lógica y valide permisos/estado antes de ejecutar.
 - Guardar una tarjeta sin sprint ahora conserva `cards.sprint_id` en `NULL` y pospone la relación histórica, eliminando la violación de la llave foránea `fk_cards_sprint`.
