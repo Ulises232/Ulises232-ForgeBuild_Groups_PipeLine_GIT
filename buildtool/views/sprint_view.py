@@ -127,6 +127,72 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
+    def _clear_sprint_form_refs(self) -> None:
+        """Remove sprint-form widgets so deleted Qt objects aren't reused."""
+        self._sprint_form_sprint = None
+        names = [
+            "pageSprint",
+            "cboSprintGroup",
+            "txtSprintBranch",
+            "btnPickBranch",
+            "txtSprintQABranch",
+            "btnPickQABranch",
+            "txtSprintName",
+            "txtSprintVersion",
+            "cboCompany",
+            "lblSprintSequence",
+            "cboSprintLead",
+            "cboSprintQA",
+            "chkSprintClosed",
+            "lblSprintMeta",
+            "btnSprintDelete",
+            "btnSprintCancel",
+            "btnSprintSave",
+            "pending_box",
+            "lstUnassignedCards",
+            "btnAssignCards",
+        ]
+        for name in names:
+            if hasattr(self, name):
+                delattr(self, name)
+
+    # ------------------------------------------------------------------
+    def _clear_card_form_refs(self) -> None:
+        """Remove card-form widgets so deleted Qt objects aren't reused."""
+        self._card_form_card = None
+        self._card_form_sprint = None
+        names = [
+            "pageCard",
+            "lblCardSprint",
+            "cboCardSprint",
+            "cboCardGroup",
+            "cboCardCompany",
+            "lblCardStatus",
+            "txtCardTicket",
+            "txtCardTitle",
+            "lblCardPrefix",
+            "txtCardBranch",
+            "lblCardBranchPreview",
+            "cboCardAssignee",
+            "cboCardQA",
+            "txtCardUnitUrl",
+            "txtCardQAUrl",
+            "lblCardChecks",
+            "lblCardLocal",
+            "lblCardOrigin",
+            "lblCardCreator",
+            "btnCardDelete",
+            "btnCardMarkUnit",
+            "btnCardMarkQA",
+            "btnCardCreateBranch",
+            "btnCardCancel",
+            "btnCardSave",
+        ]
+        for name in names:
+            if hasattr(self, name):
+                delattr(self, name)
+
+    # ------------------------------------------------------------------
     def _build_planning_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -278,12 +344,21 @@ class SprintView(QWidget):
         self._sprint_dialog = None
         self._unassigned_cards = {}
         if hasattr(self, "lstUnassignedCards"):
-            self.lstUnassignedCards.clear()
-            self.lstUnassignedCards.setEnabled(False)
+            try:
+                self.lstUnassignedCards.clear()
+                self.lstUnassignedCards.setEnabled(False)
+            except RuntimeError:
+                pass
         if hasattr(self, "btnAssignCards"):
-            self.btnAssignCards.setEnabled(False)
+            try:
+                self.btnAssignCards.setEnabled(False)
+            except RuntimeError:
+                pass
         if hasattr(self, "pending_box"):
-            self.pending_box.setVisible(False)
+            try:
+                self.pending_box.setVisible(False)
+            except RuntimeError:
+                pass
         if dialog.isVisible():
             dialog.close()
         else:
@@ -303,8 +378,10 @@ class SprintView(QWidget):
     # ------------------------------------------------------------------
     def _on_dialog_closed(self, kind: str) -> None:
         if kind == "sprint":
+            self._clear_sprint_form_refs()
             self._sprint_dialog = None
         elif kind == "card":
+            self._clear_card_form_refs()
             self._card_dialog = None
         if self._active_form == kind:
             self._active_form = None
