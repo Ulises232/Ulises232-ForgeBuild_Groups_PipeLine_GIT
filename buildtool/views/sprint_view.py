@@ -114,6 +114,7 @@ class SprintView(QWidget):
 
         self.card_browser = CardBrowser(self)
         self.card_browser.cardActivated.connect(self._open_card_from_browser)
+        self.card_browser.newCardRequested.connect(self._start_new_card_from_browser)
         self.tabs.addTab(self.card_browser, "Tarjetas")
 
         self.btnRefresh.clicked.connect(self.refresh)
@@ -481,7 +482,7 @@ class SprintView(QWidget):
             self.txtCardQAUrl.setToolTip("")
 
         branch_name = self._full_branch_name() if card_mode else ""
-        branch_ready = card_mode and bool(branch_name)
+        branch_ready = card_mode and bool(branch_name) and sprint is not None
         branch_record = None
         if sprint and branch_ready:
             branch_record = self._branch_record_for_name(sprint, branch_name)
@@ -503,6 +504,8 @@ class SprintView(QWidget):
                 branch_tooltip = ""
             elif not has_card:
                 branch_tooltip = "Guarda la tarjeta antes de crear la rama"
+            elif not sprint:
+                branch_tooltip = "Asigna la tarjeta a un sprint antes de crear la rama"
             elif sprint_closed:
                 branch_tooltip = "El sprint está finalizado; no se pueden crear nuevas ramas"
             elif not (can_lead or is_card_assignee):
@@ -519,6 +522,10 @@ class SprintView(QWidget):
                 branch_tooltip = "Configura la rama QA del sprint antes de crear ramas de tarjeta"
         self.btnCardCreateBranch.setEnabled(allow_branch_create)
         self.btnCardCreateBranch.setToolTip(branch_tooltip)
+
+        if hasattr(self, "card_browser"):
+            can_create_cards = require_roles("leader", "developer")
+            self.card_browser.set_new_card_enabled(bool(can_create_cards))
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -722,8 +729,12 @@ class SprintView(QWidget):
         parent.addChild(item)
 
     # ------------------------------------------------------------------
-    def _branch_record_for_card(self, card: Card, sprint: Sprint) -> Optional[BranchRecord]:
-        branch_key = card.branch_key or self._build_card_branch_key(card, sprint)
+    def _branch_record_for_card(
+        self, card: Card, sprint: Optional[Sprint]
+    ) -> Optional[BranchRecord]:
+        branch_key = card.branch_key
+        if not branch_key and sprint:
+            branch_key = self._build_card_branch_key(card, sprint)
         if not branch_key:
             return None
         return self._branch_index.get(branch_key)
@@ -801,7 +812,20 @@ class SprintView(QWidget):
     # ------------------------------------------------------------------
     def _restore_selection(self) -> None:
         if self._selected_card_id and self._selected_card_id in self._cards:
-            self._select_tree_item("card", self._selected_card_id)
+            card = self._cards[self._selected_card_id]
+            sprint_id = None
+            try:
+                if getattr(card, "sprint_id", None):
+                    sprint_id = int(card.sprint_id)
+                    if sprint_id == 0:
+                        sprint_id = None
+            except (TypeError, ValueError):
+                sprint_id = None
+            sprint = self._sprints.get(sprint_id) if sprint_id else None
+            if sprint and card.id is not None:
+                self._select_tree_item("card", card.id)
+                return
+            self._show_card_form(card, sprint)
             return
         if self._selected_sprint_id and self._selected_sprint_id in self._sprints:
             self._select_tree_item("sprint", self._selected_sprint_id)
@@ -968,9 +992,8 @@ class SprintView(QWidget):
         if not hasattr(self, "cboCardSprint"):
             return
         self.cboCardSprint.blockSignals(True)
-        current = selected
         self.cboCardSprint.clear()
-        self.cboCardSprint.addItem("(selecciona)", None)
+        self.cboCardSprint.addItem("Sin sprint", None)
         for sprint in sorted(
             self._sprints.values(), key=lambda s: ((s.version or "").lower(), (s.name or "").lower())
         ):
@@ -978,8 +1001,14 @@ class SprintView(QWidget):
             if sprint.status == "closed":
                 label += " (cerrado)"
             self.cboCardSprint.addItem(label, sprint.id)
-        if current:
-            idx = self.cboCardSprint.findData(current)
+        normalized: Optional[int] = None
+        try:
+            if selected not in (None, "", 0):
+                normalized = int(selected)
+        except (TypeError, ValueError):
+            normalized = None
+        if normalized is not None:
+            idx = self.cboCardSprint.findData(normalized)
             if idx >= 0:
                 self.cboCardSprint.setCurrentIndex(idx)
             else:
@@ -1073,26 +1102,45 @@ class SprintView(QWidget):
     def _on_card_sprint_changed(self) -> None:
         if not hasattr(self, "cboCardSprint"):
             return
-        sprint_id = self.cboCardSprint.currentData()
-        sprint = self._sprints.get(int(sprint_id)) if sprint_id else None
-        if sprint and sprint.status == "closed" and (self._card_form_card and (self._card_form_card.status or "").lower() != "terminated"):
+        raw_value = self.cboCardSprint.currentData()
+        sprint_id: Optional[int] = None
+        try:
+            if raw_value not in (None, ""):
+                sprint_id = int(raw_value)
+                if sprint_id == 0:
+                    sprint_id = None
+        except (TypeError, ValueError):
+            sprint_id = None
+
+        sprint = self._sprints.get(sprint_id) if sprint_id else None
+        if sprint and sprint.status == "closed" and (
+            self._card_form_card and (self._card_form_card.status or "").lower() != "terminated"
+        ):
             QMessageBox.warning(self, "Tarjeta", "No puedes mover la tarjeta a un sprint cerrado.")
-            self._populate_card_sprint_combo(self._card_form_card.sprint_id if self._card_form_card else None)
+            previous = None
+            if self._card_form_card:
+                previous = getattr(self._card_form_card, "sprint_id", None)
+            self._populate_card_sprint_combo(previous)
             return
         self._card_form_sprint = sprint
+        self._card_parent_id = sprint.id if sprint else None
+        self.lblCardSprint.setText(self._card_sprint_label(sprint, self._card_form_card))
+
         if sprint and sprint.group_name:
             self._set_card_group(sprint.group_name)
-        elif not sprint:
-            self._set_card_group(None)
+        elif not sprint and self._card_form_card:
+            self._set_card_group(self._card_form_card.group_name)
+
         current_company = self._card_form_card.company_id if self._card_form_card else None
         filter_group = self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
         self._populate_card_company_combo(current_company, filter_group)
         if sprint and sprint.company_id:
             self._set_card_company(sprint.company_id)
-        reference_sprint = sprint or (self._card_form_card and self._sprints.get(self._card_form_card.sprint_id))
+        elif not sprint and current_company:
+            self._set_card_company(current_company)
+
         reference_card = self._card_form_card or Card(id=None, sprint_id=sprint_id or 0)
-        if reference_sprint:
-            self._prepare_branch_inputs(reference_card, reference_sprint)
+        self._prepare_branch_inputs(reference_card, sprint)
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -1203,6 +1251,26 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
+    def _start_new_card_from_browser(
+        self, group_key: Optional[str], company_id: Optional[int]
+    ) -> None:
+        self._selected_card_id = None
+        self._card_parent_id = None
+        self._selected_sprint_id = None
+        card = Card(id=None, sprint_id=None)
+        card.group_name = group_key or None
+        card.company_id = company_id if company_id not in (None, "") else None
+        card.status = card.status or "pending"
+
+        planning_index = self.tabs.indexOf(self.planning_page)
+        if planning_index >= 0:
+            self.tabs.setCurrentIndex(planning_index)
+
+        self.tree.clearSelection()
+        self._show_card_form(card, None, new=True)
+        self.update_permissions()
+
+    # ------------------------------------------------------------------
     def _open_card_from_browser(self, card_id: Optional[int]) -> None:
         if not card_id:
             return
@@ -1215,24 +1283,18 @@ class SprintView(QWidget):
             )
             self.refresh()
             return
-        sprint = self._sprints.get(card.sprint_id)
-        if not sprint:
-            QMessageBox.warning(
-                self,
-                "Tarjeta",
-                "El sprint relacionado con la tarjeta ya no está disponible.",
-            )
-            self.refresh()
-            return
+        sprint = self._sprints.get(card.sprint_id) if card.sprint_id else None
         planning_index = self.tabs.indexOf(self.planning_page)
         if planning_index >= 0:
             self.tabs.setCurrentIndex(planning_index)
-        self._selected_sprint_id = sprint.id
+        self._selected_sprint_id = sprint.id if sprint else None
         self._selected_card_id = card.id
-        self._card_parent_id = sprint.id
+        self._card_parent_id = sprint.id if sprint else None
         self._show_card_form(card, sprint)
-        if card.id is not None:
+        if sprint and card.id is not None:
             self._select_tree_item("card", card.id)
+        else:
+            self.tree.clearSelection()
         self.tree.setFocus()
 
     # ------------------------------------------------------------------
@@ -1287,24 +1349,73 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
-    def _show_card_form(self, card: Card, sprint: Sprint, new: bool = False) -> None:
+    def _card_sprint_label(self, sprint: Optional[Sprint], card: Optional[Card]) -> str:
+        if sprint:
+            parts = []
+            version = (sprint.version or "").strip()
+            name = (sprint.name or "").strip()
+            if version:
+                parts.append(version)
+            if name:
+                parts.append(name)
+            label = " — ".join(parts)
+            if not label and sprint.id:
+                label = f"Sprint #{sprint.id}"
+            return label or "Sprint sin nombre"
+
+        sprint_ref = None
+        if card and getattr(card, "sprint_id", None):
+            try:
+                sprint_ref = int(card.sprint_id)
+            except (TypeError, ValueError):
+                sprint_ref = None
+        if sprint_ref:
+            return f"Sprint #{sprint_ref} (no disponible)"
+        return "Sin sprint asignado"
+
+    # ------------------------------------------------------------------
+    def _show_card_form(
+        self, card: Card, sprint: Optional[Sprint], new: bool = False
+    ) -> None:
         self.stack.setCurrentWidget(self.pageCard)
         self._card_form_card = card
         self._card_form_sprint = sprint
-        self.lblCardSprint.setText(f"{sprint.version} — {sprint.name}")
-        target_sprint_id = card.sprint_id or sprint.id
+        self.lblCardSprint.setText(self._card_sprint_label(sprint, card))
+
+        target_sprint_id: Optional[int] = None
+        try:
+            if getattr(card, "sprint_id", None):
+                target_sprint_id = int(card.sprint_id)
+                if target_sprint_id == 0:
+                    target_sprint_id = None
+        except (TypeError, ValueError):
+            target_sprint_id = None
+        if target_sprint_id is None and sprint and sprint.id is not None:
+            target_sprint_id = sprint.id
+
         self._populate_card_sprint_combo(target_sprint_id)
-        idx = self.cboCardSprint.findData(target_sprint_id)
-        if idx >= 0:
-            self.cboCardSprint.setCurrentIndex(idx)
-        group_value = card.group_name or sprint.group_name
+        if target_sprint_id is not None:
+            idx = self.cboCardSprint.findData(target_sprint_id)
+            if idx >= 0:
+                self.cboCardSprint.setCurrentIndex(idx)
+            else:
+                self.cboCardSprint.setCurrentIndex(0)
+        else:
+            self.cboCardSprint.setCurrentIndex(0)
+
+        group_value = card.group_name or (sprint.group_name if sprint else None)
         self._populate_card_group_combo(group_value)
         if group_value:
             self._set_card_group(group_value)
-        company_value = card.company_id or sprint.company_id
+        else:
+            self._set_card_group(None)
+
+        company_value = card.company_id or (sprint.company_id if sprint else None)
         self._populate_card_company_combo(company_value, group_value)
         if company_value:
             self._set_card_company(company_value)
+        else:
+            self._set_card_company(None)
         self.lblCardStatus.setText((card.status or "pendiente").capitalize())
         self.cboCardSprint.setEnabled((card.status or "").lower() != "terminated")
         self.txtCardTicket.blockSignals(True)
@@ -1342,7 +1453,7 @@ class SprintView(QWidget):
             creator = record.created_by
         self.lblCardCreator.setText(f"Creada por: {creator or '-'}")
         self._selected_card_id = card.id
-        self._card_parent_id = card.sprint_id
+        self._card_parent_id = target_sprint_id
         if new:
             self.lblCardCreator.setText("Creada por: -")
         self._update_branch_preview()
@@ -1722,26 +1833,25 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_save_card(self) -> None:
-        parent_sprint_id = self._card_parent_id or self._current_sprint_id()
-        if parent_sprint_id is None:
-            QMessageBox.warning(self, "Tarjeta", "Selecciona un sprint válido.")
-            return
-        target_data = self.cboCardSprint.currentData() if hasattr(self, "cboCardSprint") else parent_sprint_id
-        if target_data is None:
-            QMessageBox.warning(self, "Tarjeta", "Selecciona el sprint destino para la tarjeta.")
-            return
-        try:
-            target_sprint_id = int(target_data)
-        except (TypeError, ValueError):
-            QMessageBox.warning(self, "Tarjeta", "El sprint seleccionado no es válido.")
-            return
-        sprint = self._sprints.get(target_sprint_id)
-        if not sprint:
-            QMessageBox.warning(self, "Tarjeta", "El sprint seleccionado ya no existe.")
-            return
-        if sprint.status == "closed":
-            QMessageBox.warning(self, "Tarjeta", "No puedes mover la tarjeta a un sprint cerrado.")
-            return
+        target_data = self.cboCardSprint.currentData() if hasattr(self, "cboCardSprint") else None
+        target_sprint_id: Optional[int] = None
+        sprint: Optional[Sprint] = None
+        if target_data not in (None, ""):
+            try:
+                target_sprint_id = int(target_data)
+                if target_sprint_id == 0:
+                    target_sprint_id = None
+            except (TypeError, ValueError):
+                QMessageBox.warning(self, "Tarjeta", "Selecciona un sprint válido.")
+                return
+        if target_sprint_id is not None:
+            sprint = self._sprints.get(target_sprint_id)
+            if not sprint:
+                QMessageBox.warning(self, "Tarjeta", "El sprint seleccionado ya no existe.")
+                return
+            if sprint.status == "closed":
+                QMessageBox.warning(self, "Tarjeta", "No puedes mover la tarjeta a un sprint cerrado.")
+                return
 
         ticket = self.txtCardTicket.text().strip()
         title = self.txtCardTitle.text().strip()
@@ -1752,7 +1862,7 @@ class SprintView(QWidget):
         if not title:
             QMessageBox.warning(self, "Tarjeta", "El título es obligatorio.")
             return
-        if not branch_full:
+        if sprint and not branch_full:
             QMessageBox.warning(self, "Tarjeta", "Indica el nombre de la rama derivada.")
             return
 
@@ -1777,12 +1887,15 @@ class SprintView(QWidget):
         card.updated_at = now
         card.updated_by = user
         group_value = self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
-        card.group_name = group_value or sprint.group_name
+        card.group_name = group_value or (sprint.group_name if sprint else None)
         company_data = self.cboCardCompany.currentData() if hasattr(self, "cboCardCompany") else None
         try:
-            card.company_id = int(company_data) if company_data not in (None, "") else sprint.company_id
+            if company_data not in (None, ""):
+                card.company_id = int(company_data)
+            else:
+                card.company_id = sprint.company_id if sprint else None
         except (TypeError, ValueError):
-            card.company_id = sprint.company_id
+            card.company_id = sprint.company_id if sprint else None
 
         if (
             (card.status or "").lower() == "terminated"
@@ -1807,7 +1920,14 @@ class SprintView(QWidget):
         if saved.id is not None:
             self._cards[saved.id] = saved
             self._selected_card_id = saved.id
-        self._card_parent_id = saved.sprint_id
+        self._card_parent_id = saved.sprint_id if saved.sprint_id not in (None, "", 0) else None
+        if saved.sprint_id not in (None, "", 0):
+            try:
+                self._selected_sprint_id = int(saved.sprint_id)
+            except (TypeError, ValueError):
+                self._selected_sprint_id = None
+        else:
+            self._selected_sprint_id = None
 
         history = PipelineHistory()
         if saved.id:
@@ -1930,6 +2050,7 @@ class CardBrowser(QWidget):
     """Listado filtrable de tarjetas independientes del árbol de planeación."""
 
     cardActivated = Signal(int)
+    newCardRequested = Signal(object, object)
 
     _ALL_VALUE = "__all__"
     _NONE_VALUE = "__none__"
@@ -1981,6 +2102,15 @@ class CardBrowser(QWidget):
         search_row.addWidget(self.txtSearch, 1)
         layout.addLayout(search_row)
 
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.setSpacing(6)
+        button_row.addStretch(1)
+        self.btnNewCard = QPushButton("Nueva tarjeta")
+        self.btnNewCard.setIcon(get_icon("build"))
+        button_row.addWidget(self.btnNewCard)
+        layout.addLayout(button_row)
+
         self.tree = QTreeWidget()
         self.tree.setColumnCount(8)
         self.tree.setHeaderLabels(
@@ -2006,6 +2136,7 @@ class CardBrowser(QWidget):
         self.txtSearch.textChanged.connect(self._apply_filters)
         self.tree.itemActivated.connect(self._on_item_activated)
         self.tree.itemDoubleClicked.connect(self._on_item_activated)
+        self.btnNewCard.clicked.connect(self._on_new_card_clicked)
 
         self._initialize_filters()
 
@@ -2015,6 +2146,18 @@ class CardBrowser(QWidget):
         self.cboCompany.addItem("Todas las empresas", self._ALL_VALUE)
         self.cboSprint.addItem("Todos los sprints", self._ALL_VALUE)
         self.cboStatus.addItem("Todos los estados", self._ALL_VALUE)
+
+    # ------------------------------------------------------------------
+    def set_new_card_enabled(self, enabled: bool) -> None:
+        self.btnNewCard.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
+    def _on_new_card_clicked(self) -> None:
+        group_filter = self._current_group_filter()
+        if group_filter == self._NONE_VALUE:
+            group_filter = None
+        company_filter = self._normalize_company_id(self._current_company_filter())
+        self.newCardRequested.emit(group_filter, company_filter)
 
     # ------------------------------------------------------------------
     def update_sources(

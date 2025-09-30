@@ -15,6 +15,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - Los sprints almacenan y muestran la empresa asociada tanto en la tabla como en el formulario de edición.
 - El formulario de planeación de sprints incorpora selección de grupo/empresa sincronizada y asignación guiada al mover tarjetas.
+- La pestaña de tarjetas ahora permite crear tarjetas independientes de un sprint, precargando grupo y empresa según los filtros activos y aplazando la asignación del sprint hasta la planeación.
 
 ### Corregido
 - La relación `card_sprint_links` deja de propagar eliminaciones en cascada hacia `sprints`, evitando la ruta múltiple que impedía inicializar el esquema en SQL Server.
