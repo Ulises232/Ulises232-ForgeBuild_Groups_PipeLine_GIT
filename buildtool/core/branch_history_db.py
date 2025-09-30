@@ -713,7 +713,7 @@ class _SqlServerBranchHistory:
                     unassigned_at BIGINT NULL,
                     unassigned_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_card_sprint_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
-                    CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL
+                    CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id)
                 );
             END
             """,
@@ -723,13 +723,13 @@ class _SqlServerBranchHistory:
                 FROM sys.foreign_keys
                 WHERE name = 'fk_card_sprint_sprint'
                   AND parent_object_id = OBJECT_ID('card_sprint_links')
-                  AND delete_referential_action <> 3
+                  AND delete_referential_action <> 0
             )
             BEGIN
                 ALTER TABLE card_sprint_links DROP CONSTRAINT fk_card_sprint_sprint;
                 ALTER TABLE card_sprint_links ALTER COLUMN sprint_id INT NULL;
                 ALTER TABLE card_sprint_links
-                    ADD CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL;
+                    ADD CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id);
             END
             """,
             """
