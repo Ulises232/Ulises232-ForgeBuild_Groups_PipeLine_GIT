@@ -250,9 +250,18 @@ def _normalize_sprint(payload: dict) -> Dict[str, object]:
 
 
 def _normalize_card(payload: dict) -> Dict[str, object]:
+    raw_sprint = payload.get("sprint_id")
+    sprint_id: Optional[int]
+    try:
+        sprint_id = int(raw_sprint) if raw_sprint not in (None, "") else None
+    except (TypeError, ValueError):
+        sprint_id = None
+    if sprint_id == 0:
+        sprint_id = None
+
     data = {
         "id": payload.get("id"),
-        "sprint_id": int(payload.get("sprint_id") or 0),
+        "sprint_id": sprint_id,
         "branch_key": payload.get("branch_key"),
         "title": payload.get("title") or "",
         "ticket_id": payload.get("ticket_id") or "",
@@ -364,7 +373,7 @@ class Card:
     """Model representing a work card tied to a sprint."""
 
     id: Optional[int]
-    sprint_id: int
+    sprint_id: Optional[int] = None
     branch_key: Optional[str] = None
     title: str = ""
     ticket_id: str = ""
@@ -616,7 +625,7 @@ class _SqlServerBranchHistory:
             BEGIN
                 CREATE TABLE cards (
                     id INT IDENTITY(1,1) PRIMARY KEY,
-                    sprint_id INT NOT NULL,
+                    sprint_id INT NULL,
                     branch_key NVARCHAR(512) NULL,
                     title NVARCHAR(255) NOT NULL DEFAULT '',
                     ticket_id NVARCHAR(128) NULL,
@@ -645,6 +654,33 @@ class _SqlServerBranchHistory:
                     updated_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
                 );
+            END
+            """,
+            """
+            IF EXISTS (
+                SELECT 1
+                FROM sys.columns
+                WHERE object_id = OBJECT_ID('cards')
+                  AND name = 'sprint_id'
+                  AND is_nullable = 0
+            )
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM sys.foreign_keys
+                    WHERE name = 'fk_cards_sprint'
+                      AND parent_object_id = OBJECT_ID('cards')
+                )
+                    ALTER TABLE cards DROP CONSTRAINT fk_cards_sprint;
+                ALTER TABLE cards ALTER COLUMN sprint_id INT NULL;
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.foreign_keys
+                    WHERE name = 'fk_cards_sprint'
+                      AND parent_object_id = OBJECT_ID('cards')
+                )
+                    ALTER TABLE cards
+                        ADD CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE;
             END
             """,
             """

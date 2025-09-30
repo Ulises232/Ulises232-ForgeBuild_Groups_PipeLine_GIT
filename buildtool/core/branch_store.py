@@ -309,9 +309,17 @@ def _row_to_sprint(row: dict) -> Sprint:
 def _row_to_card(row: dict) -> Card:
     unit_ts_at = row.get("unit_tests_at")
     qa_at = row.get("qa_at")
+    sprint_value = row.get("sprint_id")
+    try:
+        sprint_id = int(sprint_value) if sprint_value not in (None, "") else None
+    except (TypeError, ValueError):
+        sprint_id = None
+    if sprint_id == 0:
+        sprint_id = None
+
     return Card(
         id=int(row["id"]) if row.get("id") is not None else None,
-        sprint_id=int(row.get("sprint_id") or 0),
+        sprint_id=sprint_id,
         branch_key=row.get("branch_key") or None,
         title=row.get("title") or "",
         ticket_id=row.get("ticket_id") or "",

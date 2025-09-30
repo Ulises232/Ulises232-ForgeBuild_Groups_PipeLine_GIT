@@ -169,7 +169,15 @@ class FakeBranchHistory:
         rows = list(self.cards.values())
         if sprint_ids:
             allowed = {int(x) for x in sprint_ids}
-            rows = [row for row in rows if int(row.get("sprint_id") or 0) in allowed]
+            filtered: list[dict] = []
+            for row in rows:
+                try:
+                    sprint_id = int(row.get("sprint_id"))
+                except (TypeError, ValueError):
+                    continue
+                if sprint_id in allowed:
+                    filtered.append(row)
+            rows = filtered
         if branches:
             allowed = set(branches)
             rows = [

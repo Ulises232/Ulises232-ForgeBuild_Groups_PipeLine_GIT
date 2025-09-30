@@ -20,6 +20,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Corregido
 - La relación `card_sprint_links` deja de propagar eliminaciones en cascada hacia `sprints`, evitando la ruta múltiple que impedía inicializar el esquema en SQL Server.
 - Se restauró la acción "Crear rama" en la vista de planeación para que vuelva a enlazar el botón con su lógica y valide permisos/estado antes de ejecutar.
+- Guardar una tarjeta sin sprint ahora conserva `cards.sprint_id` en `NULL` y pospone la relación histórica, eliminando la violación de la llave foránea `fk_cards_sprint`.
 
 ## [1.7.0] - 2025-02-16
 ### Añadido

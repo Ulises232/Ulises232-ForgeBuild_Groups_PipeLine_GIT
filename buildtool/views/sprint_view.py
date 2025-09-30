@@ -770,7 +770,7 @@ class SprintView(QWidget):
     def _branch_record_for_name(self, sprint: Sprint, branch: str) -> Optional[BranchRecord]:
         if not sprint or not branch:
             return None
-        temp = Card(id=None, sprint_id=sprint.id or 0, branch=branch)
+        temp = Card(id=None, sprint_id=sprint.id, branch=branch)
         key = self._build_card_branch_key(temp, sprint)
         if not key:
             return None
@@ -815,13 +815,11 @@ class SprintView(QWidget):
             card = self._cards[self._selected_card_id]
             sprint_id = None
             try:
-                if getattr(card, "sprint_id", None):
+                if getattr(card, "sprint_id", None) not in (None, ""):
                     sprint_id = int(card.sprint_id)
-                    if sprint_id == 0:
-                        sprint_id = None
             except (TypeError, ValueError):
                 sprint_id = None
-            sprint = self._sprints.get(sprint_id) if sprint_id else None
+            sprint = self._sprints.get(sprint_id) if sprint_id is not None else None
             if sprint and card.id is not None:
                 self._select_tree_item("card", card.id)
                 return
@@ -1003,7 +1001,7 @@ class SprintView(QWidget):
             self.cboCardSprint.addItem(label, sprint.id)
         normalized: Optional[int] = None
         try:
-            if selected not in (None, "", 0):
+            if selected not in (None, ""):
                 normalized = int(selected)
         except (TypeError, ValueError):
             normalized = None
@@ -1107,12 +1105,10 @@ class SprintView(QWidget):
         try:
             if raw_value not in (None, ""):
                 sprint_id = int(raw_value)
-                if sprint_id == 0:
-                    sprint_id = None
         except (TypeError, ValueError):
             sprint_id = None
 
-        sprint = self._sprints.get(sprint_id) if sprint_id else None
+        sprint = self._sprints.get(sprint_id) if sprint_id is not None else None
         if sprint and sprint.status == "closed" and (
             self._card_form_card and (self._card_form_card.status or "").lower() != "terminated"
         ):
@@ -1139,7 +1135,7 @@ class SprintView(QWidget):
         elif not sprint and current_company:
             self._set_card_company(current_company)
 
-        reference_card = self._card_form_card or Card(id=None, sprint_id=sprint_id or 0)
+        reference_card = self._card_form_card or Card(id=None, sprint_id=sprint_id)
         self._prepare_branch_inputs(reference_card, sprint)
         self.update_permissions()
 
@@ -1363,13 +1359,13 @@ class SprintView(QWidget):
                 label = f"Sprint #{sprint.id}"
             return label or "Sprint sin nombre"
 
-        sprint_ref = None
-        if card and getattr(card, "sprint_id", None):
+        sprint_ref: Optional[int] = None
+        if card and getattr(card, "sprint_id", None) not in (None, ""):
             try:
                 sprint_ref = int(card.sprint_id)
             except (TypeError, ValueError):
                 sprint_ref = None
-        if sprint_ref:
+        if sprint_ref is not None:
             return f"Sprint #{sprint_ref} (no disponible)"
         return "Sin sprint asignado"
 
@@ -1384,10 +1380,8 @@ class SprintView(QWidget):
 
         target_sprint_id: Optional[int] = None
         try:
-            if getattr(card, "sprint_id", None):
+            if getattr(card, "sprint_id", None) not in (None, ""):
                 target_sprint_id = int(card.sprint_id)
-                if target_sprint_id == 0:
-                    target_sprint_id = None
         except (TypeError, ValueError):
             target_sprint_id = None
         if target_sprint_id is None and sprint and sprint.id is not None:
@@ -1839,8 +1833,6 @@ class SprintView(QWidget):
         if target_data not in (None, ""):
             try:
                 target_sprint_id = int(target_data)
-                if target_sprint_id == 0:
-                    target_sprint_id = None
             except (TypeError, ValueError):
                 QMessageBox.warning(self, "Tarjeta", "Selecciona un sprint válido.")
                 return
@@ -1920,8 +1912,8 @@ class SprintView(QWidget):
         if saved.id is not None:
             self._cards[saved.id] = saved
             self._selected_card_id = saved.id
-        self._card_parent_id = saved.sprint_id if saved.sprint_id not in (None, "", 0) else None
-        if saved.sprint_id not in (None, "", 0):
+        self._card_parent_id = saved.sprint_id if saved.sprint_id is not None else None
+        if saved.sprint_id is not None:
             try:
                 self._selected_sprint_id = int(saved.sprint_id)
             except (TypeError, ValueError):
