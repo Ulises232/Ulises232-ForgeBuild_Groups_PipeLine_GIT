@@ -127,6 +127,76 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
+    def _build_planning_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(6)
+
+        lbl_group = QLabel("Grupo:")
+        filter_row.addWidget(lbl_group)
+        self.cboSprintFilterGroup = QComboBox()
+        self.cboSprintFilterGroup.addItem("Todos los grupos", None)
+        filter_row.addWidget(self.cboSprintFilterGroup, 1)
+
+        lbl_status = QLabel("Estado:")
+        filter_row.addWidget(lbl_status)
+        self.cboSprintFilterStatus = QComboBox()
+        self.cboSprintFilterStatus.addItem("Todos los estados", None)
+        self.cboSprintFilterStatus.addItem("Abiertos", "open")
+        self.cboSprintFilterStatus.addItem("Cerrados", "closed")
+        filter_row.addWidget(self.cboSprintFilterStatus, 1)
+
+        filter_row.addStretch(1)
+        layout.addLayout(filter_row)
+
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(6)
+
+        self.btnNewSprint = QPushButton("Nuevo sprint")
+        self.btnNewSprint.setIcon(get_icon("branch"))
+        action_row.addWidget(self.btnNewSprint)
+
+        self.btnNewCard = QPushButton("Nueva tarjeta")
+        self.btnNewCard.setIcon(get_icon("build"))
+        action_row.addWidget(self.btnNewCard)
+
+        action_row.addStretch(1)
+        layout.addLayout(action_row)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(
+            [
+                "Sprint/Tarjeta",
+                "Asignado",
+                "QA",
+                "Empresa",
+                "Estado / Checks",
+                "Rama",
+                "Rama QA",
+                "Local",
+                "Origen",
+                "Creada por",
+            ]
+        )
+        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tree.setUniformRowHeights(True)
+        layout.addWidget(self.tree, 1)
+
+        self.cboSprintFilterGroup.currentIndexChanged.connect(self._apply_sprint_filters)
+        self.cboSprintFilterStatus.currentIndexChanged.connect(self._apply_sprint_filters)
+        self.btnNewSprint.clicked.connect(self._start_new_sprint)
+        self.btnNewCard.clicked.connect(self._start_new_card)
+        self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+
+        return page
+
+    # ------------------------------------------------------------------
     def _create_sprint_form(self) -> SprintFormWidget:
         form = SprintFormWidget()
         self.pageSprint = form

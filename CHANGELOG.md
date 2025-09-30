@@ -15,6 +15,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ### Corregido
 - Se ajustaron las importaciones internas de `editor_forms` para utilizar los iconos compartidos y evitar errores de módulo faltante al iniciar la aplicación.
+- Restituida la construcción de la pestaña de planeación para que vuelva a crear el árbol de sprints y los controles asociados, evitando el fallo por el método `_build_planning_tab` faltante al abrir la ventana.
 
 ## [1.8.0] - 2025-02-17
 ### Añadido
