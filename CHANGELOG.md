@@ -19,6 +19,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Restituida la construcción de la pestaña de planeación para que vuelva a crear el árbol de sprints y los controles asociados, evitando el fallo por el método `_build_planning_tab` faltante al abrir la ventana.
 - Evitado el fallo al cargar la vista de planeación inicial verificando la existencia de los combos antes de poblarlos durante el refresco automático.
 - Al eliminar un sprint ahora se liberan sus tarjetas asociadas y permanecen en el catálogo, dejando el campo `sprint_id` en blanco en lugar de eliminarlas.
+- Guardar una tarjeta desde el planificador valida que el formulario siga activo y limita el combo de sprints a la empresa correspondiente, evitando errores y asignaciones cruzadas.
 
 ## [1.8.0] - 2025-02-17
 ### Añadido

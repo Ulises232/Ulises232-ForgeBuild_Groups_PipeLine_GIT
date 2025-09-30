@@ -519,7 +519,7 @@ class SprintView(QWidget):
                 self.cboCardQA, None, allow_empty=True, required_role="qa"
             )
 
-        self._populate_card_sprint_combo(None)
+        self._populate_card_sprint_combo(None, None)
         self._populate_card_group_combo(None)
         self._populate_card_company_combo(None, None)
 
@@ -1041,15 +1041,25 @@ class SprintView(QWidget):
         self.lblSprintSequence.setText(text)
 
     # ------------------------------------------------------------------
-    def _populate_card_sprint_combo(self, selected: Optional[int]) -> None:
+    def _populate_card_sprint_combo(
+        self, selected: Optional[int], company_filter: Optional[int] = None
+    ) -> None:
         if not hasattr(self, "cboCardSprint"):
             return
         self.cboCardSprint.blockSignals(True)
         self.cboCardSprint.clear()
         self.cboCardSprint.addItem("Sin sprint", None)
+        filter_id: Optional[int] = None
+        if company_filter not in (None, ""):
+            try:
+                filter_id = int(company_filter)
+            except (TypeError, ValueError):
+                filter_id = None
         for sprint in sorted(
             self._sprints.values(), key=lambda s: ((s.version or "").lower(), (s.name or "").lower())
         ):
+            if filter_id is not None and sprint.company_id != filter_id:
+                continue
             label = f"{sprint.version} — {sprint.name}"
             if sprint.status == "closed":
                 label += " (cerrado)"
@@ -1171,7 +1181,10 @@ class SprintView(QWidget):
             previous = None
             if self._card_form_card:
                 previous = getattr(self._card_form_card, "sprint_id", None)
-            self._populate_card_sprint_combo(previous)
+            company_filter = None
+            if hasattr(self, "cboCardCompany"):
+                company_filter = self.cboCardCompany.currentData()
+            self._populate_card_sprint_combo(previous, company_filter)
             return
         self._card_form_sprint = sprint
         self._card_parent_id = sprint.id if sprint else None
@@ -1207,21 +1220,26 @@ class SprintView(QWidget):
         if not hasattr(self, "cboCardCompany"):
             return
         data = self.cboCardCompany.currentData()
-        if data in (None, ""):
-            self.update_permissions()
-            return
-        try:
-            company_id = int(data)
-        except (TypeError, ValueError):
-            self.update_permissions()
-            return
-        company = self._companies.get(company_id)
-        if company and company.group_name:
-            current_group = (
-                self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
-            )
-            if current_group != company.group_name:
-                self._set_card_group(company.group_name)
+        company_id: Optional[int] = None
+        if data not in (None, ""):
+            try:
+                company_id = int(data)
+            except (TypeError, ValueError):
+                company_id = None
+
+        if company_id is not None:
+            company = self._companies.get(company_id)
+            if company and company.group_name:
+                current_group = (
+                    self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
+                )
+                if current_group != company.group_name:
+                    self._set_card_group(company.group_name)
+
+        current_sprint = None
+        if hasattr(self, "cboCardSprint"):
+            current_sprint = self.cboCardSprint.currentData()
+        self._populate_card_sprint_combo(current_sprint, company_id)
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -1459,7 +1477,10 @@ class SprintView(QWidget):
         if target_sprint_id is None and sprint and sprint.id is not None:
             target_sprint_id = sprint.id
 
-        self._populate_card_sprint_combo(target_sprint_id)
+        group_value = card.group_name or (sprint.group_name if sprint else None)
+        company_value = card.company_id or (sprint.company_id if sprint else None)
+
+        self._populate_card_sprint_combo(target_sprint_id, company_value)
         if target_sprint_id is not None:
             idx = self.cboCardSprint.findData(target_sprint_id)
             if idx >= 0:
@@ -1469,14 +1490,12 @@ class SprintView(QWidget):
         else:
             self.cboCardSprint.setCurrentIndex(0)
 
-        group_value = card.group_name or (sprint.group_name if sprint else None)
         self._populate_card_group_combo(group_value)
         if group_value:
             self._set_card_group(group_value)
         else:
             self._set_card_group(None)
 
-        company_value = card.company_id or (sprint.company_id if sprint else None)
         self._populate_card_company_combo(company_value, group_value)
         if company_value:
             self._set_card_company(company_value)
@@ -1901,7 +1920,31 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_save_card(self) -> None:
-        target_data = self.cboCardSprint.currentData() if hasattr(self, "cboCardSprint") else None
+        required_attrs = [
+            "cboCardSprint",
+            "txtCardTicket",
+            "txtCardTitle",
+            "txtCardBranch",
+            "cboCardAssignee",
+            "cboCardQA",
+            "txtCardUnitUrl",
+            "txtCardQAUrl",
+            "cboCardGroup",
+            "cboCardCompany",
+        ]
+        missing = [name for name in required_attrs if not hasattr(self, name)]
+        if missing:
+            logging.getLogger(__name__).warning(
+                "Intento de guardar tarjeta sin formulario activo: faltan %s", ", ".join(missing)
+            )
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "No hay un formulario de tarjeta activo para guardar los cambios.",
+            )
+            return
+
+        target_data = self.cboCardSprint.currentData()
         target_sprint_id: Optional[int] = None
         sprint: Optional[Sprint] = None
         if target_data not in (None, ""):
