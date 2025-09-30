@@ -1469,6 +1469,96 @@ class SprintView(QWidget):
             self.txtSprintQABranch.setText(key)
 
     # ------------------------------------------------------------------
+    def _on_create_branch(self) -> None:
+        if self._selected_card_id is None:
+            QMessageBox.information(self, "Tarjeta", "Selecciona una tarjeta para crear su rama.")
+            return
+
+        card = self._cards.get(self._selected_card_id)
+        sprint = self._sprints.get(card.sprint_id) if card else None
+        if not card or not sprint:
+            QMessageBox.warning(self, "Tarjeta", "La tarjeta seleccionada ya no existe.")
+            return
+
+        user = self._current_user()
+        branch_name = self._full_branch_name().strip()
+        if not branch_name:
+            QMessageBox.warning(self, "Tarjeta", "La tarjeta no tiene un nombre de rama válido.")
+            return
+
+        if not (require_roles("leader") or (card.assignee and card.assignee == user)):
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "Solo el desarrollador asignado o un líder pueden crear la rama de la tarjeta.",
+            )
+            return
+
+        if not sprint.qa_branch_key:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "Configura la rama QA del sprint antes de crear ramas de tarjetas.",
+            )
+            return
+
+        existing_record = self._branch_record_for_name(sprint, branch_name)
+        if existing_record and (existing_record.has_local_copy() or existing_record.exists_origin):
+            QMessageBox.information(
+                self,
+                "Tarjeta",
+                "La rama ya existe. Elimina la rama local o sincroniza antes de recrearla.",
+            )
+            return
+
+        effective_key = self._effective_sprint_branch_key(sprint)
+        group_key, project_key, base_branch = self._split_branch_key(effective_key)
+        if not base_branch:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "La rama QA seleccionada no es válida para crear tarjetas.",
+            )
+            return
+
+        logs: List[str] = []
+
+        def emit(msg: str) -> None:
+            logs.append(msg)
+
+        try:
+            ok = create_branches_local(
+                self._cfg,
+                group_key,
+                project_key,
+                branch_name,
+                emit=emit,
+                base_branch=base_branch,
+            )
+        except Exception as exc:  # pragma: no cover
+            QMessageBox.critical(self, "Tarjeta", f"Error al crear la rama: {exc}")
+            return
+
+        message = "\n".join(logs) or "Operación completada."
+        if ok:
+            card.branch = branch_name
+            card.branch_created_by = user
+            card.branch_created_at = int(time.time())
+            card.updated_at = card.branch_created_at
+            card.updated_by = card.branch_created_by
+            updated = upsert_card(card)
+            if updated.id:
+                self._cards[updated.id] = updated
+                self._selected_card_id = updated.id
+            QMessageBox.information(self, "Tarjeta", message)
+        else:
+            QMessageBox.warning(self, "Tarjeta", message or "No se pudo crear la rama.")
+
+        self.refresh()
+        if card.id:
+            self._select_tree_item("card", card.id)
+
+    # ------------------------------------------------------------------
     def _select_branch_key(
         self,
         *,
@@ -2324,85 +2414,3 @@ class CardBrowser(QWidget):
         prev_sprint = self._current_sprint_filter()
         self._update_sprint_filter_options(prev_sprint)
         self._apply_filters()
-
-    # ------------------------------------------------------------------
-    def _on_create_branch(self) -> None:
-        if self._selected_card_id is None:
-            QMessageBox.information(self, "Tarjeta", "Selecciona una tarjeta para crear su rama.")
-            return
-        card = self._cards.get(self._selected_card_id)
-        sprint = self._sprints.get(card.sprint_id) if card else None
-        if not card or not sprint:
-            QMessageBox.warning(self, "Tarjeta", "La tarjeta seleccionada ya no existe.")
-            return
-        user = self._current_user()
-        branch_name = self._full_branch_name().strip()
-        if not branch_name:
-            QMessageBox.warning(self, "Tarjeta", "La tarjeta no tiene un nombre de rama válido.")
-            return
-        if not (require_roles("leader") or (card.assignee and card.assignee == user)):
-            QMessageBox.warning(
-                self,
-                "Tarjeta",
-                "Solo el desarrollador asignado o un líder pueden crear la rama de la tarjeta.",
-            )
-            return
-        if not sprint.qa_branch_key:
-            QMessageBox.warning(
-                self,
-                "Tarjeta",
-                "Configura la rama QA del sprint antes de crear ramas de tarjetas.",
-            )
-            return
-        existing_record = self._branch_record_for_name(sprint, branch_name)
-        if existing_record and (existing_record.has_local_copy() or existing_record.exists_origin):
-            QMessageBox.information(
-                self,
-                "Tarjeta",
-                "La rama ya existe. Elimina la rama local o sincroniza antes de recrearla.",
-            )
-            return
-        effective_key = self._effective_sprint_branch_key(sprint)
-        group_key, project_key, base_branch = self._split_branch_key(effective_key)
-        if not base_branch:
-            QMessageBox.warning(
-                self,
-                "Tarjeta",
-                "La rama QA seleccionada no es válida para crear tarjetas.",
-            )
-            return
-        logs: List[str] = []
-
-        def emit(msg: str) -> None:
-            logs.append(msg)
-
-        try:
-            ok = create_branches_local(
-                self._cfg,
-                group_key,
-                project_key,
-                branch_name,
-                emit=emit,
-                base_branch=base_branch,
-            )
-        except Exception as exc:  # pragma: no cover
-            QMessageBox.critical(self, "Tarjeta", f"Error al crear la rama: {exc}")
-            return
-
-        message = "\n".join(logs) or "Operación completada."
-        if ok:
-            card.branch = branch_name
-            card.branch_created_by = self._current_user()
-            card.branch_created_at = int(time.time())
-            card.updated_at = card.branch_created_at
-            card.updated_by = card.branch_created_by
-            updated = upsert_card(card)
-            if updated.id:
-                self._cards[updated.id] = updated
-                self._selected_card_id = updated.id
-            QMessageBox.information(self, "Tarjeta", message)
-        else:
-            QMessageBox.warning(self, "Tarjeta", message or "No se pudo crear la rama.")
-        self.refresh()
-        if card.id:
-            self._select_tree_item("card", card.id)
