@@ -9,7 +9,7 @@ import hmac
 import os
 import time
 
-from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
+from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role, Company
 from .session import current_username
 
 
@@ -287,11 +287,14 @@ def _row_to_sprint(row: dict) -> Sprint:
     return Sprint(
         id=int(row["id"]) if row.get("id") is not None else None,
         branch_key=row.get("branch_key") or "",
+        group_name=row.get("group_name") or None,
         name=row.get("name") or "",
         version=row.get("version") or "",
         qa_branch_key=qa_branch,
         lead_user=row.get("lead_user") or None,
         qa_user=row.get("qa_user") or None,
+        company_id=int(row.get("company_id") or 0) or None,
+        company_sequence=int(row.get("company_sequence") or 0) or None,
         description=row.get("description") or "",
         status=(row.get("status") or "open").lower(),
         closed_at=int(row.get("closed_at") or 0) or None,
@@ -306,13 +309,22 @@ def _row_to_sprint(row: dict) -> Sprint:
 def _row_to_card(row: dict) -> Card:
     unit_ts_at = row.get("unit_tests_at")
     qa_at = row.get("qa_at")
+    sprint_value = row.get("sprint_id")
+    try:
+        sprint_id = int(sprint_value) if sprint_value not in (None, "") else None
+    except (TypeError, ValueError):
+        sprint_id = None
+    if sprint_id == 0:
+        sprint_id = None
+
     return Card(
         id=int(row["id"]) if row.get("id") is not None else None,
-        sprint_id=int(row.get("sprint_id") or 0),
+        sprint_id=sprint_id,
         branch_key=row.get("branch_key") or None,
         title=row.get("title") or "",
         ticket_id=row.get("ticket_id") or "",
         branch=row.get("branch") or "",
+        group_name=row.get("group_name") or None,
         assignee=row.get("assignee") or None,
         qa_assignee=row.get("qa_assignee") or None,
         description=row.get("description") or "",
@@ -325,12 +337,28 @@ def _row_to_card(row: dict) -> Card:
         unit_tests_at=int(unit_ts_at) if unit_ts_at else None,
         qa_at=int(qa_at) if qa_at else None,
         status=row.get("status") or "pending",
+        company_id=int(row.get("company_id") or 0) or None,
+        closed_at=int(row.get("closed_at") or 0) or None,
+        closed_by=row.get("closed_by") or None,
         branch_created_by=row.get("branch_created_by") or None,
         branch_created_at=int(row.get("branch_created_at") or 0) or None,
         created_at=int(row.get("created_at") or 0),
         created_by=row.get("created_by") or "",
         updated_at=int(row.get("updated_at") or 0),
         updated_by=row.get("updated_by") or "",
+    )
+
+
+def _row_to_company(row: dict) -> Company:
+    return Company(
+        id=int(row["id"]) if row.get("id") is not None else None,
+        name=row.get("name") or "",
+        group_name=row.get("group_name") or None,
+        next_sprint_number=int(row.get("next_sprint_number") or 0) or 1,
+        created_at=int(row.get("created_at") or 0),
+        created_by=row.get("created_by") or None,
+        updated_at=int(row.get("updated_at") or 0),
+        updated_by=row.get("updated_by") or None,
     )
 
 
@@ -508,22 +536,80 @@ def _split_branch_key(value: Optional[str]) -> tuple[Optional[str], Optional[str
 
 def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
     base = _resolve_base(path)
+    db = _get_db(base)
     now = int(time.time())
     sprint.branch_key = (sprint.branch_key or "").strip()
     qa_branch = (sprint.qa_branch_key or "")
     sprint.qa_branch_key = qa_branch.strip() or None
+    group_value = (sprint.group_name or "").strip()
+    sprint.group_name = group_value or None
     if not sprint.created_at:
         sprint.created_at = now
     if not sprint.updated_at:
         sprint.updated_at = now
+    existing_row = None
+    if sprint.id:
+        try:
+            existing_row = db.fetch_sprint(int(sprint.id))
+        except Exception:
+            existing_row = None
+    previous_status = (existing_row.get("status") or "open").lower() if existing_row else "open"
+    previous_sequence = None
+    if existing_row and existing_row.get("company_sequence") not in (None, ""):
+        try:
+            previous_sequence = int(existing_row.get("company_sequence"))
+        except (TypeError, ValueError):
+            previous_sequence = None
+    company_row = None
+    company_info: Optional[Company] = None
+    if sprint.company_id not in (None, ""):
+        try:
+            sprint.company_id = int(sprint.company_id)
+        except (TypeError, ValueError):
+            sprint.company_id = None
+        if sprint.company_id is not None:
+            try:
+                company_row = db.fetch_company(int(sprint.company_id))
+            except Exception:
+                company_row = None
+            if company_row:
+                company_info = _row_to_company(company_row)
+    else:
+        sprint.company_id = None
+    if sprint.company_id is None:
+        sprint.company_sequence = None
+    else:
+        if sprint.company_sequence in (None, 0):
+            if (
+                previous_sequence
+                and existing_row
+                and int(existing_row.get("company_id") or 0) == sprint.company_id
+            ):
+                sprint.company_sequence = previous_sequence
+            else:
+                next_value = 1
+                if company_info:
+                    try:
+                        next_value = int(company_info.next_sprint_number or 1)
+                    except (TypeError, ValueError):
+                        next_value = 1
+                sprint.company_sequence = next_value
+        else:
+            try:
+                sprint.company_sequence = int(sprint.company_sequence)
+            except (TypeError, ValueError):
+                sprint.company_sequence = None
     payload = {
         "id": sprint.id,
         "branch_key": sprint.branch_key,
         "qa_branch_key": sprint.qa_branch_key,
+        "group_name": sprint.group_name,
         "name": sprint.name,
         "version": sprint.version,
         "lead_user": sprint.lead_user,
         "qa_user": sprint.qa_user,
+        "company_id": sprint.company_id,
+        "company_sequence": sprint.company_sequence,
         "description": sprint.description,
         "status": sprint.status,
         "closed_at": sprint.closed_at,
@@ -533,8 +619,37 @@ def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
         "updated_at": sprint.updated_at,
         "updated_by": sprint.updated_by,
     }
-    sprint_id = _get_db(base).upsert_sprint(payload)
+    sprint_id = db.upsert_sprint(payload)
     sprint.id = sprint_id
+    new_status = (sprint.status or "open").lower()
+    if (
+        sprint.company_id
+        and sprint.company_sequence
+        and new_status == "closed"
+        and previous_status != "closed"
+    ):
+        if company_info is None and sprint.company_id:
+            try:
+                company_row = db.fetch_company(int(sprint.company_id))
+                if company_row:
+                    company_info = _row_to_company(company_row)
+            except Exception:
+                company_info = None
+        if company_info:
+            try:
+                desired_next = int(sprint.company_sequence) + 1
+            except (TypeError, ValueError):
+                desired_next = None
+            current_next = int(company_info.next_sprint_number or 1)
+            if desired_next is not None and desired_next > current_next:
+                company_info.next_sprint_number = desired_next
+                company_info.updated_at = now
+                company_info.updated_by = sprint.updated_by or _current_username()
+                if not company_info.created_at:
+                    company_info.created_at = now
+                if not company_info.created_by:
+                    company_info.created_by = company_info.updated_by
+                upsert_company(company_info, path=base)
     return sprint
 
 
@@ -543,16 +658,77 @@ def delete_sprint(sprint_id: int, *, path: Optional[Path] = None) -> None:
     _get_db(base).delete_sprint(int(sprint_id))
 
 
+def list_companies(*, path: Optional[Path] = None) -> List[Company]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_companies()
+    return [_row_to_company(row) for row in rows]
+
+
+def upsert_company(company: Company, *, path: Optional[Path] = None) -> Company:
+    base = _resolve_base(path)
+    now = int(time.time())
+    username = _current_username()
+    company.name = (company.name or "").strip()
+    group_value = (company.group_name or "").strip()
+    company.group_name = group_value or None
+    if company.id is None:
+        if not company.created_at:
+            company.created_at = now
+        company.created_by = company.created_by or username
+    if not company.created_at:
+        company.created_at = now
+    if not company.created_by:
+        company.created_by = username
+    company.updated_at = now
+    company.updated_by = username
+    if company.next_sprint_number <= 0:
+        company.next_sprint_number = 1
+    payload = {
+        "id": company.id,
+        "name": company.name,
+        "group_name": company.group_name,
+        "next_sprint_number": company.next_sprint_number,
+        "created_at": company.created_at,
+        "created_by": company.created_by,
+        "updated_at": company.updated_at,
+        "updated_by": company.updated_by,
+    }
+    company_id = _get_db(base).upsert_company(payload)
+    company.id = company_id
+    return company
+
+
+def delete_company(company_id: int, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_company(int(company_id))
+
+
 def list_cards(
     *,
     sprint_ids: Optional[Iterable[int]] = None,
     branches: Optional[Iterable[str]] = None,
+    company_ids: Optional[Iterable[int]] = None,
+    group_names: Optional[Iterable[str]] = None,
+    statuses: Optional[Iterable[str]] = None,
+    include_closed: bool = True,
+    without_sprint: bool = False,
     path: Optional[Path] = None,
 ) -> List[Card]:
     base = _resolve_base(path)
     ids = list(sprint_ids) if sprint_ids else None
     branch_list = list(branches) if branches else None
-    rows = _get_db(base).fetch_cards(sprint_ids=ids, branches=branch_list)
+    company_list = list(company_ids) if company_ids else None
+    group_list = list(group_names) if group_names else None
+    status_list = list(statuses) if statuses else None
+    rows = _get_db(base).fetch_cards(
+        sprint_ids=ids,
+        branches=branch_list,
+        company_ids=company_list,
+        group_names=group_list,
+        statuses=status_list,
+        include_closed=include_closed,
+        without_sprint=without_sprint,
+    )
     return [_row_to_card(row) for row in rows]
 
 
@@ -673,6 +849,7 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
         "title": card.title,
         "ticket_id": card.ticket_id,
         "branch": card.branch,
+        "group_name": card.group_name,
         "assignee": card.assignee,
         "qa_assignee": card.qa_assignee,
         "description": card.description,
@@ -685,6 +862,9 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
         "unit_tests_at": card.unit_tests_at,
         "qa_at": card.qa_at,
         "status": card.status,
+        "company_id": card.company_id,
+        "closed_at": card.closed_at,
+        "closed_by": card.closed_by,
         "branch_created_by": card.branch_created_by,
         "branch_created_at": card.branch_created_at,
         "created_at": card.created_at,
@@ -700,6 +880,16 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
 def delete_card(card_id: int, *, path: Optional[Path] = None) -> None:
     base = _resolve_base(path)
     _get_db(base).delete_card(int(card_id))
+
+
+def assign_cards_to_sprint(
+    sprint_id: int, card_ids: Iterable[int], *, path: Optional[Path] = None
+) -> None:
+    base = _resolve_base(path)
+    ids = [int(cid) for cid in card_ids if cid not in (None, "")]
+    if not ids:
+        return
+    _get_db(base).assign_cards_to_sprint(int(sprint_id), ids)
 
 
 # ---------------- users & roles -----------------
