@@ -10,9 +10,11 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Añadido
 - Panel de administración con pestañas para usuarios y catálogos accesible a roles de administrador y líder.
 - Catálogo inicial de empresas con captura de nombre, grupo, autor y fechas de actualización reutilizable al planear sprints.
+- Pestaña dedicada para explorar tarjetas con filtros por grupo, empresa, sprint y estado desde la vista de planeación.
 
 ### Cambiado
 - Los sprints almacenan y muestran la empresa asociada tanto en la tabla como en el formulario de edición.
+- El formulario de planeación de sprints incorpora selección de grupo/empresa sincronizada y asignación guiada al mover tarjetas.
 
 ## [1.7.0] - 2025-02-16
 ### Añadido

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from dataclasses import replace
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QStackedWidget,
+    QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -58,6 +60,7 @@ class SprintView(QWidget):
         self._cards: Dict[int, Card] = {}
         self._branch_index: Dict[str, BranchRecord] = {}
         self._companies: Dict[int, Company] = {}
+        self._companies_by_group: Dict[Optional[str], List[Company]] = {}
         self._users: List[str] = []
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
@@ -69,6 +72,10 @@ class SprintView(QWidget):
         self._current_sprint_qa_branch_key: Optional[str] = None
         self._current_card_base: str = ""
         self._branch_override: bool = False
+        self._sprint_filter_group: Optional[str] = None
+        self._sprint_filter_status: Optional[str] = None
+        self._card_form_card: Optional[Card] = None
+        self._card_form_sprint: Optional[Sprint] = None
 
         self._setup_ui()
         self.refresh()
@@ -98,6 +105,39 @@ class SprintView(QWidget):
 
         layout.addLayout(header)
 
+        self.tabs = QTabWidget()
+        self.tabs.setTabPosition(QTabWidget.North)
+        layout.addWidget(self.tabs, 1)
+
+        self.planning_page = self._build_planning_tab()
+        self.tabs.addTab(self.planning_page, "Planeación")
+
+        self.card_browser = CardBrowser(self)
+        self.card_browser.cardActivated.connect(self._open_card_from_browser)
+        self.tabs.addTab(self.card_browser, "Tarjetas")
+
+        self.btnRefresh.clicked.connect(self.refresh)
+
+        self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _build_empty_page(self) -> None:
+        container = QWidget()
+        box = QVBoxLayout(container)
+        box.setAlignment(Qt.AlignCenter)
+        label = QLabel("Selecciona un sprint o tarjeta para editar sus detalles.")
+        label.setAlignment(Qt.AlignCenter)
+        label.setWordWrap(True)
+        box.addWidget(label)
+        self.stack.addWidget(container)
+
+    # ------------------------------------------------------------------
+    def _build_planning_tab(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
         splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(splitter, 1)
 
@@ -120,6 +160,21 @@ class SprintView(QWidget):
 
         action_row.addStretch(1)
         left_layout.addLayout(action_row)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(6)
+        self.cboSprintFilterGroup = QComboBox()
+        self.cboSprintFilterGroup.addItem("Todos los grupos", None)
+        self.cboSprintFilterGroup.currentIndexChanged.connect(self._apply_sprint_filters)
+        filter_row.addWidget(self.cboSprintFilterGroup, 1)
+        self.cboSprintFilterStatus = QComboBox()
+        self.cboSprintFilterStatus.addItem("Todos", None)
+        self.cboSprintFilterStatus.addItem("Abiertos", "open")
+        self.cboSprintFilterStatus.addItem("Cerrados", "closed")
+        self.cboSprintFilterStatus.currentIndexChanged.connect(self._apply_sprint_filters)
+        filter_row.addWidget(self.cboSprintFilterStatus, 1)
+        left_layout.addLayout(filter_row)
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(
@@ -161,29 +216,21 @@ class SprintView(QWidget):
         splitter.setStretchFactor(1, 3)
         splitter.setSizes([860, 520])
 
-        self.btnRefresh.clicked.connect(self.refresh)
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
         self.btnNewCard.clicked.connect(self._start_new_card)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
 
-        self.update_permissions()
-
-    # ------------------------------------------------------------------
-    def _build_empty_page(self) -> None:
-        container = QWidget()
-        box = QVBoxLayout(container)
-        box.setAlignment(Qt.AlignCenter)
-        label = QLabel("Selecciona un sprint o tarjeta para editar sus detalles.")
-        label.setAlignment(Qt.AlignCenter)
-        label.setWordWrap(True)
-        box.addWidget(label)
-        self.stack.addWidget(container)
+        return container
 
     # ------------------------------------------------------------------
     def _build_sprint_form(self) -> None:
         self.pageSprint = QGroupBox("Detalles del sprint")
         form = QFormLayout(self.pageSprint)
         form.setLabelAlignment(Qt.AlignRight)
+
+        self.cboSprintGroup = QComboBox()
+        self.cboSprintGroup.currentIndexChanged.connect(self._on_sprint_group_changed)
+        form.addRow("Grupo", self.cboSprintGroup)
 
         branch_row = QHBoxLayout()
         self.txtSprintBranch = QLineEdit()
@@ -210,7 +257,11 @@ class SprintView(QWidget):
         form.addRow("Versión", self.txtSprintVersion)
 
         self.cboCompany = QComboBox()
+        self.cboCompany.currentIndexChanged.connect(self._on_company_changed)
         form.addRow("Empresa", self.cboCompany)
+
+        self.lblSprintSequence = QLabel("Sin empresa")
+        form.addRow("Orden empresa", self.lblSprintSequence)
 
         self.cboSprintLead = QComboBox()
         form.addRow("Responsable", self.cboSprintLead)
@@ -253,6 +304,21 @@ class SprintView(QWidget):
 
         self.lblCardSprint = QLabel("-")
         form.addRow("Sprint", self.lblCardSprint)
+
+        self.cboCardSprint = QComboBox()
+        self.cboCardSprint.currentIndexChanged.connect(self._on_card_sprint_changed)
+        form.addRow("Mover a sprint", self.cboCardSprint)
+
+        self.cboCardGroup = QComboBox()
+        self.cboCardGroup.currentIndexChanged.connect(self._on_card_group_changed)
+        form.addRow("Grupo", self.cboCardGroup)
+
+        self.cboCardCompany = QComboBox()
+        self.cboCardCompany.currentIndexChanged.connect(self._on_card_company_changed)
+        form.addRow("Empresa", self.cboCardCompany)
+
+        self.lblCardStatus = QLabel("Pendiente")
+        form.addRow("Estado", self.lblCardStatus)
 
         self.txtCardTicket = QLineEdit()
         form.addRow("Ticket", self.txtCardTicket)
@@ -460,18 +526,19 @@ class SprintView(QWidget):
         self._cards.clear()
         self._branch_index = load_index()
         self._load_companies()
+        self._populate_group_combo(self._current_sprint_group())
 
         for sprint in list_sprints():
             if sprint.id is None:
                 continue
             self._sprints[sprint.id] = sprint
 
-        sprint_ids = list(self._sprints.keys())
-        if sprint_ids:
-            for card in list_cards(sprint_ids=sprint_ids):
-                if card.id is None:
-                    continue
-                self._cards[card.id] = card
+        for card in list_cards():
+            if card.id is None:
+                continue
+            self._cards[card.id] = card
+
+        self._auto_finalize_cards()
 
         users = list_users(include_inactive=False)
         self._users = sorted({user.username for user in users})
@@ -488,9 +555,15 @@ class SprintView(QWidget):
             self.cboCardQA, None, allow_empty=True, required_role="qa"
         )
 
+        self._populate_card_sprint_combo(None)
+        self._populate_card_group_combo(None)
+        self._populate_card_company_combo(None, None)
+
         self._populate_tree()
         self._restore_selection()
         self._update_new_card_button()
+        if hasattr(self, "card_browser"):
+            self.card_browser.update_sources(self._cards, self._sprints, self._companies)
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -507,7 +580,50 @@ class SprintView(QWidget):
         self._companies = {
             company.id: company for company in companies if company.id is not None
         }
+        grouped: Dict[Optional[str], List[Company]] = {}
+        for company in companies:
+            key = company.group_name or None
+            grouped.setdefault(key, []).append(company)
+        for values in grouped.values():
+            values.sort(key=lambda comp: (comp.name or "").lower())
+        self._companies_by_group = grouped
         self._populate_company_combo(None)
+
+    # ------------------------------------------------------------------
+    def _populate_group_combo(self, selected: Optional[str]) -> None:
+        group_keys = sorted({group.key for group in self._cfg.groups if getattr(group, "key", None)})
+        if hasattr(self, "cboSprintGroup"):
+            self.cboSprintGroup.blockSignals(True)
+            current = selected or self._current_sprint_group()
+            self.cboSprintGroup.clear()
+            self.cboSprintGroup.addItem("Sin grupo", None)
+            for key in group_keys:
+                self.cboSprintGroup.addItem(key, key)
+            if current and current in group_keys:
+                index = self.cboSprintGroup.findData(current)
+                if index >= 0:
+                    self.cboSprintGroup.setCurrentIndex(index)
+                else:
+                    self.cboSprintGroup.setCurrentIndex(0)
+            else:
+                self.cboSprintGroup.setCurrentIndex(0)
+            self.cboSprintGroup.blockSignals(False)
+        if hasattr(self, "cboSprintFilterGroup"):
+            self.cboSprintFilterGroup.blockSignals(True)
+            current_filter = self.cboSprintFilterGroup.currentData()
+            self.cboSprintFilterGroup.clear()
+            self.cboSprintFilterGroup.addItem("Todos los grupos", None)
+            for key in group_keys:
+                self.cboSprintFilterGroup.addItem(key, key)
+            if current_filter and current_filter in group_keys:
+                idx = self.cboSprintFilterGroup.findData(current_filter)
+                if idx >= 0:
+                    self.cboSprintFilterGroup.setCurrentIndex(idx)
+                else:
+                    self.cboSprintFilterGroup.setCurrentIndex(0)
+            else:
+                self.cboSprintFilterGroup.setCurrentIndex(0)
+            self.cboSprintFilterGroup.blockSignals(False)
 
     # ------------------------------------------------------------------
     def _company_name(self, company_id: Optional[int]) -> str:
@@ -519,13 +635,26 @@ class SprintView(QWidget):
     # ------------------------------------------------------------------
     def _populate_tree(self) -> None:
         self.tree.clear()
+        group_filter = self._sprint_filter_group or None
+        status_filter = (self._sprint_filter_status or "").lower() if self._sprint_filter_status else None
         for sprint in sorted(
             self._sprints.values(), key=lambda s: ((s.version or "").lower(), (s.name or "").lower())
         ):
+            if group_filter and (sprint.group_name or None) != group_filter:
+                continue
+            if status_filter and (sprint.status or "").lower() != status_filter:
+                continue
             sprint_item = QTreeWidgetItem()
             sprint_label = f"{sprint.version} — {sprint.name}"
+            details: List[str] = []
+            if sprint.group_name:
+                details.append(sprint.group_name)
+            if sprint.company_sequence:
+                details.append(f"#{sprint.company_sequence}")
             if sprint.status == "closed":
-                sprint_label += " (finalizado)"
+                details.append("finalizado")
+            if details:
+                sprint_label += f" ({', '.join(details)})"
             sprint_item.setText(0, sprint_label)
             sprint_item.setText(1, sprint.lead_user or "")
             sprint_item.setText(2, sprint.qa_user or "")
@@ -555,6 +684,11 @@ class SprintView(QWidget):
         display = card.title or card.ticket_id or "(sin título)"
         if card.ticket_id:
             display = f"{card.ticket_id} — {card.title}"
+        status_display = (card.status or "pendiente").capitalize()
+        if card.group_name:
+            display += f" [{card.group_name}]"
+        if status_display:
+            display += f" ({status_display})"
 
         item = QTreeWidgetItem()
         item.setText(0, display)
@@ -564,7 +698,8 @@ class SprintView(QWidget):
         checks.append("Unit ✔" if card.unit_tests_done else "Unit ✖")
         checks.append("QA ✔" if card.qa_done else "QA ✖")
         checks.append("Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖")
-        item.setText(3, "")
+        company_name = self._company_name(card.company_id) or self._company_name(sprint.company_id)
+        item.setText(3, company_name or "")
         item.setText(4, " / ".join(checks))
         item.setText(5, card.branch)
         item.setText(6, sprint.qa_branch_key or "")
@@ -592,6 +727,33 @@ class SprintView(QWidget):
         if not branch_key:
             return None
         return self._branch_index.get(branch_key)
+
+    # ------------------------------------------------------------------
+    def _auto_finalize_cards(self) -> None:
+        updates: List[Card] = []
+        now = int(time.time())
+        for card in list(self._cards.values()):
+            sprint = self._sprints.get(card.sprint_id)
+            if not sprint:
+                continue
+            if (card.status or "").lower() == "terminated":
+                continue
+            if sprint.status == "closed" and card.unit_tests_done and card.qa_done:
+                updated = replace(
+                    card,
+                    status="terminated",
+                    closed_at=card.closed_at or now,
+                    closed_by=card.closed_by or sprint.closed_by or self._current_user(),
+                )
+                try:
+                    saved = upsert_card(updated)
+                except Exception as exc:  # pragma: no cover - registro y continúa
+                    logging.debug("No se pudo finalizar tarjeta %s: %s", card.id, exc)
+                    continue
+                updates.append(saved)
+        for card in updates:
+            if card.id is not None:
+                self._cards[card.id] = card
 
     # ------------------------------------------------------------------
     def _branch_record_for_name(self, sprint: Sprint, branch: str) -> Optional[BranchRecord]:
@@ -692,15 +854,19 @@ class SprintView(QWidget):
         combo.blockSignals(False)
 
     # ------------------------------------------------------------------
-    def _populate_company_combo(self, selected: Optional[int]) -> None:
+    def _populate_company_combo(self, selected: Optional[int], group_filter: Optional[str] = None) -> None:
         if not hasattr(self, "cboCompany"):
             return
         self.cboCompany.blockSignals(True)
         self.cboCompany.clear()
         self.cboCompany.addItem("Sin empresa", None)
-        for company in sorted(
-            self._companies.values(), key=lambda comp: (comp.name or "").lower()
-        ):
+        if group_filter:
+            companies = list(self._companies_by_group.get(group_filter, []))
+        else:
+            companies = sorted(
+                self._companies.values(), key=lambda comp: (comp.name or "").lower()
+            )
+        for company in companies:
             if company.id is None:
                 continue
             self.cboCompany.addItem(company.name, company.id)
@@ -713,6 +879,251 @@ class SprintView(QWidget):
         else:
             self.cboCompany.setCurrentIndex(0)
         self.cboCompany.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _apply_sprint_filters(self) -> None:
+        if hasattr(self, "cboSprintFilterGroup"):
+            self._sprint_filter_group = self.cboSprintFilterGroup.currentData()
+            if self._sprint_filter_group in ("", None):
+                self._sprint_filter_group = None
+        else:
+            self._sprint_filter_group = None
+        if hasattr(self, "cboSprintFilterStatus"):
+            self._sprint_filter_status = self.cboSprintFilterStatus.currentData()
+            if self._sprint_filter_status in ("", None):
+                self._sprint_filter_status = None
+        else:
+            self._sprint_filter_status = None
+        self._populate_tree()
+
+    # ------------------------------------------------------------------
+    def _current_sprint_group(self) -> Optional[str]:
+        if hasattr(self, "cboSprintGroup"):
+            value = self.cboSprintGroup.currentData()
+            return value or None
+        return None
+
+    # ------------------------------------------------------------------
+    def _set_sprint_group(self, group_key: Optional[str]) -> None:
+        if not hasattr(self, "cboSprintGroup"):
+            return
+        self.cboSprintGroup.blockSignals(True)
+        target = group_key or None
+        index = 0
+        for idx in range(self.cboSprintGroup.count()):
+            if self.cboSprintGroup.itemData(idx) == target:
+                index = idx
+                break
+        self.cboSprintGroup.setCurrentIndex(index)
+        self.cboSprintGroup.blockSignals(False)
+        self._on_sprint_group_changed()
+
+    # ------------------------------------------------------------------
+    def _on_sprint_group_changed(self) -> None:
+        group_key = self._current_sprint_group()
+        selected_company = self.cboCompany.currentData() if hasattr(self, "cboCompany") else None
+        self._populate_company_combo(selected_company, group_key)
+        self._update_sprint_sequence_label(None, self.cboCompany.currentData() if hasattr(self, "cboCompany") else None)
+
+    # ------------------------------------------------------------------
+    def _on_company_changed(self) -> None:
+        company_id = self.cboCompany.currentData() if hasattr(self, "cboCompany") else None
+        if company_id:
+            company = self._companies.get(int(company_id))
+            if company and company.group_name and not self._current_sprint_group():
+                self._set_sprint_group(company.group_name)
+        self._update_sprint_sequence_label(None, company_id)
+
+    # ------------------------------------------------------------------
+    def _update_sprint_sequence_label(
+        self,
+        sequence: Optional[int],
+        company_id: Optional[int],
+    ) -> None:
+        if not hasattr(self, "lblSprintSequence"):
+            return
+        if not company_id:
+            self.lblSprintSequence.setText("Sin empresa")
+            return
+        company = self._companies.get(int(company_id))
+        next_value = company.next_sprint_number if company else None
+        if sequence:
+            base = str(sequence)
+        else:
+            base = "-"
+        if next_value:
+            hint = next_value
+            if sequence and sequence >= next_value:
+                hint = sequence + 1
+            if base == "-":
+                text = f"Próximo: {hint}"
+            else:
+                text = f"{base} (siguiente: {hint})"
+        else:
+            text = base
+        self.lblSprintSequence.setText(text)
+
+    # ------------------------------------------------------------------
+    def _populate_card_sprint_combo(self, selected: Optional[int]) -> None:
+        if not hasattr(self, "cboCardSprint"):
+            return
+        self.cboCardSprint.blockSignals(True)
+        current = selected
+        self.cboCardSprint.clear()
+        self.cboCardSprint.addItem("(selecciona)", None)
+        for sprint in sorted(
+            self._sprints.values(), key=lambda s: ((s.version or "").lower(), (s.name or "").lower())
+        ):
+            label = f"{sprint.version} — {sprint.name}"
+            if sprint.status == "closed":
+                label += " (cerrado)"
+            self.cboCardSprint.addItem(label, sprint.id)
+        if current:
+            idx = self.cboCardSprint.findData(current)
+            if idx >= 0:
+                self.cboCardSprint.setCurrentIndex(idx)
+            else:
+                self.cboCardSprint.setCurrentIndex(0)
+        else:
+            self.cboCardSprint.setCurrentIndex(0)
+        self.cboCardSprint.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _populate_card_group_combo(self, selected: Optional[str]) -> None:
+        if not hasattr(self, "cboCardGroup"):
+            return
+        group_keys = sorted({group.key for group in self._cfg.groups if getattr(group, "key", None)})
+        self.cboCardGroup.blockSignals(True)
+        self.cboCardGroup.clear()
+        self.cboCardGroup.addItem("Sin grupo", None)
+        for key in group_keys:
+            self.cboCardGroup.addItem(key, key)
+        if selected and selected in group_keys:
+            idx = self.cboCardGroup.findData(selected)
+            if idx >= 0:
+                self.cboCardGroup.setCurrentIndex(idx)
+            else:
+                self.cboCardGroup.setCurrentIndex(0)
+        else:
+            self.cboCardGroup.setCurrentIndex(0)
+        self.cboCardGroup.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _populate_card_company_combo(
+        self,
+        selected: Optional[int],
+        group_filter: Optional[str],
+    ) -> None:
+        if not hasattr(self, "cboCardCompany"):
+            return
+        self.cboCardCompany.blockSignals(True)
+        self.cboCardCompany.clear()
+        self.cboCardCompany.addItem("Sin empresa", None)
+        companies: Iterable[Company]
+        if group_filter:
+            companies = self._companies_by_group.get(group_filter, [])
+        else:
+            companies = sorted(
+                self._companies.values(), key=lambda comp: (comp.name or "").lower()
+            )
+        for company in companies:
+            if company.id is None:
+                continue
+            self.cboCardCompany.addItem(company.name, company.id)
+        if selected:
+            idx = self.cboCardCompany.findData(selected)
+            if idx >= 0:
+                self.cboCardCompany.setCurrentIndex(idx)
+            else:
+                self.cboCardCompany.setCurrentIndex(0)
+        else:
+            self.cboCardCompany.setCurrentIndex(0)
+        self.cboCardCompany.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _set_card_group(self, group_key: Optional[str]) -> None:
+        if not hasattr(self, "cboCardGroup"):
+            return
+        self.cboCardGroup.blockSignals(True)
+        target = group_key or None
+        index = 0
+        for idx in range(self.cboCardGroup.count()):
+            if self.cboCardGroup.itemData(idx) == target:
+                index = idx
+                break
+        self.cboCardGroup.setCurrentIndex(index)
+        self.cboCardGroup.blockSignals(False)
+        self._on_card_group_changed()
+
+    # ------------------------------------------------------------------
+    def _set_card_company(self, company_id: Optional[int]) -> None:
+        if not hasattr(self, "cboCardCompany"):
+            return
+        self.cboCardCompany.blockSignals(True)
+        target = company_id if company_id not in (None, "") else None
+        index = 0
+        for idx in range(self.cboCardCompany.count()):
+            if self.cboCardCompany.itemData(idx) == target:
+                index = idx
+                break
+        self.cboCardCompany.setCurrentIndex(index)
+        self.cboCardCompany.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _on_card_sprint_changed(self) -> None:
+        if not hasattr(self, "cboCardSprint"):
+            return
+        sprint_id = self.cboCardSprint.currentData()
+        sprint = self._sprints.get(int(sprint_id)) if sprint_id else None
+        if sprint and sprint.status == "closed" and (self._card_form_card and (self._card_form_card.status or "").lower() != "terminated"):
+            QMessageBox.warning(self, "Tarjeta", "No puedes mover la tarjeta a un sprint cerrado.")
+            self._populate_card_sprint_combo(self._card_form_card.sprint_id if self._card_form_card else None)
+            return
+        self._card_form_sprint = sprint
+        if sprint and sprint.group_name:
+            self._set_card_group(sprint.group_name)
+        elif not sprint:
+            self._set_card_group(None)
+        current_company = self._card_form_card.company_id if self._card_form_card else None
+        filter_group = self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
+        self._populate_card_company_combo(current_company, filter_group)
+        if sprint and sprint.company_id:
+            self._set_card_company(sprint.company_id)
+        reference_sprint = sprint or (self._card_form_card and self._sprints.get(self._card_form_card.sprint_id))
+        reference_card = self._card_form_card or Card(id=None, sprint_id=sprint_id or 0)
+        if reference_sprint:
+            self._prepare_branch_inputs(reference_card, reference_sprint)
+        self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _on_card_group_changed(self) -> None:
+        if not hasattr(self, "cboCardGroup"):
+            return
+        group_key = self.cboCardGroup.currentData()
+        current_company = self.cboCardCompany.currentData() if hasattr(self, "cboCardCompany") else None
+        self._populate_card_company_combo(current_company, group_key)
+
+    # ------------------------------------------------------------------
+    def _on_card_company_changed(self) -> None:
+        if not hasattr(self, "cboCardCompany"):
+            return
+        data = self.cboCardCompany.currentData()
+        if data in (None, ""):
+            self.update_permissions()
+            return
+        try:
+            company_id = int(data)
+        except (TypeError, ValueError):
+            self.update_permissions()
+            return
+        company = self._companies.get(company_id)
+        if company and company.group_name:
+            current_group = (
+                self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
+            )
+            if current_group != company.group_name:
+                self._set_card_group(company.group_name)
+        self.update_permissions()
 
     # ------------------------------------------------------------------
     def _current_user(self) -> str:
@@ -792,6 +1203,39 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
+    def _open_card_from_browser(self, card_id: Optional[int]) -> None:
+        if not card_id:
+            return
+        card = self._cards.get(int(card_id))
+        if not card:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "La tarjeta seleccionada ya no existe o fue movida.",
+            )
+            self.refresh()
+            return
+        sprint = self._sprints.get(card.sprint_id)
+        if not sprint:
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "El sprint relacionado con la tarjeta ya no está disponible.",
+            )
+            self.refresh()
+            return
+        planning_index = self.tabs.indexOf(self.planning_page)
+        if planning_index >= 0:
+            self.tabs.setCurrentIndex(planning_index)
+        self._selected_sprint_id = sprint.id
+        self._selected_card_id = card.id
+        self._card_parent_id = sprint.id
+        self._show_card_form(card, sprint)
+        if card.id is not None:
+            self._select_tree_item("card", card.id)
+        self.tree.setFocus()
+
+    # ------------------------------------------------------------------
     def _current_sprint_id(self) -> Optional[int]:
         if self._selected_sprint_id is not None:
             return self._selected_sprint_id
@@ -812,11 +1256,14 @@ class SprintView(QWidget):
         self.stack.setCurrentWidget(self.pageSprint)
         self._current_sprint_branch_key = sprint.branch_key
         self._current_sprint_qa_branch_key = sprint.qa_branch_key or None
+        self._populate_group_combo(sprint.group_name)
+        self._set_sprint_group(sprint.group_name)
         self.txtSprintBranch.setText(sprint.branch_key)
         self.txtSprintQABranch.setText(sprint.qa_branch_key or "")
         self.txtSprintName.setText(sprint.name)
         self.txtSprintVersion.setText(sprint.version)
-        self._populate_company_combo(sprint.company_id)
+        self._populate_company_combo(sprint.company_id, sprint.group_name)
+        self._update_sprint_sequence_label(sprint.company_sequence, sprint.company_id)
         self._populate_user_combo(self.cboSprintLead, sprint.lead_user or None)
         self._populate_user_combo(
             self.cboSprintQA,
@@ -835,13 +1282,31 @@ class SprintView(QWidget):
         self._selected_card_id = None
         if new:
             self.lblSprintMeta.clear()
+            self._update_sprint_sequence_label(None, self.cboCompany.currentData())
         self._update_new_card_button()
         self.update_permissions()
 
     # ------------------------------------------------------------------
     def _show_card_form(self, card: Card, sprint: Sprint, new: bool = False) -> None:
         self.stack.setCurrentWidget(self.pageCard)
+        self._card_form_card = card
+        self._card_form_sprint = sprint
         self.lblCardSprint.setText(f"{sprint.version} — {sprint.name}")
+        target_sprint_id = card.sprint_id or sprint.id
+        self._populate_card_sprint_combo(target_sprint_id)
+        idx = self.cboCardSprint.findData(target_sprint_id)
+        if idx >= 0:
+            self.cboCardSprint.setCurrentIndex(idx)
+        group_value = card.group_name or sprint.group_name
+        self._populate_card_group_combo(group_value)
+        if group_value:
+            self._set_card_group(group_value)
+        company_value = card.company_id or sprint.company_id
+        self._populate_card_company_combo(company_value, group_value)
+        if company_value:
+            self._set_card_company(company_value)
+        self.lblCardStatus.setText((card.status or "pendiente").capitalize())
+        self.cboCardSprint.setEnabled((card.status or "").lower() != "terminated")
         self.txtCardTicket.blockSignals(True)
         self.txtCardTicket.setText(card.ticket_id or "")
         self.txtCardTicket.blockSignals(False)
@@ -1095,6 +1560,7 @@ class SprintView(QWidget):
         sprint.qa_branch_key = qa_branch_key or None
         sprint.name = name
         sprint.version = version
+        sprint.group_name = self._current_sprint_group()
         company_data = self.cboCompany.currentData() if hasattr(self, "cboCompany") else None
         try:
             sprint.company_id = int(company_data) if company_data not in (None, "") else None
@@ -1166,13 +1632,25 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_save_card(self) -> None:
-        sprint_id = self._card_parent_id or self._current_sprint_id()
-        if sprint_id is None:
+        parent_sprint_id = self._card_parent_id or self._current_sprint_id()
+        if parent_sprint_id is None:
             QMessageBox.warning(self, "Tarjeta", "Selecciona un sprint válido.")
             return
-        sprint = self._sprints.get(sprint_id)
+        target_data = self.cboCardSprint.currentData() if hasattr(self, "cboCardSprint") else parent_sprint_id
+        if target_data is None:
+            QMessageBox.warning(self, "Tarjeta", "Selecciona el sprint destino para la tarjeta.")
+            return
+        try:
+            target_sprint_id = int(target_data)
+        except (TypeError, ValueError):
+            QMessageBox.warning(self, "Tarjeta", "El sprint seleccionado no es válido.")
+            return
+        sprint = self._sprints.get(target_sprint_id)
         if not sprint:
-            QMessageBox.warning(self, "Tarjeta", "El sprint ya no existe.")
+            QMessageBox.warning(self, "Tarjeta", "El sprint seleccionado ya no existe.")
+            return
+        if sprint.status == "closed":
+            QMessageBox.warning(self, "Tarjeta", "No puedes mover la tarjeta a un sprint cerrado.")
             return
 
         ticket = self.txtCardTicket.text().strip()
@@ -1190,15 +1668,15 @@ class SprintView(QWidget):
 
         now = int(time.time())
         user = self._current_user()
-        card: Optional[Card]
         if self._selected_card_id and self._selected_card_id in self._cards:
             card = replace(self._cards[self._selected_card_id])
         else:
-            card = Card(id=None, sprint_id=sprint_id)
+            card = Card(id=None, sprint_id=target_sprint_id)
             card.created_at = now
             card.created_by = user
 
-        card.sprint_id = sprint_id
+        previous_sprint_id = card.sprint_id
+        card.sprint_id = target_sprint_id
         card.ticket_id = ticket
         card.title = title
         card.branch = branch_full
@@ -1208,8 +1686,34 @@ class SprintView(QWidget):
         card.qa_url = self.txtCardQAUrl.text().strip() or None
         card.updated_at = now
         card.updated_by = user
+        group_value = self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
+        card.group_name = group_value or sprint.group_name
+        company_data = self.cboCardCompany.currentData() if hasattr(self, "cboCardCompany") else None
+        try:
+            card.company_id = int(company_data) if company_data not in (None, "") else sprint.company_id
+        except (TypeError, ValueError):
+            card.company_id = sprint.company_id
 
-        saved = upsert_card(card)
+        if (
+            (card.status or "").lower() == "terminated"
+            and previous_sprint_id not in (None, card.sprint_id)
+        ):
+            QMessageBox.warning(
+                self,
+                "Tarjeta",
+                "La tarjeta está marcada como terminada y no puede moverse a otro sprint.",
+            )
+            return
+
+        try:
+            saved = upsert_card(card)
+        except sqlite3.IntegrityError:
+            QMessageBox.warning(self, "Tarjeta", "No se pudo guardar: la rama indicada ya existe.")
+            return
+        except Exception as exc:  # pragma: no cover
+            QMessageBox.critical(self, "Tarjeta", f"Error al guardar la tarjeta: {exc}")
+            return
+
         if saved.id is not None:
             self._cards[saved.id] = saved
             self._selected_card_id = saved.id
@@ -1330,6 +1834,496 @@ class SprintView(QWidget):
         self.refresh()
         if card.id:
             self._select_tree_item("card", card.id)
+
+
+class CardBrowser(QWidget):
+    """Listado filtrable de tarjetas independientes del árbol de planeación."""
+
+    cardActivated = Signal(int)
+
+    _ALL_VALUE = "__all__"
+    _NONE_VALUE = "__none__"
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._cards: Dict[int, Card] = {}
+        self._sprints: Dict[int, Sprint] = {}
+        self._companies: Dict[int, Company] = {}
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        filter_row = QHBoxLayout()
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        filter_row.setSpacing(6)
+
+        lbl_group = QLabel("Grupo:")
+        filter_row.addWidget(lbl_group)
+        self.cboGroup = QComboBox()
+        filter_row.addWidget(self.cboGroup, 1)
+
+        lbl_company = QLabel("Empresa:")
+        filter_row.addWidget(lbl_company)
+        self.cboCompany = QComboBox()
+        filter_row.addWidget(self.cboCompany, 1)
+
+        lbl_sprint = QLabel("Sprint:")
+        filter_row.addWidget(lbl_sprint)
+        self.cboSprint = QComboBox()
+        filter_row.addWidget(self.cboSprint, 1)
+
+        lbl_status = QLabel("Estado:")
+        filter_row.addWidget(lbl_status)
+        self.cboStatus = QComboBox()
+        filter_row.addWidget(self.cboStatus, 1)
+
+        layout.addLayout(filter_row)
+
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.setSpacing(6)
+        lbl_search = QLabel("Buscar:")
+        search_row.addWidget(lbl_search)
+        self.txtSearch = QLineEdit()
+        self.txtSearch.setPlaceholderText("Ticket, título, sprint o responsable")
+        self.txtSearch.setClearButtonEnabled(True)
+        search_row.addWidget(self.txtSearch, 1)
+        layout.addLayout(search_row)
+
+        self.tree = QTreeWidget()
+        self.tree.setColumnCount(8)
+        self.tree.setHeaderLabels(
+            [
+                "Tarjeta",
+                "Sprint",
+                "Grupo",
+                "Empresa",
+                "Asignado",
+                "QA",
+                "Estado",
+                "Checks",
+            ]
+        )
+        self.tree.setRootIsDecorated(False)
+        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        layout.addWidget(self.tree, 1)
+
+        self.cboGroup.currentIndexChanged.connect(self._on_group_filter_changed)
+        self.cboCompany.currentIndexChanged.connect(self._on_company_filter_changed)
+        self.cboSprint.currentIndexChanged.connect(self._apply_filters)
+        self.cboStatus.currentIndexChanged.connect(self._apply_filters)
+        self.txtSearch.textChanged.connect(self._apply_filters)
+        self.tree.itemActivated.connect(self._on_item_activated)
+        self.tree.itemDoubleClicked.connect(self._on_item_activated)
+
+        self._initialize_filters()
+
+    # ------------------------------------------------------------------
+    def _initialize_filters(self) -> None:
+        self.cboGroup.addItem("Todos los grupos", self._ALL_VALUE)
+        self.cboCompany.addItem("Todas las empresas", self._ALL_VALUE)
+        self.cboSprint.addItem("Todos los sprints", self._ALL_VALUE)
+        self.cboStatus.addItem("Todos los estados", self._ALL_VALUE)
+
+    # ------------------------------------------------------------------
+    def update_sources(
+        self,
+        cards: Dict[int, Card],
+        sprints: Dict[int, Sprint],
+        companies: Dict[int, Company],
+    ) -> None:
+        prev_group = self._current_group_filter()
+        prev_company = self._current_company_filter()
+        prev_sprint = self._current_sprint_filter()
+        prev_status = self._current_status_filter()
+        prev_search = self.txtSearch.text()
+
+        self._cards = dict(cards)
+        self._sprints = dict(sprints)
+        self._companies = dict(companies)
+
+        self._update_group_filter_options(prev_group)
+        self._update_status_filter_options(prev_status)
+        self._update_company_filter_options(prev_company)
+        self._update_sprint_filter_options(prev_sprint)
+
+        self.txtSearch.blockSignals(True)
+        self.txtSearch.setText(prev_search)
+        self.txtSearch.blockSignals(False)
+
+        self._apply_filters()
+
+    # ------------------------------------------------------------------
+    def _update_group_filter_options(self, previous: Optional[str]) -> None:
+        include_blank = False
+        groups: List[str] = []
+        seen = set()
+        for sprint in self._sprints.values():
+            if sprint.group_name:
+                if sprint.group_name not in seen:
+                    groups.append(sprint.group_name)
+                    seen.add(sprint.group_name)
+            else:
+                include_blank = True
+        for card in self._cards.values():
+            effective = card.group_name
+            if not effective:
+                sprint = self._sprints.get(card.sprint_id)
+                effective = sprint.group_name if sprint else None
+            if effective:
+                if effective not in seen:
+                    groups.append(effective)
+                    seen.add(effective)
+            else:
+                include_blank = True
+        groups.sort(key=lambda value: value.lower())
+
+        self.cboGroup.blockSignals(True)
+        self.cboGroup.clear()
+        self.cboGroup.addItem("Todos los grupos", self._ALL_VALUE)
+        if include_blank:
+            self.cboGroup.addItem("Sin grupo", self._NONE_VALUE)
+        for group in groups:
+            self.cboGroup.addItem(group, group)
+        target = self._ALL_VALUE if previous in (None, self._ALL_VALUE) else previous
+        if previous == self._NONE_VALUE and include_blank:
+            target = self._NONE_VALUE
+        index = self.cboGroup.findData(target)
+        if index < 0:
+            index = 0
+        self.cboGroup.setCurrentIndex(index)
+        self.cboGroup.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _update_company_filter_options(self, previous: Optional[object]) -> None:
+        group_filter = self._current_group_filter()
+        include_blank = False
+        options: List[Tuple[str, object]] = [("Todas las empresas", self._ALL_VALUE)]
+        added_ids: set = set()
+        extra_companies: Dict[int, str] = {}
+
+        for company in sorted(
+            self._companies.values(), key=lambda comp: (comp.name or "").lower()
+        ):
+            if not self._matches_group_filter(company.group_name, group_filter):
+                continue
+            if company.id is None:
+                include_blank = True
+                continue
+            options.append((company.name, company.id))
+            added_ids.add(company.id)
+
+        for card in self._cards.values():
+            if not self._matches_group_filter(self._effective_group(card), group_filter):
+                continue
+            company_id = self._effective_company(card)
+            if company_id is None:
+                include_blank = True
+                continue
+            if company_id in added_ids:
+                continue
+            added_ids.add(company_id)
+            extra_companies[company_id] = self._company_name(company_id)
+
+        if include_blank:
+            options.insert(1, ("Sin empresa", self._NONE_VALUE))
+
+        for company_id, label in sorted(
+            extra_companies.items(), key=lambda item: item[1].lower()
+        ):
+            options.append((label, company_id))
+
+        self.cboCompany.blockSignals(True)
+        self.cboCompany.clear()
+        for label, value in options:
+            self.cboCompany.addItem(label, value)
+        target: object
+        if previous in (None, self._ALL_VALUE):
+            target = self._ALL_VALUE
+        elif previous == self._NONE_VALUE and include_blank:
+            target = self._NONE_VALUE
+        else:
+            target = previous
+        index = self.cboCompany.findData(target)
+        if index < 0:
+            index = 0
+        self.cboCompany.setCurrentIndex(index)
+        self.cboCompany.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _update_status_filter_options(self, previous: Optional[str]) -> None:
+        statuses = sorted({(card.status or "pending").lower() for card in self._cards.values()})
+        self.cboStatus.blockSignals(True)
+        self.cboStatus.clear()
+        self.cboStatus.addItem("Todos los estados", self._ALL_VALUE)
+        for status in statuses:
+            label = status.capitalize()
+            self.cboStatus.addItem(label, status)
+        target = self._ALL_VALUE if previous in (None, self._ALL_VALUE) else previous
+        index = self.cboStatus.findData(target)
+        if index < 0:
+            index = 0
+        self.cboStatus.setCurrentIndex(index)
+        self.cboStatus.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _update_sprint_filter_options(self, previous: Optional[int]) -> None:
+        group_filter = self._current_group_filter()
+        company_filter = self._current_company_filter()
+        sprint_ids = set()
+        for sprint in self._sprints.values():
+            if self._matches_group_filter(sprint.group_name, group_filter) and self._matches_company_filter(
+                sprint.company_id, company_filter
+            ):
+                if sprint.id is not None:
+                    sprint_ids.add(sprint.id)
+        for card in self._cards.values():
+            if not self._matches_group_filter(self._effective_group(card), group_filter):
+                continue
+            if not self._matches_company_filter(self._effective_company(card), company_filter):
+                continue
+            if card.sprint_id:
+                sprint_ids.add(card.sprint_id)
+
+        sprints = [self._sprints[sid] for sid in sprint_ids if sid in self._sprints]
+        sprints.sort(key=lambda sprint: ((sprint.version or "").lower(), (sprint.name or "").lower()))
+
+        self.cboSprint.blockSignals(True)
+        self.cboSprint.clear()
+        self.cboSprint.addItem("Todos los sprints", self._ALL_VALUE)
+        for sprint in sprints:
+            if sprint.id is None:
+                continue
+            self.cboSprint.addItem(self._sprint_label(sprint), sprint.id)
+        target = self._ALL_VALUE if previous in (None, self._ALL_VALUE) else previous
+        index = self.cboSprint.findData(target)
+        if index < 0:
+            index = 0
+        self.cboSprint.setCurrentIndex(index)
+        self.cboSprint.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _current_group_filter(self) -> Optional[str]:
+        value = self.cboGroup.currentData()
+        if value == self._ALL_VALUE:
+            return None
+        return value
+
+    # ------------------------------------------------------------------
+    def _current_company_filter(self) -> Optional[object]:
+        value = self.cboCompany.currentData()
+        if value == self._ALL_VALUE:
+            return None
+        return value
+
+    # ------------------------------------------------------------------
+    def _current_status_filter(self) -> Optional[str]:
+        value = self.cboStatus.currentData()
+        if value == self._ALL_VALUE:
+            return None
+        return value
+
+    # ------------------------------------------------------------------
+    def _current_sprint_filter(self) -> Optional[int]:
+        value = self.cboSprint.currentData()
+        if value == self._ALL_VALUE:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    # ------------------------------------------------------------------
+    def _matches_group_filter(self, value: Optional[str], group_filter: Optional[str]) -> bool:
+        normalized = (value or "").strip() or None
+        if group_filter is None:
+            return True
+        if group_filter == self._NONE_VALUE:
+            return normalized is None
+        return normalized == group_filter
+
+    # ------------------------------------------------------------------
+    def _matches_company_filter(
+        self,
+        value: Optional[object],
+        company_filter: Optional[object],
+    ) -> bool:
+        normalized = self._normalize_company_id(value)
+        if company_filter is None:
+            return True
+        if company_filter == self._NONE_VALUE:
+            return normalized is None
+        try:
+            return normalized == int(company_filter)
+        except (TypeError, ValueError):
+            return False
+
+    # ------------------------------------------------------------------
+    def _normalize_company_id(self, value: Optional[object]) -> Optional[int]:
+        if value in (None, "", 0):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    # ------------------------------------------------------------------
+    def _effective_group(self, card: Card) -> Optional[str]:
+        if card.group_name:
+            return card.group_name
+        sprint = self._sprints.get(card.sprint_id)
+        return sprint.group_name if sprint else None
+
+    # ------------------------------------------------------------------
+    def _effective_company(self, card: Card) -> Optional[int]:
+        if card.company_id not in (None, ""):
+            return self._normalize_company_id(card.company_id)
+        sprint = self._sprints.get(card.sprint_id)
+        if sprint:
+            return self._normalize_company_id(sprint.company_id)
+        return None
+
+    # ------------------------------------------------------------------
+    def _company_name(self, company_id: Optional[int]) -> str:
+        normalized = self._normalize_company_id(company_id)
+        if normalized is None:
+            return ""
+        company = self._companies.get(normalized)
+        if company:
+            return company.name
+        return f"Empresa #{normalized}"
+
+    # ------------------------------------------------------------------
+    def _sprint_label(self, sprint: Optional[Sprint]) -> str:
+        if not sprint:
+            return ""
+        label = sprint.version or ""
+        if sprint.name:
+            if label:
+                label += " — "
+            label += sprint.name
+        return label or f"Sprint #{sprint.id}" if sprint.id else ""
+
+    # ------------------------------------------------------------------
+    def _apply_filters(self) -> None:
+        cards = self._filtered_cards()
+        self._populate_tree(cards)
+
+    # ------------------------------------------------------------------
+    def _filtered_cards(self) -> List[Card]:
+        group_filter = self._current_group_filter()
+        company_filter = self._current_company_filter()
+        status_filter = self._current_status_filter()
+        sprint_filter = self._current_sprint_filter()
+        search = self.txtSearch.text().strip().lower()
+
+        results: List[Card] = []
+        for card in self._cards.values():
+            effective_group = self._effective_group(card)
+            if not self._matches_group_filter(effective_group, group_filter):
+                continue
+            effective_company = self._effective_company(card)
+            if not self._matches_company_filter(effective_company, company_filter):
+                continue
+            if status_filter:
+                status_value = (card.status or "pending").lower()
+                if status_value != status_filter:
+                    continue
+            if sprint_filter and card.sprint_id != sprint_filter:
+                continue
+            if search:
+                sprint = self._sprints.get(card.sprint_id)
+                haystack = " ".join(
+                    filter(
+                        None,
+                        [
+                            card.ticket_id or "",
+                            card.title or "",
+                            effective_group or "",
+                            self._company_name(effective_company),
+                            sprint.version if sprint else "",
+                            sprint.name if sprint else "",
+                            card.assignee or "",
+                            card.qa_assignee or "",
+                        ],
+                    )
+                ).lower()
+                if search not in haystack:
+                    continue
+            results.append(card)
+
+        results.sort(
+            key=lambda card: (
+                (self._sprint_label(self._sprints.get(card.sprint_id)) or "").lower(),
+                (card.ticket_id or "").lower(),
+                (card.title or "").lower(),
+            )
+        )
+        return results
+
+    # ------------------------------------------------------------------
+    def _populate_tree(self, cards: List[Card]) -> None:
+        self.tree.setUpdatesEnabled(False)
+        self.tree.clear()
+        for card in cards:
+            sprint = self._sprints.get(card.sprint_id)
+            group_value = self._effective_group(card) or ""
+            company_name = self._company_name(self._effective_company(card))
+            status_value = (card.status or "pendiente").capitalize()
+            checks = []
+            checks.append("Unit ✔" if card.unit_tests_done else "Unit ✖")
+            checks.append("QA ✔" if card.qa_done else "QA ✖")
+            if card.status and card.status.lower() == "terminated":
+                checks.append("Terminado")
+
+            item = QTreeWidgetItem()
+            if card.ticket_id and card.title:
+                item.setText(0, f"{card.ticket_id} — {card.title}")
+            elif card.title:
+                item.setText(0, card.title)
+            else:
+                item.setText(0, card.ticket_id or "(sin título)")
+            item.setText(1, self._sprint_label(sprint) if sprint else "")
+            item.setText(2, group_value)
+            item.setText(3, company_name)
+            item.setText(4, card.assignee or "")
+            item.setText(5, card.qa_assignee or "")
+            item.setText(6, status_value)
+            item.setText(7, " / ".join(checks))
+            if card.id is not None:
+                item.setData(0, Qt.UserRole, card.id)
+            self.tree.addTopLevelItem(item)
+        self.tree.setUpdatesEnabled(True)
+        self.tree.resizeColumnToContents(0)
+        self.tree.resizeColumnToContents(1)
+
+    # ------------------------------------------------------------------
+    def _on_item_activated(self, item: QTreeWidgetItem, _: int) -> None:
+        if not item:
+            return
+        card_id = item.data(0, Qt.UserRole)
+        if card_id is None:
+            return
+        try:
+            value = int(card_id)
+        except (TypeError, ValueError):
+            return
+        self.cardActivated.emit(value)
+
+    # ------------------------------------------------------------------
+    def _on_group_filter_changed(self) -> None:
+        prev_company = self._current_company_filter()
+        prev_sprint = self._current_sprint_filter()
+        self._update_company_filter_options(prev_company)
+        self._update_sprint_filter_options(prev_sprint)
+        self._apply_filters()
+
+    # ------------------------------------------------------------------
+    def _on_company_filter_changed(self) -> None:
+        prev_sprint = self._current_sprint_filter()
+        self._update_sprint_filter_options(prev_sprint)
+        self._apply_filters()
 
     # ------------------------------------------------------------------
     def _on_create_branch(self) -> None:

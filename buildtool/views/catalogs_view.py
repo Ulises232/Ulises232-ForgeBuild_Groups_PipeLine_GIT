@@ -78,8 +78,10 @@ class CompanyCatalogView(QWidget):
 
         self.lblCreated = QLabel("-")
         self.lblUpdated = QLabel("-")
+        self.lblNextSprint = QLabel("1")
         form.addRow("Creada por", self.lblCreated)
         form.addRow("Última actualización", self.lblUpdated)
+        form.addRow("Próximo sprint", self.lblNextSprint)
 
         action_row = QHBoxLayout()
         action_row.addStretch(1)
@@ -164,6 +166,7 @@ class CompanyCatalogView(QWidget):
         self._set_group(None)
         self.lblCreated.setText("-")
         self.lblUpdated.setText("-")
+        self.lblNextSprint.setText("1")
         self.txtName.setFocus()
 
     # ------------------------------------------------------------------
@@ -179,6 +182,7 @@ class CompanyCatalogView(QWidget):
         self._set_group(company.group_name)
         self.lblCreated.setText(self._format_meta(company.created_by, company.created_at))
         self.lblUpdated.setText(self._format_meta(company.updated_by, company.updated_at))
+        self.lblNextSprint.setText(str(company.next_sprint_number or 1))
 
     # ------------------------------------------------------------------
     def _cancel(self) -> None:
@@ -205,13 +209,14 @@ class CompanyCatalogView(QWidget):
                 id=base_company.id if base_company else self._current_id,
                 name=name,
                 group_name=group_key,
+                next_sprint_number=base_company.next_sprint_number if base_company else 1,
                 created_at=base_company.created_at if base_company else 0,
                 created_by=base_company.created_by if base_company else current_username(""),
                 updated_at=base_company.updated_at if base_company else 0,
                 updated_by=base_company.updated_by if base_company else current_username(""),
             )
         else:
-            company = Company(id=None, name=name, group_name=group_key)
+            company = Company(id=None, name=name, group_name=group_key, next_sprint_number=1)
         try:
             saved = save_company(company)
         except Exception as exc:  # pragma: no cover - errores de conexión

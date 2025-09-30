@@ -5,6 +5,7 @@ import logging
 import os
 import queue
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
@@ -60,11 +61,13 @@ SPRINT_COLUMNS = [
     "id",
     "branch_key",
     "qa_branch_key",
+    "group_name",
     "name",
     "version",
     "lead_user",
     "qa_user",
     "company_id",
+    "company_sequence",
     "description",
     "status",
     "closed_at",
@@ -83,6 +86,7 @@ CARD_COLUMNS = [
     "title",
     "ticket_id",
     "branch",
+    "group_name",
     "assignee",
     "qa_assignee",
     "description",
@@ -95,6 +99,9 @@ CARD_COLUMNS = [
     "unit_tests_at",
     "qa_at",
     "status",
+    "company_id",
+    "closed_at",
+    "closed_by",
     "branch_created_by",
     "branch_created_at",
     "created_at",
@@ -108,6 +115,7 @@ COMPANY_COLUMNS = [
     "id",
     "name",
     "group_name",
+    "next_sprint_number",
     "created_at",
     "created_by",
     "updated_at",
@@ -120,10 +128,13 @@ CREATE TABLE {if_not_exists}{table} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     branch_key TEXT NOT NULL DEFAULT '',
     qa_branch_key TEXT,
+    group_name TEXT,
     name TEXT NOT NULL DEFAULT '',
     version TEXT NOT NULL DEFAULT '',
     lead_user TEXT,
     qa_user TEXT,
+    company_id INTEGER,
+    company_sequence INTEGER,
     description TEXT,
     status TEXT NOT NULL DEFAULT 'open',
     closed_at INTEGER,
@@ -144,6 +155,7 @@ CREATE TABLE {if_not_exists}{table} (
     title TEXT NOT NULL DEFAULT '',
     ticket_id TEXT,
     branch TEXT NOT NULL DEFAULT '',
+    group_name TEXT,
     assignee TEXT,
     qa_assignee TEXT,
     description TEXT,
@@ -156,6 +168,9 @@ CREATE TABLE {if_not_exists}{table} (
     unit_tests_at INTEGER,
     qa_at INTEGER,
     status TEXT DEFAULT 'pending',
+    company_id INTEGER,
+    closed_at INTEGER,
+    closed_by TEXT,
     branch_created_by TEXT,
     branch_created_at INTEGER,
     created_at INTEGER NOT NULL DEFAULT 0,
@@ -197,11 +212,13 @@ def _normalize_sprint(payload: dict) -> Dict[str, object]:
         "id": payload.get("id"),
         "branch_key": payload.get("branch_key") or "",
         "qa_branch_key": payload.get("qa_branch_key") or None,
+        "group_name": payload.get("group_name") or None,
         "name": payload.get("name") or "",
         "version": payload.get("version") or "",
         "lead_user": payload.get("lead_user"),
         "qa_user": payload.get("qa_user"),
         "company_id": payload.get("company_id"),
+        "company_sequence": payload.get("company_sequence"),
         "description": payload.get("description") or "",
         "status": (payload.get("status") or "open").lower(),
         "closed_at": int(payload.get("closed_at") or 0) or None,
@@ -217,11 +234,18 @@ def _normalize_sprint(payload: dict) -> Dict[str, object]:
         data["qa_branch_key"] = data["qa_branch_key"].strip() or None
     if data["qa_branch_key"] in ("", None):
         data["qa_branch_key"] = None
+    if isinstance(data["group_name"], str):
+        data["group_name"] = data["group_name"].strip() or None
     company_id = data.get("company_id")
     try:
         data["company_id"] = int(company_id) if company_id not in (None, "") else None
     except (TypeError, ValueError):
         data["company_id"] = None
+    sequence = data.get("company_sequence")
+    try:
+        data["company_sequence"] = int(sequence) if sequence not in (None, "") else None
+    except (TypeError, ValueError):
+        data["company_sequence"] = None
     return data
 
 
@@ -233,6 +257,7 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
         "title": payload.get("title") or "",
         "ticket_id": payload.get("ticket_id") or "",
         "branch": payload.get("branch") or "",
+        "group_name": payload.get("group_name") or None,
         "assignee": payload.get("assignee"),
         "qa_assignee": payload.get("qa_assignee"),
         "description": payload.get("description") or "",
@@ -245,6 +270,9 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
         "unit_tests_at": int(payload.get("unit_tests_at") or 0) or None,
         "qa_at": int(payload.get("qa_at") or 0) or None,
         "status": payload.get("status") or "pending",
+        "company_id": payload.get("company_id"),
+        "closed_at": int(payload.get("closed_at") or 0) or None,
+        "closed_by": payload.get("closed_by"),
         "branch_created_by": payload.get("branch_created_by"),
         "branch_created_at": int(payload.get("branch_created_at") or 0) or None,
         "created_at": int(payload.get("created_at") or 0),
@@ -254,6 +282,13 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
     }
     if data["id"] in ("", None):
         data["id"] = None
+    if isinstance(data["group_name"], str):
+        data["group_name"] = data["group_name"].strip() or None
+    company_id = data.get("company_id")
+    try:
+        data["company_id"] = int(company_id) if company_id not in (None, "") else None
+    except (TypeError, ValueError):
+        data["company_id"] = None
     return data
 
 
@@ -282,6 +317,7 @@ def _normalize_company(payload: dict) -> Dict[str, object]:
         "id": payload.get("id"),
         "name": (payload.get("name") or "").strip(),
         "group_name": (payload.get("group_name") or "").strip() or None,
+        "next_sprint_number": payload.get("next_sprint_number"),
         "created_at": int(payload.get("created_at") or 0),
         "created_by": payload.get("created_by"),
         "updated_at": int(payload.get("updated_at") or 0),
@@ -289,6 +325,13 @@ def _normalize_company(payload: dict) -> Dict[str, object]:
     }
     if data["id"] in ("", None):
         data["id"] = None
+    sequence = data.get("next_sprint_number")
+    try:
+        data["next_sprint_number"] = int(sequence) if sequence not in (None, "") else 1
+    except (TypeError, ValueError):
+        data["next_sprint_number"] = 1
+    if data["next_sprint_number"] <= 0:
+        data["next_sprint_number"] = 1
     return data
 
 
@@ -300,10 +343,12 @@ class Sprint:
     branch_key: str
     name: str
     version: str
+    group_name: Optional[str] = None
     qa_branch_key: Optional[str] = None
     lead_user: Optional[str] = None
     qa_user: Optional[str] = None
     company_id: Optional[int] = None
+    company_sequence: Optional[int] = None
     description: str = ""
     status: str = "open"
     closed_at: Optional[int] = None
@@ -324,6 +369,7 @@ class Card:
     title: str = ""
     ticket_id: str = ""
     branch: str = ""
+    group_name: Optional[str] = None
     assignee: Optional[str] = None
     qa_assignee: Optional[str] = None
     description: str = ""
@@ -336,6 +382,9 @@ class Card:
     unit_tests_at: Optional[int] = None
     qa_at: Optional[int] = None
     status: str = "pending"
+    company_id: Optional[int] = None
+    closed_at: Optional[int] = None
+    closed_by: Optional[str] = None
     branch_created_by: Optional[str] = None
     branch_created_at: Optional[int] = None
     created_at: int = 0
@@ -374,6 +423,7 @@ class Company:
     id: Optional[int]
     name: str
     group_name: Optional[str] = None
+    next_sprint_number: int = 1
     created_at: int = 0
     created_by: Optional[str] = None
     updated_at: int = 0
@@ -543,11 +593,13 @@ class _SqlServerBranchHistory:
                     id INT IDENTITY(1,1) PRIMARY KEY,
                     branch_key NVARCHAR(512) NOT NULL DEFAULT '',
                     qa_branch_key NVARCHAR(512) NULL,
+                    group_name NVARCHAR(255) NULL,
                     name NVARCHAR(255) NOT NULL DEFAULT '',
                     version NVARCHAR(128) NOT NULL DEFAULT '',
                     lead_user NVARCHAR(255) NULL,
                     qa_user NVARCHAR(255) NULL,
                     company_id INT NULL,
+                    company_sequence INT NULL,
                     description NVARCHAR(MAX) NULL,
                     status NVARCHAR(32) NOT NULL DEFAULT 'open',
                     closed_at BIGINT NULL,
@@ -569,6 +621,7 @@ class _SqlServerBranchHistory:
                     title NVARCHAR(255) NOT NULL DEFAULT '',
                     ticket_id NVARCHAR(128) NULL,
                     branch NVARCHAR(255) NOT NULL DEFAULT '',
+                    group_name NVARCHAR(255) NULL,
                     assignee NVARCHAR(255) NULL,
                     qa_assignee NVARCHAR(255) NULL,
                     description NVARCHAR(MAX) NULL,
@@ -581,6 +634,9 @@ class _SqlServerBranchHistory:
                     unit_tests_at BIGINT NULL,
                     qa_at BIGINT NULL,
                     status NVARCHAR(32) NOT NULL DEFAULT 'pending',
+                    company_id INT NULL,
+                    closed_at BIGINT NULL,
+                    closed_by NVARCHAR(255) NULL,
                     branch_created_by NVARCHAR(255) NULL,
                     branch_created_at BIGINT NULL,
                     created_at BIGINT NOT NULL DEFAULT 0,
@@ -588,6 +644,53 @@ class _SqlServerBranchHistory:
                     updated_at BIGINT NOT NULL DEFAULT 0,
                     updated_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'card_sprint_links')
+            BEGIN
+                CREATE TABLE card_sprint_links (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    card_id INT NOT NULL,
+                    sprint_id INT NOT NULL,
+                    assigned_at BIGINT NOT NULL DEFAULT 0,
+                    assigned_by NVARCHAR(255) NULL,
+                    unassigned_at BIGINT NULL,
+                    unassigned_by NVARCHAR(255) NULL,
+                    CONSTRAINT fk_card_sprint_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'card_company_links')
+            BEGIN
+                CREATE TABLE card_company_links (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    card_id INT NOT NULL,
+                    company_id INT NOT NULL,
+                    linked_at BIGINT NOT NULL DEFAULT 0,
+                    linked_by NVARCHAR(255) NULL,
+                    unlinked_at BIGINT NULL,
+                    unlinked_by NVARCHAR(255) NULL,
+                    CONSTRAINT fk_card_company_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_card_company_company FOREIGN KEY (company_id) REFERENCES catalog_companies(id) ON DELETE CASCADE
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'card_branch_links')
+            BEGIN
+                CREATE TABLE card_branch_links (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    card_id INT NOT NULL,
+                    branch_key NVARCHAR(512) NOT NULL,
+                    linked_at BIGINT NOT NULL DEFAULT 0,
+                    linked_by NVARCHAR(255) NULL,
+                    unlinked_at BIGINT NULL,
+                    unlinked_by NVARCHAR(255) NULL,
+                    CONSTRAINT fk_card_branch_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
                 );
             END
             """,
@@ -692,6 +795,18 @@ class _SqlServerBranchHistory:
             IF COL_LENGTH('sprints', 'company_id') IS NULL
             BEGIN
                 ALTER TABLE sprints ADD company_id INT NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('sprints', 'group_name') IS NULL
+            BEGIN
+                ALTER TABLE sprints ADD group_name NVARCHAR(255) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('sprints', 'company_sequence') IS NULL
+            BEGIN
+                ALTER TABLE sprints ADD company_sequence INT NULL;
             END
             """,
             """
@@ -815,6 +930,80 @@ class _SqlServerBranchHistory:
             )
             BEGIN
                 CREATE INDEX idx_cards_branch ON cards(branch);
+            END
+            """,
+            """
+            IF NOT EXISTS (
+                SELECT name FROM sys.indexes WHERE name = 'idx_card_sprint_active'
+                    AND object_id = OBJECT_ID('card_sprint_links')
+            )
+            BEGIN
+                CREATE INDEX idx_card_sprint_active ON card_sprint_links(card_id, unassigned_at);
+            END
+            """,
+            """
+            IF NOT EXISTS (
+                SELECT name FROM sys.indexes WHERE name = 'idx_card_sprint_by_sprint'
+                    AND object_id = OBJECT_ID('card_sprint_links')
+            )
+            BEGIN
+                CREATE INDEX idx_card_sprint_by_sprint ON card_sprint_links(sprint_id, unassigned_at);
+            END
+            """,
+            """
+            IF NOT EXISTS (
+                SELECT name FROM sys.indexes WHERE name = 'idx_card_company_active'
+                    AND object_id = OBJECT_ID('card_company_links')
+            )
+            BEGIN
+                CREATE INDEX idx_card_company_active ON card_company_links(card_id, unlinked_at);
+            END
+            """,
+            """
+            IF NOT EXISTS (
+                SELECT name FROM sys.indexes WHERE name = 'idx_card_branch_active'
+                    AND object_id = OBJECT_ID('card_branch_links')
+            )
+            BEGIN
+                CREATE INDEX idx_card_branch_active ON card_branch_links(card_id, unlinked_at);
+            END
+            """,
+            """
+            IF COL_LENGTH('cards', 'group_name') IS NULL
+            BEGIN
+                ALTER TABLE cards ADD group_name NVARCHAR(255) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('cards', 'company_id') IS NULL
+            BEGIN
+                ALTER TABLE cards ADD company_id INT NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('cards', 'closed_at') IS NULL
+            BEGIN
+                ALTER TABLE cards ADD closed_at BIGINT NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('cards', 'closed_by') IS NULL
+            BEGIN
+                ALTER TABLE cards ADD closed_by NVARCHAR(255) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_companies', 'next_sprint_number') IS NULL
+            BEGIN
+                ALTER TABLE catalog_companies ADD next_sprint_number INT NOT NULL DEFAULT 1;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_companies', 'next_sprint_number') IS NOT NULL
+            BEGIN
+                UPDATE catalog_companies
+                   SET next_sprint_number = 1
+                 WHERE next_sprint_number IS NULL OR next_sprint_number <= 0;
             END
             """,
             """
@@ -1003,6 +1192,131 @@ class _SqlServerBranchHistory:
             row = cursor.fetchone()
             return int(row["id"]) if row and row.get("id") is not None else 0
         return data.get(key_column)
+
+    def _sync_card_links(
+        self,
+        cursor: "pymssql.Cursor",
+        card_id: int,
+        data: Dict[str, object],
+    ) -> None:
+        username = data.get("updated_by") or data.get("created_by")
+        timestamp = int(data.get("updated_at") or data.get("created_at") or time.time())
+        sprint_id = data.get("sprint_id") or None
+        if sprint_id in (0, ""):
+            sprint_id = None
+        company_id = data.get("company_id") or None
+        if company_id in (0, ""):
+            company_id = None
+        branch_key = (data.get("branch_key") or "").strip() or None
+        self._sync_card_sprint_link(cursor, card_id, sprint_id, username, timestamp)
+        self._sync_card_company_link(cursor, card_id, company_id, username, timestamp)
+        self._sync_card_branch_link(cursor, card_id, branch_key, username, timestamp)
+
+    def _sync_card_sprint_link(
+        self,
+        cursor: "pymssql.Cursor",
+        card_id: int,
+        sprint_id: Optional[int],
+        username: Optional[str],
+        timestamp: int,
+    ) -> None:
+        cursor.execute(
+            "SELECT id, sprint_id FROM card_sprint_links WHERE card_id=%s AND unassigned_at IS NULL",
+            (int(card_id),),
+        )
+        rows = cursor.fetchall() or []
+        active_id: Optional[int] = None
+        for row in rows:
+            linked_id = int(row.get("id"))
+            current = int(row.get("sprint_id") or 0) or None
+            if sprint_id is not None and current == sprint_id and active_id is None:
+                active_id = linked_id
+                continue
+            cursor.execute(
+                "UPDATE card_sprint_links SET unassigned_at=%s, unassigned_by=%s WHERE id=%s",
+                (timestamp, username, linked_id),
+            )
+        if sprint_id is None or active_id is not None:
+            return
+        cursor.execute(
+            """
+            INSERT INTO card_sprint_links (
+                card_id, sprint_id, assigned_at, assigned_by
+            ) VALUES (%s, %s, %s, %s)
+            """,
+            (int(card_id), int(sprint_id), timestamp, username),
+        )
+
+    def _sync_card_company_link(
+        self,
+        cursor: "pymssql.Cursor",
+        card_id: int,
+        company_id: Optional[int],
+        username: Optional[str],
+        timestamp: int,
+    ) -> None:
+        cursor.execute(
+            "SELECT id, company_id FROM card_company_links WHERE card_id=%s AND unlinked_at IS NULL",
+            (int(card_id),),
+        )
+        rows = cursor.fetchall() or []
+        active_id: Optional[int] = None
+        for row in rows:
+            linked_id = int(row.get("id"))
+            current = int(row.get("company_id") or 0) or None
+            if company_id is not None and current == company_id and active_id is None:
+                active_id = linked_id
+                continue
+            cursor.execute(
+                "UPDATE card_company_links SET unlinked_at=%s, unlinked_by=%s WHERE id=%s",
+                (timestamp, username, linked_id),
+            )
+        if company_id is None or active_id is not None:
+            return
+        cursor.execute(
+            """
+            INSERT INTO card_company_links (
+                card_id, company_id, linked_at, linked_by
+            ) VALUES (%s, %s, %s, %s)
+            """,
+            (int(card_id), int(company_id), timestamp, username),
+        )
+
+    def _sync_card_branch_link(
+        self,
+        cursor: "pymssql.Cursor",
+        card_id: int,
+        branch_key: Optional[str],
+        username: Optional[str],
+        timestamp: int,
+    ) -> None:
+        cursor.execute(
+            "SELECT id, branch_key FROM card_branch_links WHERE card_id=%s AND unlinked_at IS NULL",
+            (int(card_id),),
+        )
+        rows = cursor.fetchall() or []
+        active_id: Optional[int] = None
+        normalized_branch = (branch_key or "").strip() or None
+        for row in rows:
+            linked_id = int(row.get("id"))
+            current_branch = (row.get("branch_key") or "").strip()
+            if normalized_branch and current_branch == normalized_branch and active_id is None:
+                active_id = linked_id
+                continue
+            cursor.execute(
+                "UPDATE card_branch_links SET unlinked_at=%s, unlinked_by=%s WHERE id=%s",
+                (timestamp, username, linked_id),
+            )
+        if not normalized_branch or active_id is not None:
+            return
+        cursor.execute(
+            """
+            INSERT INTO card_branch_links (
+                card_id, branch_key, linked_at, linked_by
+            ) VALUES (%s, %s, %s, %s)
+            """,
+            (int(card_id), normalized_branch, timestamp, username),
+        )
 
     @staticmethod
     def _quote_identifier(identifier: str) -> str:
@@ -1217,6 +1531,10 @@ class _SqlServerBranchHistory:
         *,
         sprint_ids: Optional[Sequence[int]] = None,
         branches: Optional[Sequence[str]] = None,
+        company_ids: Optional[Sequence[int]] = None,
+        group_names: Optional[Sequence[str]] = None,
+        statuses: Optional[Sequence[str]] = None,
+        include_closed: bool = True,
     ) -> List[dict]:
         sql = "SELECT * FROM cards"
         params: List[object] = []
@@ -1231,6 +1549,25 @@ class _SqlServerBranchHistory:
             placeholders = ",".join("%s" for _ in names)
             clauses.append(f"branch IN ({placeholders})")
             params.extend(names)
+        companies = [int(cid) for cid in (company_ids or []) if cid not in (None, "")]
+        if companies:
+            placeholders = ",".join("%s" for _ in companies)
+            clauses.append(f"company_id IN ({placeholders})")
+            params.extend(companies)
+        groups = [(g or "").strip() for g in (group_names or []) if g is not None]
+        groups = [g for g in groups if g]
+        if groups:
+            placeholders = ",".join("%s" for _ in groups)
+            clauses.append(f"group_name IN ({placeholders})")
+            params.extend(groups)
+        status_list = [(s or "").lower() for s in (statuses or []) if s]
+        status_list = [s for s in status_list if s]
+        if status_list:
+            placeholders = ",".join("%s" for _ in status_list)
+            clauses.append(f"LOWER(status) IN ({placeholders})")
+            params.extend(status_list)
+        if not include_closed:
+            clauses.append("LOWER(status) <> 'terminated'")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC"
@@ -1256,6 +1593,7 @@ class _SqlServerBranchHistory:
             "title",
             "ticket_id",
             "branch",
+            "group_name",
             "assignee",
             "qa_assignee",
             "description",
@@ -1268,6 +1606,9 @@ class _SqlServerBranchHistory:
             "unit_tests_at",
             "qa_at",
             "status",
+            "company_id",
+            "closed_at",
+            "closed_by",
             "branch_created_by",
             "branch_created_at",
             "created_at",
@@ -1277,7 +1618,12 @@ class _SqlServerBranchHistory:
         ]
         with self._connect() as conn:
             cursor = conn.cursor()
-            return self._execute_upsert_generic(cursor, "cards", "id", data, columns)
+            card_id = int(self._execute_upsert_generic(cursor, "cards", "id", data, columns) or 0)
+            if card_id <= 0:
+                card_id = int(data.get("id") or 0)
+            if card_id:
+                self._sync_card_links(cursor, card_id, data)
+            return card_id
 
     def delete_card(self, card_id: int) -> None:
         with self._connect() as conn:
@@ -1483,12 +1829,23 @@ class _SqlServerBranchHistory:
             rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+    def fetch_company(self, company_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM catalog_companies WHERE id=%s",
+                (int(company_id),),
+            )
+            row = cursor.fetchone()
+        return dict(row) if row else None
+
     def upsert_company(self, payload: dict) -> int:
         data = _normalize_company(payload)
         columns = [
             "id",
             "name",
             "group_name",
+            "next_sprint_number",
             "created_at",
             "created_by",
             "updated_at",

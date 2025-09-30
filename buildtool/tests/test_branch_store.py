@@ -161,6 +161,10 @@ class FakeBranchHistory:
         self,
         sprint_ids: list[int] | None = None,
         branches: list[str] | None = None,
+        company_ids: list[int] | None = None,
+        group_names: list[str] | None = None,
+        statuses: list[str] | None = None,
+        include_closed: bool = True,
     ) -> list[dict]:
         rows = list(self.cards.values())
         if sprint_ids:
@@ -172,6 +176,42 @@ class FakeBranchHistory:
                 row
                 for row in rows
                 if row.get("branch") in allowed or row.get("branch_key") in allowed
+            ]
+        if company_ids:
+            normalized_ids = set()
+            allow_null = False
+            for cid in company_ids:
+                if cid in (None, ""):
+                    allow_null = True
+                else:
+                    normalized_ids.add(int(cid))
+            rows = [
+                row
+                for row in rows
+                if (
+                    (row.get("company_id") in (None, "") and allow_null)
+                    or int(row.get("company_id") or 0) in normalized_ids
+                )
+            ]
+        if group_names:
+            allowed = {name.lower() for name in group_names if name is not None}
+            rows = [
+                row
+                for row in rows
+                if (row.get("group_name") or "").lower() in allowed
+            ]
+        if statuses:
+            allowed = {status.lower() for status in statuses if status is not None}
+            rows = [
+                row
+                for row in rows
+                if (row.get("status") or "pending").lower() in allowed
+            ]
+        if not include_closed:
+            rows = [
+                row
+                for row in rows
+                if (row.get("status") or "pending").lower() not in {"closed", "terminated"}
             ]
         return [row.copy() for row in rows]
 
