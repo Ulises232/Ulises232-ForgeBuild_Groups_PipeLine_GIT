@@ -171,6 +171,9 @@ class FakeBranchHistory:
         ident = int(sprint_id)
         self.sprints.pop(ident, None)
         self.sprint_groups.pop(ident, None)
+        for row in self.cards.values():
+            if int(row.get("sprint_id") or 0) == ident:
+                row["sprint_id"] = None
 
     # Cards ------------------------------------------------------------
     def fetch_cards(
@@ -743,6 +746,39 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertEqual(len(refreshed), 1)
         self.assertEqual(refreshed[0].ticket_id, "BUG-123")
         self.assertEqual(refreshed[0].sprint_id, sprint.id)
+
+    def test_delete_sprint_unassigns_cards_instead_of_removing(self) -> None:
+        now = int(time.time())
+        sprint = Sprint(
+            id=None,
+            branch_key="g/proyecto/base",
+            qa_branch_key="g/proyecto/base_QA",
+            name="Sprint activo",
+            version="1.0",
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+        branch_store.upsert_sprint(sprint, path=self.base_path)
+        card = Card(
+            id=None,
+            sprint_id=sprint.id,
+            title="Corrección",
+            ticket_id="BUG-123",
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+        branch_store.upsert_card(card, path=self.base_path)
+
+        branch_store.delete_sprint(sprint.id, path=self.base_path)
+
+        stored = branch_store.list_cards(path=self.base_path)
+        self.assertEqual(len(stored), 1)
+        self.assertIsNone(stored[0].sprint_id)
+        self.assertEqual(stored[0].ticket_id, "BUG-123")
 
 
 if __name__ == "__main__":

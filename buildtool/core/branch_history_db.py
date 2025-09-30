@@ -552,6 +552,15 @@ class _SqlServerBranchHistory:
         with self._pool.connection() as conn:
             yield conn
 
+    def _system_username(self) -> str:
+        for env_key in ("BRANCH_HISTORY_USERNAME", "USERNAME", "USER"):
+            value = os.environ.get(env_key)
+            if value:
+                trimmed = value.strip()
+                if trimmed:
+                    return trimmed
+        return "system"
+
     # ------------------------------------------------------------------
     # inicialización
     def _ensure_schema(self) -> None:
@@ -661,7 +670,7 @@ class _SqlServerBranchHistory:
                     created_by NVARCHAR(255) NULL,
                     updated_at BIGINT NOT NULL DEFAULT 0,
                     updated_by NVARCHAR(255) NULL,
-                    CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+                    CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL
                 );
             END
             """,
@@ -689,7 +698,7 @@ class _SqlServerBranchHistory:
                       AND parent_object_id = OBJECT_ID('cards')
                 )
                     ALTER TABLE cards
-                        ADD CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE;
+                        ADD CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL;
             END
             """,
             """
@@ -698,13 +707,13 @@ class _SqlServerBranchHistory:
                 CREATE TABLE card_sprint_links (
                     id INT IDENTITY(1,1) PRIMARY KEY,
                     card_id INT NOT NULL,
-                    sprint_id INT NOT NULL,
+                    sprint_id INT NULL,
                     assigned_at BIGINT NOT NULL DEFAULT 0,
                     assigned_by NVARCHAR(255) NULL,
                     unassigned_at BIGINT NULL,
                     unassigned_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_card_sprint_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
-                    CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id)
+                    CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL
                 );
             END
             """,
@@ -714,12 +723,13 @@ class _SqlServerBranchHistory:
                 FROM sys.foreign_keys
                 WHERE name = 'fk_card_sprint_sprint'
                   AND parent_object_id = OBJECT_ID('card_sprint_links')
-                  AND delete_referential_action = 1
+                  AND delete_referential_action <> 3
             )
             BEGIN
                 ALTER TABLE card_sprint_links DROP CONSTRAINT fk_card_sprint_sprint;
+                ALTER TABLE card_sprint_links ALTER COLUMN sprint_id INT NULL;
                 ALTER TABLE card_sprint_links
-                    ADD CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id);
+                    ADD CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL;
             END
             """,
             """
@@ -1633,6 +1643,26 @@ class _SqlServerBranchHistory:
     def delete_sprint(self, sprint_id: int) -> None:
         with self._connect() as conn:
             cursor = conn.cursor()
+            timestamp = int(time.time())
+            username = self._system_username()
+            cursor.execute(
+                """
+                UPDATE card_sprint_links
+                   SET unassigned_at=%s,
+                       unassigned_by=%s
+                 WHERE sprint_id=%s
+                   AND unassigned_at IS NULL
+                """,
+                (timestamp, username, int(sprint_id)),
+            )
+            cursor.execute(
+                "UPDATE card_sprint_links SET sprint_id=NULL WHERE sprint_id=%s",
+                (int(sprint_id),),
+            )
+            cursor.execute(
+                "UPDATE cards SET sprint_id=NULL WHERE sprint_id=%s",
+                (int(sprint_id),),
+            )
             cursor.execute("DELETE FROM sprints WHERE id=%s", (int(sprint_id),))
 
     def fetch_cards(

@@ -1095,6 +1095,10 @@ DROP TABLE IF EXISTS groups;
     # ------------------------------------------------------------------
     def delete_sprint(self, sprint_id: int) -> None:
         with sqlite3.connect(self.db_path) as cx:
+            cx.execute(
+                "UPDATE cards SET sprint_id = NULL WHERE sprint_id = ?",
+                (int(sprint_id),),
+            )
             cx.execute("DELETE FROM sprints WHERE id = ?", (int(sprint_id),))
             cx.commit()
 
