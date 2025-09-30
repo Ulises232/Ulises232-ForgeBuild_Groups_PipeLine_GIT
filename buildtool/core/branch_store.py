@@ -9,7 +9,7 @@ import hmac
 import os
 import time
 
-from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role
+from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role, Company
 from .session import current_username
 
 
@@ -292,6 +292,7 @@ def _row_to_sprint(row: dict) -> Sprint:
         qa_branch_key=qa_branch,
         lead_user=row.get("lead_user") or None,
         qa_user=row.get("qa_user") or None,
+        company_id=int(row.get("company_id") or 0) or None,
         description=row.get("description") or "",
         status=(row.get("status") or "open").lower(),
         closed_at=int(row.get("closed_at") or 0) or None,
@@ -331,6 +332,18 @@ def _row_to_card(row: dict) -> Card:
         created_by=row.get("created_by") or "",
         updated_at=int(row.get("updated_at") or 0),
         updated_by=row.get("updated_by") or "",
+    )
+
+
+def _row_to_company(row: dict) -> Company:
+    return Company(
+        id=int(row["id"]) if row.get("id") is not None else None,
+        name=row.get("name") or "",
+        group_name=row.get("group_name") or None,
+        created_at=int(row.get("created_at") or 0),
+        created_by=row.get("created_by") or None,
+        updated_at=int(row.get("updated_at") or 0),
+        updated_by=row.get("updated_by") or None,
     )
 
 
@@ -524,6 +537,7 @@ def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
         "version": sprint.version,
         "lead_user": sprint.lead_user,
         "qa_user": sprint.qa_user,
+        "company_id": sprint.company_id,
         "description": sprint.description,
         "status": sprint.status,
         "closed_at": sprint.closed_at,
@@ -541,6 +555,48 @@ def upsert_sprint(sprint: Sprint, *, path: Optional[Path] = None) -> Sprint:
 def delete_sprint(sprint_id: int, *, path: Optional[Path] = None) -> None:
     base = _resolve_base(path)
     _get_db(base).delete_sprint(int(sprint_id))
+
+
+def list_companies(*, path: Optional[Path] = None) -> List[Company]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_companies()
+    return [_row_to_company(row) for row in rows]
+
+
+def upsert_company(company: Company, *, path: Optional[Path] = None) -> Company:
+    base = _resolve_base(path)
+    now = int(time.time())
+    username = _current_username()
+    company.name = (company.name or "").strip()
+    group_value = (company.group_name or "").strip()
+    company.group_name = group_value or None
+    if company.id is None:
+        if not company.created_at:
+            company.created_at = now
+        company.created_by = company.created_by or username
+    if not company.created_at:
+        company.created_at = now
+    if not company.created_by:
+        company.created_by = username
+    company.updated_at = now
+    company.updated_by = username
+    payload = {
+        "id": company.id,
+        "name": company.name,
+        "group_name": company.group_name,
+        "created_at": company.created_at,
+        "created_by": company.created_by,
+        "updated_at": company.updated_at,
+        "updated_by": company.updated_by,
+    }
+    company_id = _get_db(base).upsert_company(payload)
+    company.id = company_id
+    return company
+
+
+def delete_company(company_id: int, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_company(int(company_id))
 
 
 def list_cards(

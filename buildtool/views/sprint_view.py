@@ -40,6 +40,7 @@ from ..core.branch_store import (
     upsert_card,
     upsert_sprint,
 )
+from ..core.catalog_queries import Company, list_companies as list_company_catalog
 from ..core.config import load_config
 from ..core.git_tasks_local import create_branches_local
 from ..core.pipeline_history import PipelineHistory
@@ -56,6 +57,7 @@ class SprintView(QWidget):
         self._sprints: Dict[int, Sprint] = {}
         self._cards: Dict[int, Card] = {}
         self._branch_index: Dict[str, BranchRecord] = {}
+        self._companies: Dict[int, Company] = {}
         self._users: List[str] = []
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
@@ -125,6 +127,7 @@ class SprintView(QWidget):
                 "Sprint/Tarjeta",
                 "Asignado",
                 "QA",
+                "Empresa",
                 "Checks",
                 "Rama",
                 "Rama QA",
@@ -205,6 +208,9 @@ class SprintView(QWidget):
 
         self.txtSprintVersion = QLineEdit()
         form.addRow("Versión", self.txtSprintVersion)
+
+        self.cboCompany = QComboBox()
+        form.addRow("Empresa", self.cboCompany)
 
         self.cboSprintLead = QComboBox()
         form.addRow("Responsable", self.cboSprintLead)
@@ -453,6 +459,7 @@ class SprintView(QWidget):
         self._sprints.clear()
         self._cards.clear()
         self._branch_index = load_index()
+        self._load_companies()
 
         for sprint in list_sprints():
             if sprint.id is None:
@@ -487,6 +494,29 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
+    def _load_companies(self) -> None:
+        try:
+            companies = list_company_catalog()
+        except Exception as exc:  # pragma: no cover - errores de conexión
+            QMessageBox.warning(
+                self,
+                "Empresas",
+                f"No fue posible cargar el catálogo de empresas: {exc}",
+            )
+            companies = []
+        self._companies = {
+            company.id: company for company in companies if company.id is not None
+        }
+        self._populate_company_combo(None)
+
+    # ------------------------------------------------------------------
+    def _company_name(self, company_id: Optional[int]) -> str:
+        if company_id is None:
+            return ""
+        company = self._companies.get(company_id)
+        return company.name if company else ""
+
+    # ------------------------------------------------------------------
     def _populate_tree(self) -> None:
         self.tree.clear()
         for sprint in sorted(
@@ -499,12 +529,13 @@ class SprintView(QWidget):
             sprint_item.setText(0, sprint_label)
             sprint_item.setText(1, sprint.lead_user or "")
             sprint_item.setText(2, sprint.qa_user or "")
-            sprint_item.setText(3, "Cerrado" if sprint.status == "closed" else "Abierto")
-            sprint_item.setText(4, sprint.branch_key)
-            sprint_item.setText(5, sprint.qa_branch_key or "")
-            sprint_item.setText(6, "-")
+            sprint_item.setText(3, self._company_name(sprint.company_id))
+            sprint_item.setText(4, "Cerrado" if sprint.status == "closed" else "Abierto")
+            sprint_item.setText(5, sprint.branch_key)
+            sprint_item.setText(6, sprint.qa_branch_key or "")
             sprint_item.setText(7, "-")
-            sprint_item.setText(8, sprint.created_by or "")
+            sprint_item.setText(8, "-")
+            sprint_item.setText(9, sprint.created_by or "")
             sprint_item.setData(0, Qt.UserRole, ("sprint", sprint.id))
             self.tree.addTopLevelItem(sprint_item)
 
@@ -533,9 +564,10 @@ class SprintView(QWidget):
         checks.append("Unit ✔" if card.unit_tests_done else "Unit ✖")
         checks.append("QA ✔" if card.qa_done else "QA ✖")
         checks.append("Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖")
-        item.setText(3, " / ".join(checks))
-        item.setText(4, card.branch)
-        item.setText(5, sprint.qa_branch_key or "")
+        item.setText(3, "")
+        item.setText(4, " / ".join(checks))
+        item.setText(5, card.branch)
+        item.setText(6, sprint.qa_branch_key or "")
 
         record = self._branch_record_for_card(card, sprint)
         has_branch = bool((card.branch or "").strip())
@@ -548,9 +580,9 @@ class SprintView(QWidget):
             origin_text = "No" if has_branch else "-"
             creator = card.branch_created_by or ""
 
-        item.setText(6, local_text)
-        item.setText(7, origin_text)
-        item.setText(8, creator or "")
+        item.setText(7, local_text)
+        item.setText(8, origin_text)
+        item.setText(9, creator or "")
         item.setData(0, Qt.UserRole, ("card", card.id))
         parent.addChild(item)
 
@@ -660,6 +692,29 @@ class SprintView(QWidget):
         combo.blockSignals(False)
 
     # ------------------------------------------------------------------
+    def _populate_company_combo(self, selected: Optional[int]) -> None:
+        if not hasattr(self, "cboCompany"):
+            return
+        self.cboCompany.blockSignals(True)
+        self.cboCompany.clear()
+        self.cboCompany.addItem("Sin empresa", None)
+        for company in sorted(
+            self._companies.values(), key=lambda comp: (comp.name or "").lower()
+        ):
+            if company.id is None:
+                continue
+            self.cboCompany.addItem(company.name, company.id)
+        if selected is not None:
+            index = self.cboCompany.findData(selected)
+            if index >= 0:
+                self.cboCompany.setCurrentIndex(index)
+            else:
+                self.cboCompany.setCurrentIndex(0)
+        else:
+            self.cboCompany.setCurrentIndex(0)
+        self.cboCompany.blockSignals(False)
+
+    # ------------------------------------------------------------------
     def _current_user(self) -> str:
         fallback = current_username("")
         if fallback:
@@ -761,6 +816,7 @@ class SprintView(QWidget):
         self.txtSprintQABranch.setText(sprint.qa_branch_key or "")
         self.txtSprintName.setText(sprint.name)
         self.txtSprintVersion.setText(sprint.version)
+        self._populate_company_combo(sprint.company_id)
         self._populate_user_combo(self.cboSprintLead, sprint.lead_user or None)
         self._populate_user_combo(
             self.cboSprintQA,
@@ -1039,6 +1095,11 @@ class SprintView(QWidget):
         sprint.qa_branch_key = qa_branch_key or None
         sprint.name = name
         sprint.version = version
+        company_data = self.cboCompany.currentData() if hasattr(self, "cboCompany") else None
+        try:
+            sprint.company_id = int(company_data) if company_data not in (None, "") else None
+        except (TypeError, ValueError):
+            sprint.company_id = None
         sprint.lead_user = self._combo_value(self.cboSprintLead)
         sprint.qa_user = self._combo_value(self.cboSprintQA)
         sprint.description = sprint.description or ""
@@ -1263,7 +1324,7 @@ class SprintView(QWidget):
                 "QA ✔" if card.qa_done else "QA ✖",
                 "Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖",
             ]
-            current_item.setText(3, " / ".join(card_checks))
+            current_item.setText(4, " / ".join(card_checks))
         self.update_permissions()
         self._cards[card.id] = card
         self.refresh()

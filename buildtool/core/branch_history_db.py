@@ -64,6 +64,7 @@ SPRINT_COLUMNS = [
     "version",
     "lead_user",
     "qa_user",
+    "company_id",
     "description",
     "status",
     "closed_at",
@@ -96,6 +97,17 @@ CARD_COLUMNS = [
     "status",
     "branch_created_by",
     "branch_created_at",
+    "created_at",
+    "created_by",
+    "updated_at",
+    "updated_by",
+]
+
+
+COMPANY_COLUMNS = [
+    "id",
+    "name",
+    "group_name",
     "created_at",
     "created_by",
     "updated_at",
@@ -189,6 +201,7 @@ def _normalize_sprint(payload: dict) -> Dict[str, object]:
         "version": payload.get("version") or "",
         "lead_user": payload.get("lead_user"),
         "qa_user": payload.get("qa_user"),
+        "company_id": payload.get("company_id"),
         "description": payload.get("description") or "",
         "status": (payload.get("status") or "open").lower(),
         "closed_at": int(payload.get("closed_at") or 0) or None,
@@ -204,6 +217,11 @@ def _normalize_sprint(payload: dict) -> Dict[str, object]:
         data["qa_branch_key"] = data["qa_branch_key"].strip() or None
     if data["qa_branch_key"] in ("", None):
         data["qa_branch_key"] = None
+    company_id = data.get("company_id")
+    try:
+        data["company_id"] = int(company_id) if company_id not in (None, "") else None
+    except (TypeError, ValueError):
+        data["company_id"] = None
     return data
 
 
@@ -259,6 +277,21 @@ def _normalize_role(payload: dict) -> Dict[str, object]:
     }
 
 
+def _normalize_company(payload: dict) -> Dict[str, object]:
+    data = {
+        "id": payload.get("id"),
+        "name": (payload.get("name") or "").strip(),
+        "group_name": (payload.get("group_name") or "").strip() or None,
+        "created_at": int(payload.get("created_at") or 0),
+        "created_by": payload.get("created_by"),
+        "updated_at": int(payload.get("updated_at") or 0),
+        "updated_by": payload.get("updated_by"),
+    }
+    if data["id"] in ("", None):
+        data["id"] = None
+    return data
+
+
 @dataclass(slots=True)
 class Sprint:
     """Model representing a sprint/version planning entry."""
@@ -270,6 +303,7 @@ class Sprint:
     qa_branch_key: Optional[str] = None
     lead_user: Optional[str] = None
     qa_user: Optional[str] = None
+    company_id: Optional[int] = None
     description: str = ""
     status: str = "open"
     closed_at: Optional[int] = None
@@ -331,6 +365,19 @@ class Role:
     key: str
     name: str
     description: str = ""
+
+
+@dataclass(slots=True)
+class Company:
+    """Catalog entry representing a company."""
+
+    id: Optional[int]
+    name: str
+    group_name: Optional[str] = None
+    created_at: int = 0
+    created_by: Optional[str] = None
+    updated_at: int = 0
+    updated_by: Optional[str] = None
 
 
 def _parse_sqlserver_dsn(url: str) -> Tuple[Dict[str, Optional[str]], Dict[str, str]]:
@@ -500,6 +547,7 @@ class _SqlServerBranchHistory:
                     version NVARCHAR(128) NOT NULL DEFAULT '',
                     lead_user NVARCHAR(255) NULL,
                     qa_user NVARCHAR(255) NULL,
+                    company_id INT NULL,
                     description NVARCHAR(MAX) NULL,
                     status NVARCHAR(32) NOT NULL DEFAULT 'open',
                     closed_at BIGINT NULL,
@@ -557,6 +605,20 @@ class _SqlServerBranchHistory:
                     password_changed_at BIGINT NULL,
                     require_password_reset BIT NOT NULL DEFAULT 0,
                     active_since BIGINT NULL
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'catalog_companies')
+            BEGIN
+                CREATE TABLE catalog_companies (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    name NVARCHAR(255) NOT NULL UNIQUE,
+                    group_name NVARCHAR(255) NULL,
+                    created_at BIGINT NOT NULL DEFAULT 0,
+                    created_by NVARCHAR(255) NULL,
+                    updated_at BIGINT NOT NULL DEFAULT 0,
+                    updated_by NVARCHAR(255) NULL
                 );
             END
             """,
@@ -624,6 +686,12 @@ class _SqlServerBranchHistory:
             IF COL_LENGTH('users', 'active_since') IS NULL
             BEGIN
                 ALTER TABLE users ADD active_since BIGINT NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('sprints', 'company_id') IS NULL
+            BEGIN
+                ALTER TABLE sprints ADD company_id INT NULL;
             END
             """,
             """
@@ -1125,6 +1193,7 @@ class _SqlServerBranchHistory:
             "version",
             "lead_user",
             "qa_user",
+            "company_id",
             "description",
             "status",
             "closed_at",
@@ -1406,6 +1475,42 @@ class _SqlServerBranchHistory:
                     )
                 except pymssql.IntegrityError:
                     pass
+
+    def fetch_companies(self) -> List[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM catalog_companies ORDER BY name")
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def upsert_company(self, payload: dict) -> int:
+        data = _normalize_company(payload)
+        columns = [
+            "id",
+            "name",
+            "group_name",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            return self._execute_upsert_generic(
+                cursor,
+                "catalog_companies",
+                "id",
+                data,
+                columns,
+            )
+
+    def delete_company(self, company_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM catalog_companies WHERE id=%s",
+                (int(company_id),),
+            )
 
     def prune_activity(self, valid_keys: Iterable[str]) -> None:
         keys = [key for key in valid_keys if key]

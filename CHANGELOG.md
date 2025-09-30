@@ -6,6 +6,14 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ## [Unreleased]
 
+## [1.8.0] - 2025-02-17
+### Añadido
+- Panel de administración con pestañas para usuarios y catálogos accesible a roles de administrador y líder.
+- Catálogo inicial de empresas con captura de nombre, grupo, autor y fechas de actualización reutilizable al planear sprints.
+
+### Cambiado
+- Los sprints almacenan y muestran la empresa asociada tanto en la tabla como en el formulario de edición.
+
 ## [1.7.0] - 2025-02-16
 ### Añadido
 - Tabla `branch_local_users` en SQL Server para registrar la presencia local de cada rama por usuario y exponerla mediante `load_local_states` y nuevas pruebas automatizadas.

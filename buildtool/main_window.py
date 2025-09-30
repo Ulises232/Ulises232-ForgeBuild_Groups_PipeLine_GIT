@@ -20,7 +20,7 @@ from .views.pipeline_view import PipelineView
 from .views.git_view import GitView
 from .views.groups_wizard import GroupsWizard
 from .views.sprint_view import SprintView
-from .views.user_admin import UserAdminView
+from .views.admin_panel import AdminPanelView
 from .ui.icons import get_icon
 from .ui.theme import apply_theme, ThemeMode
 
@@ -28,7 +28,7 @@ from .ui.theme import apply_theme, ThemeMode
 TAB_PIPELINE = "Pipeline"
 TAB_GIT = "Repos (Git)"
 TAB_SPRINTS = "Sprints"
-TAB_USERS = "Usuarios"
+TAB_ADMIN = "Administración"
 
 class MainWindow(QWidget):
     def __init__(self):
@@ -94,7 +94,7 @@ class MainWindow(QWidget):
         self.pipeline = PipelineView(self.cfg, self.reload_config)
         self.git = GitView(self.cfg, self)
         self.sprints = SprintView(self)
-        self.user_admin: Optional[UserAdminView] = None
+        self.admin_panel: Optional[AdminPanelView] = None
         self.tabs.addTab(self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
         self.tabs.addTab(self.git, get_icon("git"), TAB_GIT)
         self.tabs.addTab(self.sprints, get_icon("history"), TAB_SPRINTS)
@@ -111,7 +111,7 @@ class MainWindow(QWidget):
         idx = self.tabs.currentIndex()
         current_title = self.tabs.tabText(idx) if idx >= 0 else None
         for widget in (
-            getattr(self, "user_admin", None),
+            getattr(self, "admin_panel", None),
             getattr(self, "sprints", None),
             getattr(self, "git", None),
             getattr(self, "pipeline", None),
@@ -125,7 +125,7 @@ class MainWindow(QWidget):
         self.pipeline = PipelineView(self.cfg, self.reload_config)
         self.git = GitView(self.cfg, self)
         self.sprints = SprintView(self)
-        self.user_admin = None
+        self.admin_panel = None
         self.tabs.insertTab(0, self.pipeline, get_icon("pipeline"), TAB_PIPELINE)
         self.tabs.insertTab(1, self.git, get_icon("git"), TAB_GIT)
         self.tabs.insertTab(2, self.sprints, get_icon("history"), TAB_SPRINTS)
@@ -139,18 +139,18 @@ class MainWindow(QWidget):
         self.tabs.setCurrentIndex(target_index)
 
     def _ensure_admin_tab(self) -> None:
-        if self.user_admin is not None:
-            tab_index = self.tabs.indexOf(self.user_admin)
-            if tab_index >= 0 and not require_roles("admin"):
+        if self.admin_panel is not None:
+            tab_index = self.tabs.indexOf(self.admin_panel)
+            if tab_index >= 0 and not require_roles("admin", "leader"):
                 self.tabs.removeTab(tab_index)
-                self.user_admin.deleteLater()
-                self.user_admin = None
-        if require_roles("admin"):
-            if self.user_admin is None:
-                self.user_admin = UserAdminView(self)
-                self.tabs.addTab(self.user_admin, get_icon("config"), TAB_USERS)
+                self.admin_panel.deleteLater()
+                self.admin_panel = None
+        if require_roles("admin", "leader"):
+            if self.admin_panel is None:
+                self.admin_panel = AdminPanelView(self)
+                self.tabs.addTab(self.admin_panel, get_icon("config"), TAB_ADMIN)
             else:
-                self.user_admin.reload()
+                self.admin_panel.reload()
 
     def open_groups(self):
         if self._groups_win is None:
