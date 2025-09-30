@@ -424,16 +424,23 @@ class SprintView(QWidget):
         self._users = sorted({user.username for user in users})
         self._user_roles = list_user_roles()
 
-        self._populate_user_combo(self.cboSprintLead, None)
-        self._populate_user_combo(
-            self.cboSprintQA, None, allow_empty=True, required_role="qa"
-        )
-        self._populate_user_combo(
-            self.cboCardAssignee, None, allow_empty=True, required_role="developer"
-        )
-        self._populate_user_combo(
-            self.cboCardQA, None, allow_empty=True, required_role="qa"
-        )
+        if hasattr(self, "cboSprintLead"):
+            self._populate_user_combo(self.cboSprintLead, None)
+        if hasattr(self, "cboSprintQA"):
+            self._populate_user_combo(
+                self.cboSprintQA, None, allow_empty=True, required_role="qa"
+            )
+        if hasattr(self, "cboCardAssignee"):
+            self._populate_user_combo(
+                self.cboCardAssignee,
+                None,
+                allow_empty=True,
+                required_role="developer",
+            )
+        if hasattr(self, "cboCardQA"):
+            self._populate_user_combo(
+                self.cboCardQA, None, allow_empty=True, required_role="qa"
+            )
 
         self._populate_card_sprint_combo(None)
         self._populate_card_group_combo(None)
