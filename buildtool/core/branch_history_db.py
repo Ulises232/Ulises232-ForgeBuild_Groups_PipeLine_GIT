@@ -602,7 +602,6 @@ class _SqlServerBranchHistory:
                     id INT IDENTITY(1,1) PRIMARY KEY,
                     branch_key NVARCHAR(512) NOT NULL DEFAULT '',
                     qa_branch_key NVARCHAR(512) NULL,
-                    group_name NVARCHAR(255) NULL,
                     name NVARCHAR(255) NOT NULL DEFAULT '',
                     version NVARCHAR(128) NOT NULL DEFAULT '',
                     lead_user NVARCHAR(255) NULL,
@@ -617,6 +616,16 @@ class _SqlServerBranchHistory:
                     created_by NVARCHAR(255) NULL,
                     updated_at BIGINT NOT NULL DEFAULT 0,
                     updated_by NVARCHAR(255) NULL
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'sprint_groups')
+            BEGIN
+                CREATE TABLE sprint_groups (
+                    sprint_id INT NOT NULL PRIMARY KEY,
+                    group_name NVARCHAR(255) NOT NULL,
+                    CONSTRAINT fk_sprint_groups_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
                 );
             END
             """,
@@ -848,9 +857,24 @@ class _SqlServerBranchHistory:
             END
             """,
             """
-            IF COL_LENGTH('sprints', 'group_name') IS NULL
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'sprint_groups')
             BEGIN
-                ALTER TABLE sprints ADD group_name NVARCHAR(255) NULL;
+                CREATE TABLE sprint_groups (
+                    sprint_id INT NOT NULL PRIMARY KEY,
+                    group_name NVARCHAR(255) NOT NULL,
+                    CONSTRAINT fk_sprint_groups_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE CASCADE
+                );
+            END
+            IF COL_LENGTH('sprints', 'group_name') IS NOT NULL
+            BEGIN
+                INSERT INTO sprint_groups (sprint_id, group_name)
+                SELECT id, group_name
+                FROM sprints
+                WHERE group_name IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sprint_groups WHERE sprint_groups.sprint_id = sprints.id
+                  );
+                ALTER TABLE sprints DROP COLUMN group_name;
             END
             """,
             """
@@ -1513,14 +1537,14 @@ class _SqlServerBranchHistory:
                 self._insert_ignore_activity(cursor, data)
 
     def fetch_sprints(self, *, branch_keys: Optional[Sequence[str]] = None) -> List[dict]:
-        sql = "SELECT * FROM sprints"
+        sql = "SELECT s.*, g.group_name FROM sprints AS s LEFT JOIN sprint_groups AS g ON g.sprint_id = s.id"
         params: List[str] = []
         keys = [key for key in (branch_keys or []) if key]
         if keys:
             placeholders = ",".join("%s" for _ in keys)
-            sql += f" WHERE branch_key IN ({placeholders})"
+            sql += f" WHERE s.branch_key IN ({placeholders})"
             params.extend(keys)
-        sql += " ORDER BY created_at DESC, id DESC"
+        sql += " ORDER BY s.created_at DESC, s.id DESC"
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(params))
@@ -1530,7 +1554,10 @@ class _SqlServerBranchHistory:
     def fetch_sprint(self, sprint_id: int) -> Optional[dict]:
         with self._connect() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM sprints WHERE id=%s", (int(sprint_id),))
+            cursor.execute(
+                "SELECT s.*, g.group_name FROM sprints AS s LEFT JOIN sprint_groups AS g ON g.sprint_id = s.id WHERE s.id=%s",
+                (int(sprint_id),),
+            )
             row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -1541,7 +1568,7 @@ class _SqlServerBranchHistory:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM sprints WHERE branch_key=%s OR qa_branch_key=%s",
+                "SELECT s.*, g.group_name FROM sprints AS s LEFT JOIN sprint_groups AS g ON g.sprint_id = s.id WHERE s.branch_key=%s OR s.qa_branch_key=%s",
                 (key, key),
             )
             row = cursor.fetchone()
@@ -1549,6 +1576,7 @@ class _SqlServerBranchHistory:
 
     def upsert_sprint(self, payload: dict) -> int:
         data = _normalize_sprint(payload)
+        group_name = data.pop("group_name", None)
         columns = [
             "id",
             "branch_key",
@@ -1569,7 +1597,38 @@ class _SqlServerBranchHistory:
         ]
         with self._connect() as conn:
             cursor = conn.cursor()
-            return self._execute_upsert_generic(cursor, "sprints", "id", data, columns)
+            sprint_id = self._execute_upsert_generic(cursor, "sprints", "id", data, columns)
+            self._update_sprint_group(cursor, sprint_id, group_name)
+            return sprint_id
+
+    def _update_sprint_group(self, cursor, sprint_id: int, group_name: Optional[str]) -> None:
+        if sprint_id is None:
+            return
+        if group_name:
+            cursor.execute(
+                """
+                IF EXISTS (SELECT 1 FROM sprint_groups WHERE sprint_id=%s)
+                BEGIN
+                    UPDATE sprint_groups SET group_name=%s WHERE sprint_id=%s;
+                END
+                ELSE
+                BEGIN
+                    INSERT INTO sprint_groups (sprint_id, group_name) VALUES (%s, %s);
+                END
+                """,
+                (
+                    int(sprint_id),
+                    group_name,
+                    int(sprint_id),
+                    int(sprint_id),
+                    group_name,
+                ),
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM sprint_groups WHERE sprint_id=%s",
+                (int(sprint_id),),
+            )
 
     def delete_sprint(self, sprint_id: int) -> None:
         with self._connect() as conn:
@@ -1585,6 +1644,7 @@ class _SqlServerBranchHistory:
         group_names: Optional[Sequence[str]] = None,
         statuses: Optional[Sequence[str]] = None,
         include_closed: bool = True,
+        without_sprint: bool = False,
     ) -> List[dict]:
         sql = "SELECT * FROM cards"
         params: List[object] = []
@@ -1618,6 +1678,8 @@ class _SqlServerBranchHistory:
             params.extend(status_list)
         if not include_closed:
             clauses.append("LOWER(status) <> 'terminated'")
+        if without_sprint:
+            clauses.append("sprint_id IS NULL")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC"
@@ -1679,6 +1741,22 @@ class _SqlServerBranchHistory:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM cards WHERE id=%s", (int(card_id),))
+
+    def assign_cards_to_sprint(self, sprint_id: int, card_ids: Sequence[int]) -> None:
+        ids = [int(cid) for cid in card_ids if cid not in (None, "")]
+        if not ids:
+            return
+        placeholders = ",".join("%s" for _ in ids)
+        params: List[object] = [int(sprint_id)]
+        params.extend(ids)
+        sql = (
+            "UPDATE cards SET sprint_id=%s WHERE id IN ("
+            + placeholders
+            + ") AND (status IS NULL OR LOWER(status) <> 'terminated')"
+        )
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(sql, tuple(params))
 
     def fetch_users(self) -> List[dict]:
         with self._connect() as conn:

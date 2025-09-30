@@ -6,6 +6,13 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ## [Unreleased]
 
+### Añadido
+- Ventana de edición de sprints con listado reutilizable de tarjetas pendientes por empresa, permitiendo asignar varias al sprint en un solo paso.
+
+### Cambiado
+- La relación entre sprints y grupos se almacena en la tabla `sprint_groups`, migrando los datos existentes y manteniendo la compatibilidad con SQL Server.
+- Los formularios de sprints y tarjetas ahora se muestran en diálogos reutilizables definidos en `editor_forms.py`, facilitando su uso desde otras vistas.
+
 ## [1.8.0] - 2025-02-17
 ### Añadido
 - Panel de administración con pestañas para usuarios y catálogos accesible a roles de administrador y líder.

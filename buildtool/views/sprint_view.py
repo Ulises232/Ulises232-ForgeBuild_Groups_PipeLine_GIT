@@ -11,16 +11,13 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
+    QListWidgetItem,
     QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QSplitter,
-    QStackedWidget,
     QTabWidget,
     QTreeWidget,
     QTreeWidgetItem,
@@ -32,6 +29,7 @@ from ..core.branch_store import (
     BranchRecord,
     Card,
     Sprint,
+    assign_cards_to_sprint,
     delete_card,
     delete_sprint,
     list_cards,
@@ -50,6 +48,8 @@ from ..core.session import current_username, get_active_user, require_roles
 from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
 from .sprint_helpers import filter_users_by_role
 from ..ui.icons import get_icon
+from .editor_forms import CardFormWidget, SprintFormWidget
+from .form_dialogs import FormDialog
 
 class SprintView(QWidget):
     """Single window to manage sprints and cards."""
@@ -76,6 +76,11 @@ class SprintView(QWidget):
         self._sprint_filter_status: Optional[str] = None
         self._card_form_card: Optional[Card] = None
         self._card_form_sprint: Optional[Sprint] = None
+        self._sprint_form_sprint: Optional[Sprint] = None
+        self._unassigned_cards: Dict[int, Card] = {}
+        self._sprint_dialog: Optional[FormDialog] = None
+        self._card_dialog: Optional[FormDialog] = None
+        self._active_form: Optional[str] = None
 
         self._setup_ui()
         self.refresh()
@@ -122,285 +127,125 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
-    def _build_empty_page(self) -> None:
-        container = QWidget()
-        box = QVBoxLayout(container)
-        box.setAlignment(Qt.AlignCenter)
-        label = QLabel("Selecciona un sprint o tarjeta para editar sus detalles.")
-        label.setAlignment(Qt.AlignCenter)
-        label.setWordWrap(True)
-        box.addWidget(label)
-        self.stack.addWidget(container)
-
-    # ------------------------------------------------------------------
-    def _build_planning_tab(self) -> QWidget:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(splitter, 1)
-
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
-
-        action_row = QHBoxLayout()
-        action_row.setContentsMargins(0, 0, 0, 0)
-        action_row.setSpacing(6)
-
-        self.btnNewSprint = QPushButton("Nuevo sprint")
-        self.btnNewSprint.setIcon(get_icon("branch"))
-        action_row.addWidget(self.btnNewSprint)
-
-        self.btnNewCard = QPushButton("Nueva tarjeta")
-        self.btnNewCard.setIcon(get_icon("build"))
-        action_row.addWidget(self.btnNewCard)
-
-        action_row.addStretch(1)
-        left_layout.addLayout(action_row)
-
-        filter_row = QHBoxLayout()
-        filter_row.setContentsMargins(0, 0, 0, 0)
-        filter_row.setSpacing(6)
-        self.cboSprintFilterGroup = QComboBox()
-        self.cboSprintFilterGroup.addItem("Todos los grupos", None)
-        self.cboSprintFilterGroup.currentIndexChanged.connect(self._apply_sprint_filters)
-        filter_row.addWidget(self.cboSprintFilterGroup, 1)
-        self.cboSprintFilterStatus = QComboBox()
-        self.cboSprintFilterStatus.addItem("Todos", None)
-        self.cboSprintFilterStatus.addItem("Abiertos", "open")
-        self.cboSprintFilterStatus.addItem("Cerrados", "closed")
-        self.cboSprintFilterStatus.currentIndexChanged.connect(self._apply_sprint_filters)
-        filter_row.addWidget(self.cboSprintFilterStatus, 1)
-        left_layout.addLayout(filter_row)
-
-        self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(
-            [
-                "Sprint/Tarjeta",
-                "Asignado",
-                "QA",
-                "Empresa",
-                "Checks",
-                "Rama",
-                "Rama QA",
-                "Local",
-                "Origen",
-                "Creada por",
-            ]
-        )
-        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tree.setUniformRowHeights(True)
-        left_layout.addWidget(self.tree, 1)
-
-        splitter.addWidget(left_panel)
-
-        right_panel = QWidget()
-        right_panel.setMinimumWidth(360)
-        right_panel.setMaximumWidth(860)
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(12)
-
-        self.stack = QStackedWidget()
-        right_layout.addWidget(self.stack, 1)
-
-        self._build_empty_page()
-        self._build_sprint_form()
-        self._build_card_form()
-
-        splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 3)
-        splitter.setSizes([860, 520])
-
-        self.btnNewSprint.clicked.connect(self._start_new_sprint)
-        self.btnNewCard.clicked.connect(self._start_new_card)
-        self.tree.itemSelectionChanged.connect(self._on_selection_changed)
-
-        return container
-
-    # ------------------------------------------------------------------
-    def _build_sprint_form(self) -> None:
-        self.pageSprint = QGroupBox("Detalles del sprint")
-        form = QFormLayout(self.pageSprint)
-        form.setLabelAlignment(Qt.AlignRight)
-
-        self.cboSprintGroup = QComboBox()
+    def _create_sprint_form(self) -> SprintFormWidget:
+        form = SprintFormWidget()
+        self.pageSprint = form
+        self.cboSprintGroup = form.cboSprintGroup
         self.cboSprintGroup.currentIndexChanged.connect(self._on_sprint_group_changed)
-        form.addRow("Grupo", self.cboSprintGroup)
-
-        branch_row = QHBoxLayout()
-        self.txtSprintBranch = QLineEdit()
-        self.txtSprintBranch.setReadOnly(True)
-        branch_row.addWidget(self.txtSprintBranch, 1)
-        self.btnPickBranch = QPushButton("Seleccionar rama")
-        self.btnPickBranch.setIcon(get_icon("branch"))
-        branch_row.addWidget(self.btnPickBranch)
-        form.addRow("Rama base", branch_row)
-
-        qa_row = QHBoxLayout()
-        self.txtSprintQABranch = QLineEdit()
-        self.txtSprintQABranch.setReadOnly(True)
-        qa_row.addWidget(self.txtSprintQABranch, 1)
-        self.btnPickQABranch = QPushButton("Seleccionar rama QA")
-        self.btnPickQABranch.setIcon(get_icon("branch"))
-        qa_row.addWidget(self.btnPickQABranch)
-        form.addRow("Rama QA", qa_row)
-
-        self.txtSprintName = QLineEdit()
-        form.addRow("Nombre", self.txtSprintName)
-
-        self.txtSprintVersion = QLineEdit()
-        form.addRow("Versión", self.txtSprintVersion)
-
-        self.cboCompany = QComboBox()
-        self.cboCompany.currentIndexChanged.connect(self._on_company_changed)
-        form.addRow("Empresa", self.cboCompany)
-
-        self.lblSprintSequence = QLabel("Sin empresa")
-        form.addRow("Orden empresa", self.lblSprintSequence)
-
-        self.cboSprintLead = QComboBox()
-        form.addRow("Responsable", self.cboSprintLead)
-
-        self.cboSprintQA = QComboBox()
-        form.addRow("Responsable QA", self.cboSprintQA)
-
-        self.chkSprintClosed = QCheckBox("Sprint finalizado")
-        form.addRow("Estado", self.chkSprintClosed)
-
-        self.lblSprintMeta = QLabel("")
-        self.lblSprintMeta.setWordWrap(True)
-        form.addRow("", self.lblSprintMeta)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch(1)
-        self.btnSprintDelete = QPushButton("Eliminar")
-        self.btnSprintDelete.setIcon(get_icon("delete"))
-        button_row.addWidget(self.btnSprintDelete)
-        self.btnSprintCancel = QPushButton("Cancelar")
-        button_row.addWidget(self.btnSprintCancel)
-        self.btnSprintSave = QPushButton("Guardar")
-        self.btnSprintSave.setIcon(get_icon("save"))
-        button_row.addWidget(self.btnSprintSave)
-        form.addRow("", button_row)
-
+        self.txtSprintBranch = form.txtSprintBranch
+        self.btnPickBranch = form.btnPickBranch
         self.btnPickBranch.clicked.connect(self._on_pick_branch)
+        self.txtSprintQABranch = form.txtSprintQABranch
+        self.btnPickQABranch = form.btnPickQABranch
         self.btnPickQABranch.clicked.connect(self._on_pick_qa_branch)
+        self.txtSprintName = form.txtSprintName
+        self.txtSprintVersion = form.txtSprintVersion
+        self.cboCompany = form.cboCompany
+        self.cboCompany.currentIndexChanged.connect(self._on_company_changed)
+        self.lblSprintSequence = form.lblSprintSequence
+        self.cboSprintLead = form.cboSprintLead
+        self.cboSprintQA = form.cboSprintQA
+        self.chkSprintClosed = form.chkSprintClosed
+        self.lblSprintMeta = form.lblSprintMeta
+        self.btnSprintDelete = form.btnSprintDelete
+        self.btnSprintCancel = form.btnSprintCancel
+        self.btnSprintSave = form.btnSprintSave
+        self.pending_box = form.pending_box
+        self.lstUnassignedCards = form.lstUnassignedCards
+        self.btnAssignCards = form.btnAssignCards
         self.btnSprintSave.clicked.connect(self._on_save_sprint)
         self.btnSprintCancel.clicked.connect(self._on_cancel)
         self.btnSprintDelete.clicked.connect(self._on_delete_sprint)
-
-        self.stack.addWidget(self.pageSprint)
+        self.btnAssignCards.clicked.connect(self._on_assign_pending_cards)
+        return form
 
     # ------------------------------------------------------------------
-    def _build_card_form(self) -> None:
-        self.pageCard = QGroupBox("Detalles de la tarjeta")
-        form = QFormLayout(self.pageCard)
-        form.setLabelAlignment(Qt.AlignRight)
-
-        self.lblCardSprint = QLabel("-")
-        form.addRow("Sprint", self.lblCardSprint)
-
-        self.cboCardSprint = QComboBox()
+    def _create_card_form(self) -> CardFormWidget:
+        form = CardFormWidget()
+        self.pageCard = form
+        self.lblCardSprint = form.lblCardSprint
+        self.cboCardSprint = form.cboCardSprint
         self.cboCardSprint.currentIndexChanged.connect(self._on_card_sprint_changed)
-        form.addRow("Mover a sprint", self.cboCardSprint)
-
-        self.cboCardGroup = QComboBox()
+        self.cboCardGroup = form.cboCardGroup
         self.cboCardGroup.currentIndexChanged.connect(self._on_card_group_changed)
-        form.addRow("Grupo", self.cboCardGroup)
-
-        self.cboCardCompany = QComboBox()
+        self.cboCardCompany = form.cboCardCompany
         self.cboCardCompany.currentIndexChanged.connect(self._on_card_company_changed)
-        form.addRow("Empresa", self.cboCardCompany)
-
-        self.lblCardStatus = QLabel("Pendiente")
-        form.addRow("Estado", self.lblCardStatus)
-
-        self.txtCardTicket = QLineEdit()
-        form.addRow("Ticket", self.txtCardTicket)
+        self.lblCardStatus = form.lblCardStatus
+        self.txtCardTicket = form.txtCardTicket
         self.txtCardTicket.textChanged.connect(self._on_ticket_changed)
-
-        self.txtCardTitle = QLineEdit()
-        form.addRow("Título", self.txtCardTitle)
-
-        branch_row = QHBoxLayout()
-        self.lblCardPrefix = QLabel("")
-        branch_row.addWidget(self.lblCardPrefix)
-        self.txtCardBranch = QLineEdit()
-        branch_row.addWidget(self.txtCardBranch, 1)
-        self.lblCardBranchPreview = QLabel("")
-        branch_row.addWidget(self.lblCardBranchPreview)
-        form.addRow("Rama", branch_row)
+        self.txtCardTitle = form.txtCardTitle
+        self.lblCardPrefix = form.lblCardPrefix
+        self.txtCardBranch = form.txtCardBranch
         self.txtCardBranch.textChanged.connect(self._on_branch_text_changed)
-
-        self.cboCardAssignee = QComboBox()
-        form.addRow("Desarrollador", self.cboCardAssignee)
-
-        self.cboCardQA = QComboBox()
-        form.addRow("QA", self.cboCardQA)
-
-        self.txtCardUnitUrl = QLineEdit()
-        self.txtCardUnitUrl.setPlaceholderText("https://...")
-        form.addRow("Link pruebas unitarias", self.txtCardUnitUrl)
-
-        self.txtCardQAUrl = QLineEdit()
-        self.txtCardQAUrl.setPlaceholderText("https://...")
-        form.addRow("Link QA", self.txtCardQAUrl)
-
-        self.lblCardChecks = QLabel("Pruebas: pendiente | QA: pendiente")
-        form.addRow("Checks", self.lblCardChecks)
-
-        status_row = QHBoxLayout()
-        self.lblCardLocal = QLabel("Local: -")
-        status_row.addWidget(self.lblCardLocal)
-        self.lblCardOrigin = QLabel("Origen: -")
-        status_row.addWidget(self.lblCardOrigin)
-        self.lblCardCreator = QLabel("Creada por: -")
-        status_row.addWidget(self.lblCardCreator)
-        status_row.addStretch(1)
-        form.addRow("Estado de rama", status_row)
-
-        button_row = QHBoxLayout()
-        self.btnCardDelete = QPushButton("Eliminar")
-        self.btnCardDelete.setIcon(get_icon("delete"))
-        button_row.addWidget(self.btnCardDelete)
-        self.btnCardMarkUnit = QPushButton("Marcar pruebas unitarias")
-        self.btnCardMarkUnit.setIcon(get_icon("build"))
-        button_row.addWidget(self.btnCardMarkUnit)
-        self.btnCardMarkQA = QPushButton("Marcar QA")
-        self.btnCardMarkQA.setIcon(get_icon("log"))
-        button_row.addWidget(self.btnCardMarkQA)
-        self.btnCardCreateBranch = QPushButton("Crear rama")
-        self.btnCardCreateBranch.setIcon(get_icon("branch"))
-        button_row.addWidget(self.btnCardCreateBranch)
-        button_row.addStretch(1)
-        self.btnCardCancel = QPushButton("Cancelar")
-        button_row.addWidget(self.btnCardCancel)
-        self.btnCardSave = QPushButton("Guardar")
-        self.btnCardSave.setIcon(get_icon("save"))
-        button_row.addWidget(self.btnCardSave)
-        form.addRow("", button_row)
-
+        self.lblCardBranchPreview = form.lblCardBranchPreview
+        self.cboCardAssignee = form.cboCardAssignee
+        self.cboCardQA = form.cboCardQA
+        self.txtCardUnitUrl = form.txtCardUnitUrl
+        self.txtCardQAUrl = form.txtCardQAUrl
+        self.lblCardChecks = form.lblCardChecks
+        self.lblCardLocal = form.lblCardLocal
+        self.lblCardOrigin = form.lblCardOrigin
+        self.lblCardCreator = form.lblCardCreator
+        self.btnCardDelete = form.btnCardDelete
+        self.btnCardMarkUnit = form.btnCardMarkUnit
+        self.btnCardMarkQA = form.btnCardMarkQA
+        self.btnCardCreateBranch = form.btnCardCreateBranch
+        self.btnCardCancel = form.btnCardCancel
+        self.btnCardSave = form.btnCardSave
         self.btnCardSave.clicked.connect(self._on_save_card)
         self.btnCardCancel.clicked.connect(self._on_cancel)
         self.btnCardDelete.clicked.connect(self._on_delete_card)
         self.btnCardCreateBranch.clicked.connect(self._on_create_branch)
         self.btnCardMarkUnit.clicked.connect(lambda: self._mark_card("unit"))
         self.btnCardMarkQA.clicked.connect(lambda: self._mark_card("qa"))
+        return form
 
-        self.stack.addWidget(self.pageCard)
+    # ------------------------------------------------------------------
+    def _close_sprint_dialog(self) -> None:
+        dialog = self._sprint_dialog
+        if dialog is None:
+            return
+        self._sprint_dialog = None
+        self._unassigned_cards = {}
+        if hasattr(self, "lstUnassignedCards"):
+            self.lstUnassignedCards.clear()
+            self.lstUnassignedCards.setEnabled(False)
+        if hasattr(self, "btnAssignCards"):
+            self.btnAssignCards.setEnabled(False)
+        if hasattr(self, "pending_box"):
+            self.pending_box.setVisible(False)
+        if dialog.isVisible():
+            dialog.close()
+        else:
+            self._on_dialog_closed("sprint")
+
+    # ------------------------------------------------------------------
+    def _close_card_dialog(self) -> None:
+        dialog = self._card_dialog
+        if dialog is None:
+            return
+        self._card_dialog = None
+        if dialog.isVisible():
+            dialog.close()
+        else:
+            self._on_dialog_closed("card")
+
+    # ------------------------------------------------------------------
+    def _on_dialog_closed(self, kind: str) -> None:
+        if kind == "sprint":
+            self._sprint_dialog = None
+        elif kind == "card":
+            self._card_dialog = None
+        if self._active_form == kind:
+            self._active_form = None
+        self.update_permissions()
 
     # ------------------------------------------------------------------
     def update_permissions(self) -> None:
         username = self._current_user()
         can_lead = require_roles("leader")
-        sprint_mode = self.stack.currentWidget() is self.pageSprint
-        card_mode = self.stack.currentWidget() is self.pageCard
+        sprint_mode = self._active_form == "sprint"
+        card_mode = self._active_form == "card"
         card = self._cards.get(self._selected_card_id or -1)
         sprint = None
         if card and card.sprint_id:
@@ -412,11 +257,21 @@ class SprintView(QWidget):
 
         self.btnNewSprint.setEnabled(can_lead)
 
-        self.btnPickBranch.setEnabled(can_lead and sprint_mode)
-        self.btnPickQABranch.setEnabled(can_lead and sprint_mode)
-        self.btnSprintSave.setEnabled(can_lead and sprint_mode)
-        self.btnSprintDelete.setEnabled(can_lead and sprint_mode and self._selected_sprint_id is not None)
-        self.chkSprintClosed.setEnabled(can_lead and sprint_mode)
+        if hasattr(self, 'btnPickBranch'):
+            self.btnPickBranch.setEnabled(can_lead and sprint_mode)
+        if hasattr(self, 'btnPickQABranch'):
+            self.btnPickQABranch.setEnabled(can_lead and sprint_mode)
+        if hasattr(self, 'btnSprintSave'):
+            self.btnSprintSave.setEnabled(can_lead and sprint_mode)
+        if hasattr(self, 'btnSprintDelete'):
+            self.btnSprintDelete.setEnabled(can_lead and sprint_mode and self._selected_sprint_id is not None)
+        if hasattr(self, 'chkSprintClosed'):
+            self.chkSprintClosed.setEnabled(can_lead and sprint_mode)
+        if hasattr(self, 'btnAssignCards'):
+            can_assign = can_lead and sprint_mode and bool(self._unassigned_cards)
+            self.btnAssignCards.setEnabled(can_assign)
+            if hasattr(self, 'lstUnassignedCards'):
+                self.lstUnassignedCards.setEnabled(can_assign)
 
         has_card = card is not None and card.id is not None
         is_card_assignee = bool(card and card.assignee and card.assignee == username)
@@ -424,108 +279,56 @@ class SprintView(QWidget):
         allow_unit_toggle = card_mode and has_card and (can_lead or is_card_assignee)
         allow_qa_toggle = card_mode and has_card and (can_lead or is_card_qa)
 
-        if card and card.unit_tests_done:
-            self.btnCardMarkUnit.setText("Desmarcar pruebas unitarias")
-        else:
-            self.btnCardMarkUnit.setText("Marcar pruebas unitarias")
-        self.btnCardMarkUnit.setEnabled(allow_unit_toggle)
-        if not allow_unit_toggle:
-            if card_mode and not has_card:
-                tooltip = "Guarda la tarjeta antes de actualizar las pruebas unitarias"
-            elif not (can_lead or is_card_assignee):
-                if card and card.assignee:
-                    tooltip = (
-                        "Solo el desarrollador asignado o un líder pueden actualizar las pruebas unitarias"
-                    )
-                else:
-                    tooltip = "Asigna un desarrollador antes de marcar las pruebas unitarias"
+        if hasattr(self, 'btnCardSave'):
+            self.btnCardSave.setEnabled(card_mode and (can_lead or is_card_assignee or is_card_qa))
+        if hasattr(self, 'btnCardDelete'):
+            self.btnCardDelete.setEnabled(can_lead and card_mode and self._selected_card_id is not None)
+        if hasattr(self, 'btnCardCreateBranch'):
+            self.btnCardCreateBranch.setEnabled(card_mode and can_lead)
+
+        if hasattr(self, 'btnCardMarkUnit'):
+            if card and card.unit_tests_done:
+                self.btnCardMarkUnit.setText('Desmarcar pruebas unitarias')
             else:
-                tooltip = ""
-            self.btnCardMarkUnit.setToolTip(tooltip)
-        else:
-            self.btnCardMarkUnit.setToolTip("")
-
-        if card and card.qa_done:
-            self.btnCardMarkQA.setText("Desmarcar QA")
-        else:
-            self.btnCardMarkQA.setText("Marcar QA")
-        self.btnCardMarkQA.setEnabled(allow_qa_toggle)
-        if not allow_qa_toggle:
-            if card_mode and not has_card:
-                tooltip = "Guarda la tarjeta antes de actualizar las pruebas QA"
-            elif not (can_lead or is_card_qa):
-                if card and card.qa_assignee:
-                    tooltip = "Solo la persona asignada en QA o un líder pueden aprobar QA"
+                self.btnCardMarkUnit.setText('Marcar pruebas unitarias')
+            self.btnCardMarkUnit.setEnabled(allow_unit_toggle)
+            if not allow_unit_toggle:
+                if card_mode and not has_card:
+                    tooltip = 'Guarda la tarjeta antes de actualizar las pruebas unitarias'
+                elif not (can_lead or is_card_assignee):
+                    if card and card.assignee:
+                        tooltip = 'Solo el desarrollador asignado o un líder pueden actualizar las pruebas unitarias'
+                    else:
+                        tooltip = 'Asigna un desarrollador antes de marcar las pruebas unitarias'
                 else:
-                    tooltip = "Asigna un responsable de QA antes de marcar la revisión"
+                    tooltip = ''
+                self.btnCardMarkUnit.setToolTip(tooltip)
             else:
-                tooltip = ""
-            self.btnCardMarkQA.setToolTip(tooltip)
-        else:
-            self.btnCardMarkQA.setToolTip("")
+                self.btnCardMarkUnit.setToolTip('')
 
-        can_edit_unit_url = card_mode and (can_lead or is_card_assignee)
-        can_edit_qa_url = card_mode and (can_lead or is_card_qa)
-        self.txtCardUnitUrl.setReadOnly(not can_edit_unit_url)
-        self.txtCardQAUrl.setReadOnly(not can_edit_qa_url)
-        if not can_edit_unit_url:
-            self.txtCardUnitUrl.setToolTip(
-                "Solo el desarrollador asignado o un líder pueden registrar el enlace de pruebas unitarias"
-            )
-        else:
-            self.txtCardUnitUrl.setToolTip("")
-        if not can_edit_qa_url:
-            self.txtCardQAUrl.setToolTip(
-                "Solo la persona asignada en QA o un líder pueden registrar el enlace de pruebas QA"
-            )
-        else:
-            self.txtCardQAUrl.setToolTip("")
+        if hasattr(self, 'btnCardMarkQA'):
+            if card and card.qa_done:
+                self.btnCardMarkQA.setText('Desmarcar QA')
+            else:
+                self.btnCardMarkQA.setText('Marcar QA')
+            self.btnCardMarkQA.setEnabled(allow_qa_toggle)
+            if not allow_qa_toggle:
+                if card_mode and not has_card:
+                    tooltip = 'Guarda la tarjeta antes de actualizar las pruebas QA'
+                elif not (can_lead or is_card_qa):
+                    if card and card.qa_assignee:
+                        tooltip = 'Solo la persona asignada en QA o un líder pueden aprobar QA'
+                    else:
+                        tooltip = 'Asigna un responsable de QA antes de marcar la revisión'
+                else:
+                    tooltip = ''
+                self.btnCardMarkQA.setToolTip(tooltip)
+            else:
+                self.btnCardMarkQA.setToolTip('')
 
-        branch_name = self._full_branch_name() if card_mode else ""
-        branch_ready = card_mode and bool(branch_name) and sprint is not None
-        branch_record = None
-        if sprint and branch_ready:
-            branch_record = self._branch_record_for_name(sprint, branch_name)
-        branch_exists = bool(
-            branch_record and (branch_record.has_local_copy() or branch_record.exists_origin)
-        )
-        sprint_closed = bool(sprint and sprint.status == "closed")
-        allow_branch_create = (
-            card_mode
-            and has_card
-            and branch_ready
-            and not branch_exists
-            and not sprint_closed
-            and (can_lead or is_card_assignee)
-        )
-        branch_tooltip = ""
-        if not allow_branch_create:
-            if not card_mode:
-                branch_tooltip = ""
-            elif not has_card:
-                branch_tooltip = "Guarda la tarjeta antes de crear la rama"
-            elif not sprint:
-                branch_tooltip = "Asigna la tarjeta a un sprint antes de crear la rama"
-            elif sprint_closed:
-                branch_tooltip = "El sprint está finalizado; no se pueden crear nuevas ramas"
-            elif not (can_lead or is_card_assignee):
-                branch_tooltip = (
-                    "Solo el desarrollador asignado o un líder pueden crear la rama de la tarjeta"
-                )
-            elif not branch_ready:
-                branch_tooltip = "Completa el ticket y el nombre de la rama para crearla"
-            elif branch_exists:
-                branch_tooltip = (
-                    "La rama ya existe. Si se eliminó localmente, sincroniza el historial para recrearla"
-                )
-            elif sprint and not self._effective_sprint_branch_key(sprint):
-                branch_tooltip = "Configura la rama QA del sprint antes de crear ramas de tarjeta"
-        self.btnCardCreateBranch.setEnabled(allow_branch_create)
-        self.btnCardCreateBranch.setToolTip(branch_tooltip)
-
-        if hasattr(self, "card_browser"):
-            can_create_cards = require_roles("leader", "developer")
-            self.card_browser.set_new_card_enabled(bool(can_create_cards))
+        if hasattr(self, 'cboCardSprint'):
+            enabled = card_mode and (card is None or (card.status or '').lower() != 'terminated')
+            self.cboCardSprint.setEnabled(enabled)
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -828,7 +631,8 @@ class SprintView(QWidget):
         if self._selected_sprint_id and self._selected_sprint_id in self._sprints:
             self._select_tree_item("sprint", self._selected_sprint_id)
             return
-        self.stack.setCurrentIndex(0)
+        self._close_sprint_dialog()
+        self._close_card_dialog()
 
     # ------------------------------------------------------------------
     def _select_tree_item(self, kind: str, ident: int) -> None:
@@ -903,6 +707,93 @@ class SprintView(QWidget):
         self.cboCompany.blockSignals(False)
 
     # ------------------------------------------------------------------
+    def _populate_unassigned_cards(
+        self, sprint: Optional[Sprint], company_id: Optional[int]
+    ) -> None:
+        if not hasattr(self, "lstUnassignedCards"):
+            return
+        self.lstUnassignedCards.clear()
+        self.lstUnassignedCards.setEnabled(False)
+        self.btnAssignCards.setEnabled(False)
+        self._unassigned_cards = {}
+        if not sprint or sprint.id is None:
+            if hasattr(self, "pending_box"):
+                self.pending_box.setVisible(False)
+            return
+        if company_id in (None, ""):
+            if hasattr(self, "pending_box"):
+                self.pending_box.setVisible(False)
+            return
+        try:
+            company_key = int(company_id)
+        except (TypeError, ValueError):
+            return
+        try:
+            pending = list_cards(
+                company_ids=[company_key],
+                without_sprint=True,
+                include_closed=False,
+            )
+        except Exception:
+            pending = []
+        group_key = sprint.group_name or None
+        if group_key:
+            pending = [card for card in pending if (card.group_name or None) == group_key]
+        for card in pending:
+            if card.id is None:
+                continue
+            title = card.title or ""
+            ticket = card.ticket_id or ""
+            if ticket and title:
+                label = f"{ticket} — {title}"
+            else:
+                label = ticket or title or f"Tarjeta #{card.id}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, int(card.id))
+            self.lstUnassignedCards.addItem(item)
+            self._unassigned_cards[int(card.id)] = card
+        is_open = (sprint.status or "open").lower() != "closed"
+        has_items = bool(self._unassigned_cards)
+        self.lstUnassignedCards.setEnabled(is_open and has_items)
+        self.btnAssignCards.setEnabled(is_open and has_items)
+        if hasattr(self, "pending_box"):
+            self.pending_box.setVisible(bool(self._unassigned_cards))
+
+    # ------------------------------------------------------------------
+    def _on_assign_pending_cards(self) -> None:
+        if not hasattr(self, "lstUnassignedCards") or not hasattr(self, "btnAssignCards"):
+            return
+        if self._selected_sprint_id is None:
+            QMessageBox.information(self, "Sprint", "Guarda el sprint antes de asignar tarjetas.")
+            return
+        selected_items = self.lstUnassignedCards.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "Sprint", "Selecciona al menos una tarjeta pendiente.")
+            return
+        card_ids: List[int] = []
+        for item in selected_items:
+            card_id = item.data(Qt.UserRole)
+            if card_id in (None, ""):
+                continue
+            try:
+                card_ids.append(int(card_id))
+            except (TypeError, ValueError):
+                continue
+        if not card_ids:
+            QMessageBox.warning(self, "Sprint", "Las tarjetas seleccionadas ya no son válidas.")
+            return
+        try:
+            assign_cards_to_sprint(int(self._selected_sprint_id), card_ids)
+        except Exception as exc:
+            QMessageBox.critical(self, "Sprint", f"No se pudieron asignar las tarjetas: {exc}")
+            return
+        self.refresh()
+        sprint = self._sprints.get(self._selected_sprint_id) if self._selected_sprint_id else None
+        if sprint:
+            self._show_sprint_form(sprint)
+            self._select_tree_item("sprint", sprint.id)
+
+    # ------------------------------------------------------------------
     def _apply_sprint_filters(self) -> None:
         if hasattr(self, "cboSprintFilterGroup"):
             self._sprint_filter_group = self.cboSprintFilterGroup.currentData()
@@ -945,7 +836,11 @@ class SprintView(QWidget):
         group_key = self._current_sprint_group()
         selected_company = self.cboCompany.currentData() if hasattr(self, "cboCompany") else None
         self._populate_company_combo(selected_company, group_key)
-        self._update_sprint_sequence_label(None, self.cboCompany.currentData() if hasattr(self, "cboCompany") else None)
+        if self._sprint_form_sprint:
+            self._sprint_form_sprint.group_name = group_key
+        company_value = self.cboCompany.currentData() if hasattr(self, "cboCompany") else None
+        self._update_sprint_sequence_label(None, company_value)
+        self._populate_unassigned_cards(self._sprint_form_sprint, company_value)
 
     # ------------------------------------------------------------------
     def _on_company_changed(self) -> None:
@@ -954,7 +849,13 @@ class SprintView(QWidget):
             company = self._companies.get(int(company_id))
             if company and company.group_name and not self._current_sprint_group():
                 self._set_sprint_group(company.group_name)
+        if self._sprint_form_sprint:
+            try:
+                self._sprint_form_sprint.company_id = int(company_id) if company_id not in (None, "") else None
+            except (TypeError, ValueError):
+                self._sprint_form_sprint.company_id = None
         self._update_sprint_sequence_label(None, company_id)
+        self._populate_unassigned_cards(self._sprint_form_sprint, company_id)
 
     # ------------------------------------------------------------------
     def _update_sprint_sequence_label(
@@ -1191,7 +1092,8 @@ class SprintView(QWidget):
         if not item:
             self._selected_card_id = None
             self._selected_sprint_id = None
-            self.stack.setCurrentIndex(0)
+            self._close_sprint_dialog()
+            self._close_card_dialog()
             self.update_permissions()
             return
 
@@ -1311,13 +1213,19 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _show_sprint_form(self, sprint: Sprint, new: bool = False) -> None:
-        self.stack.setCurrentWidget(self.pageSprint)
+        self._close_card_dialog()
+        self._close_sprint_dialog()
+        form = self._create_sprint_form()
+        dialog = FormDialog(self, 'Sprint', form)
+        dialog.destroyed.connect(lambda _=None, kind='sprint': self._on_dialog_closed(kind))
+        self._sprint_dialog = dialog
+        self._active_form = 'sprint'
         self._current_sprint_branch_key = sprint.branch_key
         self._current_sprint_qa_branch_key = sprint.qa_branch_key or None
         self._populate_group_combo(sprint.group_name)
         self._set_sprint_group(sprint.group_name)
         self.txtSprintBranch.setText(sprint.branch_key)
-        self.txtSprintQABranch.setText(sprint.qa_branch_key or "")
+        self.txtSprintQABranch.setText(sprint.qa_branch_key or '')
         self.txtSprintName.setText(sprint.name)
         self.txtSprintVersion.setText(sprint.version)
         self._populate_company_combo(sprint.company_id, sprint.group_name)
@@ -1327,21 +1235,25 @@ class SprintView(QWidget):
             self.cboSprintQA,
             sprint.qa_user or None,
             allow_empty=True,
-            required_role="qa",
+            required_role='qa',
         )
-        self.chkSprintClosed.setChecked(sprint.status == "closed")
-        meta_lines = []
+        self.chkSprintClosed.setChecked(sprint.status == 'closed')
+        meta_lines: list[str] = []
         if sprint.created_by:
-            meta_lines.append(f"Creado por {sprint.created_by}")
-        if sprint.status == "closed" and sprint.closed_by:
-            meta_lines.append(f"Finalizado por {sprint.closed_by}")
-        self.lblSprintMeta.setText("\n".join(meta_lines))
+            meta_lines.append(f'Creado por {sprint.created_by}')
+        if sprint.status == 'closed' and sprint.closed_by:
+            meta_lines.append(f'Finalizado por {sprint.closed_by}')
+        self.lblSprintMeta.setText('\n'.join(meta_lines))
         self._selected_sprint_id = sprint.id
         self._selected_card_id = None
+        self._sprint_form_sprint = sprint
+        self._populate_unassigned_cards(sprint, sprint.company_id)
         if new:
             self.lblSprintMeta.clear()
-            self._update_sprint_sequence_label(None, self.cboCompany.currentData())
+            company_id = self.cboCompany.currentData() if hasattr(self, 'cboCompany') else None
+            self._update_sprint_sequence_label(None, company_id)
         self._update_new_card_button()
+        dialog.show()
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -1373,14 +1285,20 @@ class SprintView(QWidget):
     def _show_card_form(
         self, card: Card, sprint: Optional[Sprint], new: bool = False
     ) -> None:
-        self.stack.setCurrentWidget(self.pageCard)
+        self._close_sprint_dialog()
+        self._close_card_dialog()
+        form = self._create_card_form()
+        dialog = FormDialog(self, 'Tarjeta', form)
+        dialog.destroyed.connect(lambda _=None, kind='card': self._on_dialog_closed(kind))
+        self._card_dialog = dialog
+        self._active_form = 'card'
         self._card_form_card = card
         self._card_form_sprint = sprint
         self.lblCardSprint.setText(self._card_sprint_label(sprint, card))
 
         target_sprint_id: Optional[int] = None
         try:
-            if getattr(card, "sprint_id", None) not in (None, ""):
+            if getattr(card, 'sprint_id', None) not in (None, ''):
                 target_sprint_id = int(card.sprint_id)
         except (TypeError, ValueError):
             target_sprint_id = None
@@ -1410,47 +1328,48 @@ class SprintView(QWidget):
             self._set_card_company(company_value)
         else:
             self._set_card_company(None)
-        self.lblCardStatus.setText((card.status or "pendiente").capitalize())
-        self.cboCardSprint.setEnabled((card.status or "").lower() != "terminated")
+        self.lblCardStatus.setText((card.status or 'pendiente').capitalize())
+        self.cboCardSprint.setEnabled((card.status or '').lower() != 'terminated')
         self.txtCardTicket.blockSignals(True)
-        self.txtCardTicket.setText(card.ticket_id or "")
+        self.txtCardTicket.setText(card.ticket_id or '')
         self.txtCardTicket.blockSignals(False)
-        self.txtCardTitle.setText(card.title or "")
+        self.txtCardTitle.setText(card.title or '')
         self._prepare_branch_inputs(card, sprint)
         self._populate_user_combo(
             self.cboCardAssignee,
             card.assignee or None,
             allow_empty=True,
-            required_role="developer",
+            required_role='developer',
         )
         self._populate_user_combo(
             self.cboCardQA,
             card.qa_assignee or None,
             allow_empty=True,
-            required_role="qa",
+            required_role='qa',
         )
-        self.txtCardUnitUrl.setText(card.unit_tests_url or "")
-        self.txtCardQAUrl.setText(card.qa_url or "")
+        self.txtCardUnitUrl.setText(card.unit_tests_url or '')
+        self.txtCardQAUrl.setText(card.qa_url or '')
         checks = []
-        checks.append("Pruebas: ✔" if card.unit_tests_done else "Pruebas: pendiente")
-        checks.append("QA: ✔" if card.qa_done else "QA: pendiente")
-        self.lblCardChecks.setText(" | ".join(checks))
+        checks.append('Pruebas: ✔' if card.unit_tests_done else 'Pruebas: pendiente')
+        checks.append('QA: ✔' if card.qa_done else 'QA: pendiente')
+        self.lblCardChecks.setText(' | '.join(checks))
         record = self._branch_record_for_card(card, sprint)
         if record:
-            self.lblCardLocal.setText("Local: Sí" if record.has_local_copy() else "Local: No")
-            self.lblCardOrigin.setText("Origen: Sí" if record.exists_origin else "Origen: No")
+            self.lblCardLocal.setText('Local: Sí' if record.has_local_copy() else 'Local: No')
+            self.lblCardOrigin.setText('Origen: Sí' if record.exists_origin else 'Origen: No')
         else:
-            self.lblCardLocal.setText("Local: -")
-            self.lblCardOrigin.setText("Origen: -")
-        creator = card.branch_created_by or (record.last_updated_by if record else "")
+            self.lblCardLocal.setText('Local: -')
+            self.lblCardOrigin.setText('Origen: -')
+        creator = card.branch_created_by or (record.last_updated_by if record else '')
         if not creator and record:
             creator = record.created_by
         self.lblCardCreator.setText(f"Creada por: {creator or '-'}")
         self._selected_card_id = card.id
         self._card_parent_id = target_sprint_id
         if new:
-            self.lblCardCreator.setText("Creada por: -")
+            self.lblCardCreator.setText('Creada por: -')
         self._update_branch_preview()
+        dialog.show()
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -1483,7 +1402,7 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_branch_text_changed(self) -> None:
-        if self.stack.currentWidget() is not self.pageCard:
+        if self._active_form != "card":
             return
         text = self.txtCardBranch.text().strip()
         if self._branch_override and not text:
@@ -1493,7 +1412,7 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_ticket_changed(self) -> None:
-        if self.stack.currentWidget() is not self.pageCard:
+        if self._active_form != "card":
             return
         self._update_branch_preview()
         self.update_permissions()
@@ -1813,7 +1732,8 @@ class SprintView(QWidget):
         self._selected_sprint_id = None
         self._selected_card_id = None
         self.refresh()
-        self.stack.setCurrentIndex(0)
+        self._close_sprint_dialog()
+        self._close_card_dialog()
 
     # ------------------------------------------------------------------
     def _full_branch_name(self) -> str:
@@ -1949,13 +1869,14 @@ class SprintView(QWidget):
             return
         delete_card(card.id)
         self._selected_card_id = None
+        self._close_card_dialog()
         self.refresh()
-        self.stack.setCurrentIndex(0)
 
     # ------------------------------------------------------------------
     def _on_cancel(self) -> None:
         self.tree.clearSelection()
-        self.stack.setCurrentIndex(0)
+        self._close_sprint_dialog()
+        self._close_card_dialog()
         self._current_sprint_branch_key = None
         self._current_sprint_qa_branch_key = None
         self.update_permissions()

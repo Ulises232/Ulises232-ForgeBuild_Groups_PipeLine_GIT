@@ -711,6 +711,7 @@ def list_cards(
     group_names: Optional[Iterable[str]] = None,
     statuses: Optional[Iterable[str]] = None,
     include_closed: bool = True,
+    without_sprint: bool = False,
     path: Optional[Path] = None,
 ) -> List[Card]:
     base = _resolve_base(path)
@@ -726,6 +727,7 @@ def list_cards(
         group_names=group_list,
         statuses=status_list,
         include_closed=include_closed,
+        without_sprint=without_sprint,
     )
     return [_row_to_card(row) for row in rows]
 
@@ -878,6 +880,16 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
 def delete_card(card_id: int, *, path: Optional[Path] = None) -> None:
     base = _resolve_base(path)
     _get_db(base).delete_card(int(card_id))
+
+
+def assign_cards_to_sprint(
+    sprint_id: int, card_ids: Iterable[int], *, path: Optional[Path] = None
+) -> None:
+    base = _resolve_base(path)
+    ids = [int(cid) for cid in card_ids if cid not in (None, "")]
+    if not ids:
+        return
+    _get_db(base).assign_cards_to_sprint(int(sprint_id), ids)
 
 
 # ---------------- users & roles -----------------

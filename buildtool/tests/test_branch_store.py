@@ -20,6 +20,7 @@ class FakeBranchHistory:
         self.branch_local_users: dict[tuple[str, str], dict] = {}
         self.activity_rows: list[dict] = []
         self.sprints: dict[int, dict] = {}
+        self.sprint_groups: dict[int, str | None] = {}
         self.cards: dict[int, dict] = {}
         self.users: dict[str, dict] = {}
         self.roles: dict[str, dict] = {}
@@ -129,16 +130,27 @@ class FakeBranchHistory:
                 for row in rows
                 if row.get("branch_key") in allowed or row.get("qa_branch_key") in allowed
             ]
-        return [row.copy() for row in rows]
+        result: list[dict] = []
+        for row in rows:
+            entry = row.copy()
+            entry["group_name"] = self.sprint_groups.get(entry.get("id"))
+            result.append(entry)
+        return result
 
     def fetch_sprint(self, sprint_id: int) -> dict | None:
         row = self.sprints.get(int(sprint_id))
-        return row.copy() if row else None
+        if not row:
+            return None
+        entry = row.copy()
+        entry["group_name"] = self.sprint_groups.get(entry.get("id"))
+        return entry
 
     def fetch_sprint_by_branch_key(self, branch_key: str) -> dict | None:
         for row in self.sprints.values():
             if row.get("branch_key") == branch_key or row.get("qa_branch_key") == branch_key:
-                return row.copy()
+                entry = row.copy()
+                entry["group_name"] = self.sprint_groups.get(entry.get("id"))
+                return entry
         return None
 
     def upsert_sprint(self, payload: dict) -> int:
@@ -149,12 +161,16 @@ class FakeBranchHistory:
             ident = self.next_sprint_id
             self.next_sprint_id += 1
         stored = payload.copy()
+        group_name = stored.pop("group_name", None)
         stored["id"] = ident
         self.sprints[ident] = stored
+        self.sprint_groups[ident] = group_name
         return ident
 
     def delete_sprint(self, sprint_id: int) -> None:
-        self.sprints.pop(int(sprint_id), None)
+        ident = int(sprint_id)
+        self.sprints.pop(ident, None)
+        self.sprint_groups.pop(ident, None)
 
     # Cards ------------------------------------------------------------
     def fetch_cards(
@@ -165,6 +181,7 @@ class FakeBranchHistory:
         group_names: list[str] | None = None,
         statuses: list[str] | None = None,
         include_closed: bool = True,
+        without_sprint: bool = False,
     ) -> list[dict]:
         rows = list(self.cards.values())
         if sprint_ids:
@@ -221,6 +238,8 @@ class FakeBranchHistory:
                 for row in rows
                 if (row.get("status") or "pending").lower() not in {"closed", "terminated"}
             ]
+        if without_sprint:
+            rows = [row for row in rows if row.get("sprint_id") in (None, "")]
         return [row.copy() for row in rows]
 
     def upsert_card(self, payload: dict) -> int:
@@ -237,6 +256,15 @@ class FakeBranchHistory:
 
     def delete_card(self, card_id: int) -> None:
         self.cards.pop(int(card_id), None)
+
+    def assign_cards_to_sprint(self, sprint_id: int, card_ids: list[int]) -> None:
+        for cid in card_ids:
+            row = self.cards.get(int(cid))
+            if not row:
+                continue
+            if (row.get("status") or "").lower() == "terminated":
+                continue
+            row["sprint_id"] = int(sprint_id)
 
     # Users & roles ----------------------------------------------------
     def fetch_users(self) -> list[dict]:
@@ -661,6 +689,60 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertIsNotNone(found)
         if found:
             self.assertEqual(found.id, sprint.id)
+
+    def test_assign_cards_to_sprint_from_pending(self) -> None:
+        now = int(time.time())
+        sprint = Sprint(
+            id=None,
+            branch_key="g/proyecto/base",
+            qa_branch_key="g/proyecto/base_QA",
+            name="Sprint activo",
+            version="1.0",
+            company_id=42,
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+        branch_store.upsert_sprint(sprint, path=self.base_path)
+        pending = Card(
+            id=None,
+            sprint_id=None,
+            title="Corrección",
+            ticket_id="BUG-123",
+            group_name="grupo",
+            company_id=42,
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+        branch_store.upsert_card(pending, path=self.base_path)
+        other = Card(
+            id=None,
+            sprint_id=None,
+            title="Otro",
+            ticket_id="BUG-456",
+            group_name="otro",
+            company_id=99,
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+        branch_store.upsert_card(other, path=self.base_path)
+
+        pending_cards = branch_store.list_cards(
+            company_ids=[42], without_sprint=True, include_closed=False, path=self.base_path
+        )
+        self.assertEqual(len(pending_cards), 1)
+        self.assertEqual(pending_cards[0].ticket_id, "BUG-123")
+
+        branch_store.assign_cards_to_sprint(sprint.id, [pending.id], path=self.base_path)
+        refreshed = branch_store.list_cards(path=self.base_path, sprint_ids=[sprint.id])
+        self.assertEqual(len(refreshed), 1)
+        self.assertEqual(refreshed[0].ticket_id, "BUG-123")
+        self.assertEqual(refreshed[0].sprint_id, sprint.id)
 
 
 if __name__ == "__main__":
