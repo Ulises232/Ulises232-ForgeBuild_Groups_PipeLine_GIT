@@ -60,7 +60,7 @@ from ..core.pipeline_history import PipelineHistory
 from ..core.session import current_username, get_active_user, require_roles
 from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
 from .sprint_helpers import filter_users_by_role
-from ..ui.color_utils import incidence_brushes
+from ..ui.color_utils import status_brushes
 from ..ui.icons import get_icon
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
@@ -77,8 +77,6 @@ class SprintView(QWidget):
         self._companies_by_group: Dict[Optional[str], List[Company]] = {}
         self._incidence_types: Dict[int, IncidenceType] = {}
         self._incidence_icons: Dict[int, QIcon] = {}
-        self._incidence_brushes: Dict[int, QBrush] = {}
-        self._incidence_foregrounds: Dict[int, QBrush] = {}
         self._users: List[str] = []
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
@@ -561,8 +559,6 @@ class SprintView(QWidget):
                 self._companies,
                 self._incidence_types,
                 self._incidence_icons,
-                self._incidence_brushes,
-                self._incidence_foregrounds,
             )
         self.update_permissions()
 
@@ -602,8 +598,6 @@ class SprintView(QWidget):
             types = []
         mapping: Dict[int, IncidenceType] = {}
         icons: Dict[int, QIcon] = {}
-        brushes: Dict[int, QBrush] = {}
-        foregrounds: Dict[int, QBrush] = {}
         for entry in types:
             if entry.id is None:
                 continue
@@ -611,15 +605,8 @@ class SprintView(QWidget):
             icon = self._build_incidence_icon(entry)
             if icon and not icon.isNull():
                 icons[entry.id] = icon
-            background, foreground = incidence_brushes(getattr(entry, "color", None))
-            if background:
-                brushes[entry.id] = background
-            if foreground:
-                foregrounds[entry.id] = foreground
         self._incidence_types = mapping
         self._incidence_icons = icons
-        self._incidence_brushes = brushes
-        self._incidence_foregrounds = foregrounds
         self._populate_card_incidence_combo(None)
 
     # ------------------------------------------------------------------
@@ -774,24 +761,30 @@ class SprintView(QWidget):
         item.setText(9, origin_text)
         item.setText(10, creator or "")
         item.setData(0, Qt.UserRole, ("card", card.id))
-        self._apply_incidence_style(item, incidence)
+        self._apply_card_style(item, card, incidence)
         parent.addChild(item)
 
     # ------------------------------------------------------------------
-    def _apply_incidence_style(
-        self, item: QTreeWidgetItem, incidence: Optional[IncidenceType]
+    def _apply_card_style(
+        self,
+        item: QTreeWidgetItem,
+        card: Card,
+        incidence: Optional[IncidenceType],
     ) -> None:
         icon = QIcon()
-        background = None
-        foreground = None
         if incidence and incidence.id is not None:
             icon = self._incidence_icons.get(int(incidence.id), QIcon())
-            background = self._incidence_brushes.get(int(incidence.id))
-            foreground = self._incidence_foregrounds.get(int(incidence.id))
         if icon and not icon.isNull():
             item.setIcon(1, icon)
         else:
             item.setIcon(1, QIcon())
+
+        background = None
+        foreground = None
+        status_value = getattr(card, "status", None)
+        if isinstance(status_value, str):
+            background, foreground = status_brushes(status_value)
+
         for column in range(item.columnCount()):
             if background:
                 item.setBackground(column, background)
@@ -2326,8 +2319,6 @@ class CardBrowser(QWidget):
         self._companies: Dict[int, Company] = {}
         self._incidence_types: Dict[int, IncidenceType] = {}
         self._incidence_icons: Dict[int, QIcon] = {}
-        self._incidence_brushes: Dict[int, QBrush] = {}
-        self._incidence_foregrounds: Dict[int, QBrush] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -2501,8 +2492,6 @@ class CardBrowser(QWidget):
         companies: Dict[int, Company],
         incidence_types: Dict[int, IncidenceType] | None = None,
         incidence_icons: Dict[int, QIcon] | None = None,
-        incidence_brushes: Dict[int, QBrush] | None = None,
-        incidence_foregrounds: Dict[int, QBrush] | None = None,
     ) -> None:
         prev_group = self._current_group_filter()
         prev_company = self._current_company_filter()
@@ -2515,8 +2504,6 @@ class CardBrowser(QWidget):
         self._companies = dict(companies)
         self._incidence_types = dict(incidence_types or {})
         self._incidence_icons = dict(incidence_icons or {})
-        self._incidence_brushes = dict(incidence_brushes or {})
-        self._incidence_foregrounds = dict(incidence_foregrounds or {})
 
         self._update_group_filter_options(prev_group)
         self._update_status_filter_options(prev_status)
@@ -2911,27 +2898,33 @@ class CardBrowser(QWidget):
             item.setText(8, " / ".join(checks))
             if card.id is not None:
                 item.setData(0, Qt.UserRole, card.id)
-            self._apply_incidence_style(item, incidence)
+            self._apply_card_style(item, card, incidence)
             self.tree.addTopLevelItem(item)
         self.tree.setUpdatesEnabled(True)
         self.tree.resizeColumnToContents(0)
         self.tree.resizeColumnToContents(1)
 
     # ------------------------------------------------------------------
-    def _apply_incidence_style(
-        self, item: QTreeWidgetItem, incidence: Optional[IncidenceType]
+    def _apply_card_style(
+        self,
+        item: QTreeWidgetItem,
+        card: Card,
+        incidence: Optional[IncidenceType],
     ) -> None:
         icon = QIcon()
-        background = None
-        foreground = None
         if incidence and incidence.id is not None:
             icon = self._incidence_icons.get(int(incidence.id), QIcon())
-            background = self._incidence_brushes.get(int(incidence.id))
-            foreground = self._incidence_foregrounds.get(int(incidence.id))
         if icon and not icon.isNull():
             item.setIcon(1, icon)
         else:
             item.setIcon(1, QIcon())
+
+        background = None
+        foreground = None
+        status_value = getattr(card, "status", None)
+        if isinstance(status_value, str):
+            background, foreground = status_brushes(status_value)
+
         for column in range(item.columnCount()):
             if background:
                 item.setBackground(column, background)

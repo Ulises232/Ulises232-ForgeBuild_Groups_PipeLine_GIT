@@ -358,7 +358,6 @@ def _normalize_incidence_type(payload: dict) -> Dict[str, object]:
     data = {
         "id": payload.get("id"),
         "name": (payload.get("name") or "").strip(),
-        "color": (payload.get("color") or "").strip() or None,
         "icon": payload.get("icon"),
         "created_at": int(payload.get("created_at") or 0),
         "created_by": payload.get("created_by"),
@@ -367,9 +366,6 @@ def _normalize_incidence_type(payload: dict) -> Dict[str, object]:
     }
     if data["id"] in ("", None):
         data["id"] = None
-    if data["color"]:
-        color = data["color"].strip()
-        data["color"] = color if color else None
     icon_value = data.get("icon")
     if icon_value is not None and not isinstance(icon_value, (bytes, bytearray)):
         data["icon"] = None
@@ -474,11 +470,10 @@ class Company:
 
 @dataclass(slots=True)
 class IncidenceType:
-    """Catalog entry describing an incident type with presentation metadata."""
+    """Catalog entry describing an incident type."""
 
     id: Optional[int]
     name: str
-    color: Optional[str] = None
     icon: Optional[bytes] = None
     created_at: int = 0
     created_by: Optional[str] = None
@@ -728,7 +723,6 @@ class _SqlServerBranchHistory:
                 CREATE TABLE catalog_incidence_types (
                     id INT IDENTITY(1,1) PRIMARY KEY,
                     name NVARCHAR(255) NOT NULL UNIQUE,
-                    color NVARCHAR(32) NULL,
                     icon VARBINARY(MAX) NULL,
                     created_at BIGINT NOT NULL DEFAULT 0,
                     created_by NVARCHAR(255) NULL,
@@ -1160,9 +1154,9 @@ class _SqlServerBranchHistory:
             END
             """,
             """
-            IF COL_LENGTH('catalog_incidence_types', 'color') IS NULL
+            IF COL_LENGTH('catalog_incidence_types', 'color') IS NOT NULL
             BEGIN
-                ALTER TABLE catalog_incidence_types ADD color NVARCHAR(32) NULL;
+                ALTER TABLE catalog_incidence_types DROP COLUMN color;
             END
             """,
             """
@@ -2155,7 +2149,6 @@ class _SqlServerBranchHistory:
         columns = [
             "id",
             "name",
-            "color",
             "icon",
             "created_at",
             "created_by",

@@ -32,31 +32,38 @@ def _blend_over(color: QColor, base: QColor) -> QColor:
     return blended
 
 
-def parse_color(value: Optional[str]) -> Optional[QColor]:
-    """Return a QColor for *value* or ``None`` when it is invalid."""
+_STATUS_COLORS = {
+    "pending": "#33F2C94C",
+    "pendiente": "#33F2C94C",
+    "unit": "#332B6BE4",
+    "qa": "#33E07A5F",
+    "bloqueado": "#33D66B6B",
+    "merge_en_progreso": "#33378AD7",
+    "merge_ok": "#3321A179",
+    "merge_error": "#33D94F4F",
+    "terminated": "#3321A179",
+    "terminado": "#3321A179",
+}
 
-    if not value:
-        return None
-    color = QColor(value.strip())
+_DEFAULT_STATUS_COLOR = "#19000000"
+
+
+def status_brushes(value: Optional[str]) -> Tuple[Optional[QBrush], Optional[QBrush]]:
+    """Return background/foreground brushes for the given status value."""
+
+    status = (value or "").strip().lower()
+    if not status:
+        return (None, None)
+
+    color_name = _STATUS_COLORS.get(status, _DEFAULT_STATUS_COLOR)
+    color = QColor(color_name)
     if not color.isValid():
-        return None
-    return color
-
-
-def incidence_brushes(value: Optional[str]) -> Tuple[Optional[QBrush], Optional[QBrush]]:
-    """Return background/foreground brushes suited for incidence colors."""
-
-    color = parse_color(value)
-    if color is None:
         return (None, None)
 
     background = QBrush(color)
-
-    # Determine the most legible foreground by blending the color over a
-    # light background and checking relative luminance.
     effective = _blend_over(color, QColor("#ffffff"))
     luminance = _relative_luminance(effective)
-    foreground_color = QColor("#202020") if luminance > 0.55 else QColor("#f0f0f0")
+    foreground_color = QColor("#202020") if luminance > 0.6 else QColor("#f5f5f5")
     foreground = QBrush(foreground_color)
     return (background, foreground)
 

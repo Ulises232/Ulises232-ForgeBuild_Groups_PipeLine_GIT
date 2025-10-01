@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QColorDialog,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -38,7 +37,6 @@ from ..core.catalog_queries import (
 )
 from ..core.config import load_config
 from ..core.session import current_username
-from ..ui.color_utils import incidence_brushes, parse_color
 from ..ui.icons import get_icon
 
 
@@ -328,23 +326,6 @@ class IncidenceCatalogView(QWidget):
         self.txtName.textChanged.connect(self._update_preview_text)
         form.addRow("Nombre", self.txtName)
 
-        color_row = QHBoxLayout()
-        color_row.setContentsMargins(0, 0, 0, 0)
-        color_row.setSpacing(6)
-        self.txtColor = QLineEdit()
-        self.txtColor.setPlaceholderText("#RRGGBB o #AARRGGBB")
-        self.txtColor.textChanged.connect(self._update_color_preview)
-        color_row.addWidget(self.txtColor, 1)
-        self.btnPickColor = QPushButton("Seleccionar color")
-        self.btnPickColor.clicked.connect(self._pick_color)
-        color_row.addWidget(self.btnPickColor)
-        self.lblColorPreview = QLabel("    ")
-        self.lblColorPreview.setMinimumWidth(36)
-        self.lblColorPreview.setFixedHeight(24)
-        self.lblColorPreview.setFrameShape(QLabel.Box)
-        color_row.addWidget(self.lblColorPreview)
-        form.addRow("Color", color_row)
-
         self.previewFrame = QFrame()
         self.previewFrame.setFrameShape(QFrame.StyledPanel)
         self.previewFrame.setStyleSheet("border: 1px dashed palette(mid);")
@@ -432,8 +413,6 @@ class IncidenceCatalogView(QWidget):
         self._current_id = None
         self._current_icon = None
         self.txtName.clear()
-        self.txtColor.clear()
-        self._update_color_preview(None)
         self._update_icon_preview(None)
         self.txtName.setFocus()
         self.btnDelete.setEnabled(False)
@@ -452,8 +431,6 @@ class IncidenceCatalogView(QWidget):
             return
         self._current_id = entry.id
         self.txtName.setText(entry.name or "")
-        self.txtColor.setText(entry.color or "")
-        self._update_color_preview(entry.color)
         icon_value = getattr(entry, "icon", None)
         if isinstance(icon_value, memoryview):
             icon_value = icon_value.tobytes()
@@ -462,24 +439,6 @@ class IncidenceCatalogView(QWidget):
         self._current_icon = icon_value if isinstance(icon_value, (bytes, bytearray)) else None
         self._update_icon_preview(self._current_icon)
         self.btnDelete.setEnabled(self._current_id is not None)
-
-    # ------------------------------------------------------------------
-    def _pick_color(self) -> None:
-        initial_text = self.txtColor.text().strip() or "#ffffff"
-        initial_color = QColor(initial_text)
-        if not initial_color.isValid():
-            initial_color = QColor("#ffffff")
-        dialog = QColorDialog(initial_color, self)
-        dialog.setOption(QColorDialog.ShowAlphaChannel, True)
-        dialog.setWindowTitle("Selecciona un color")
-        if not dialog.exec():
-            return
-        color = dialog.selectedColor()
-        if not color.isValid():
-            return
-        fmt = QColor.HexArgb if color.alpha() < 255 else QColor.HexRgb
-        self.txtColor.setText(color.name(fmt))
-        self._update_color_preview(color.name(fmt))
 
     # ------------------------------------------------------------------
     def _pick_icon(self) -> None:
@@ -507,37 +466,6 @@ class IncidenceCatalogView(QWidget):
     def _clear_icon(self) -> None:
         self._current_icon = None
         self._update_icon_preview(None)
-
-    # ------------------------------------------------------------------
-    def _update_color_preview(self, value: Optional[str]) -> None:
-        color_text = value if isinstance(value, str) else self.txtColor.text()
-        color = parse_color(color_text)
-        background, foreground = incidence_brushes(color_text)
-        if not color or not background:
-            self.lblColorPreview.setStyleSheet("border: 1px solid palette(mid);")
-            self.previewFrame.setStyleSheet("border: 1px dashed palette(mid);")
-            self.lblPreviewText.setStyleSheet("")
-            if self.lblPreviewIcon.pixmap() is None or self.lblPreviewIcon.pixmap().isNull():
-                self.lblPreviewIcon.setStyleSheet("color: palette(windowText);")
-            return
-
-        fmt = QColor.HexArgb if color.alpha() < 255 else QColor.HexRgb
-        color_name = color.name(fmt)
-        self.lblColorPreview.setStyleSheet(
-            f"background-color: {color_name}; border: 1px solid palette(mid);"
-        )
-        self.previewFrame.setStyleSheet(
-            f"background-color: {color_name}; border: 1px solid palette(mid); border-radius: 6px;"
-        )
-        text_color = foreground.color() if foreground else QColor("#202020")
-        text_name = text_color.name(QColor.HexRgb)
-        self.lblPreviewText.setStyleSheet(
-            f"color: {text_name}; font-weight: 600;"
-        )
-        if self.lblPreviewIcon.pixmap() is None or self.lblPreviewIcon.pixmap().isNull():
-            self.lblPreviewIcon.setStyleSheet(
-                f"color: {text_name}; background: transparent;"
-            )
 
     # ------------------------------------------------------------------
     def _update_icon_preview(self, data: Optional[bytes]) -> None:
@@ -581,8 +509,6 @@ class IncidenceCatalogView(QWidget):
         entry = self._types.get(self._current_id)
         if entry:
             self.txtName.setText(entry.name or "")
-            self.txtColor.setText(entry.color or "")
-            self._update_color_preview(entry.color)
             icon_value = getattr(entry, "icon", None)
             if isinstance(icon_value, memoryview):
                 icon_value = icon_value.tobytes()
@@ -600,7 +526,6 @@ class IncidenceCatalogView(QWidget):
         if not name:
             QMessageBox.warning(self, "Tipos de incidencia", "El nombre es obligatorio.")
             return
-        color = (self.txtColor.text().strip() or None)
         icon_data = self._current_icon
 
         if self._current_id is not None:
@@ -608,7 +533,6 @@ class IncidenceCatalogView(QWidget):
             entry = IncidenceType(
                 id=self._current_id,
                 name=name,
-                color=color,
                 icon=icon_data,
                 created_at=base.created_at if base else 0,
                 created_by=base.created_by if base else current_username(""),
@@ -616,7 +540,7 @@ class IncidenceCatalogView(QWidget):
                 updated_by=base.updated_by if base else current_username(""),
             )
         else:
-            entry = IncidenceType(id=None, name=name, color=color, icon=icon_data)
+            entry = IncidenceType(id=None, name=name, icon=icon_data)
 
         try:
             saved = save_incidence_type(entry)

@@ -375,7 +375,6 @@ def _row_to_incidence_type(row: dict) -> IncidenceType:
     return IncidenceType(
         id=int(row["id"]) if row.get("id") is not None else None,
         name=row.get("name") or "",
-        color=row.get("color") or None,
         icon=row.get("icon"),
         created_at=int(row.get("created_at") or 0),
         created_by=row.get("created_by") or None,
@@ -738,7 +737,6 @@ def upsert_incidence_type(
     now = int(time.time())
     username = _current_username()
     entry.name = (entry.name or "").strip()
-    entry.color = (entry.color or "").strip() or None
     if entry.id is None:
         if not entry.created_at:
             entry.created_at = now
@@ -752,7 +750,6 @@ def upsert_incidence_type(
     payload = {
         "id": entry.id,
         "name": entry.name,
-        "color": entry.color,
         "icon": bytes(entry.icon) if isinstance(entry.icon, (bytes, bytearray)) else entry.icon,
         "created_at": entry.created_at,
         "created_by": entry.created_by,

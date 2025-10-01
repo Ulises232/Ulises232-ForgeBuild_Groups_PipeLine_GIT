@@ -144,7 +144,7 @@ class CardImporterTests(unittest.TestCase):
 
         companies = [Company(id=10, name="Acme", group_name="Alpha")]
 
-        types = [IncidenceType(id=5, name="Bug", color="#ff0000")]
+        types = [IncidenceType(id=5, name="Bug")]
 
         summary = apply_card_entries(
             entries,
