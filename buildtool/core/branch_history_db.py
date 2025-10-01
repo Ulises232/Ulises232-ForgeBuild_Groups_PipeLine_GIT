@@ -100,6 +100,7 @@ CARD_COLUMNS = [
     "qa_at",
     "status",
     "company_id",
+    "incidence_type_id",
     "closed_at",
     "closed_by",
     "branch_created_by",
@@ -169,6 +170,7 @@ CREATE TABLE {if_not_exists}{table} (
     qa_at INTEGER,
     status TEXT DEFAULT 'pending',
     company_id INTEGER,
+    incidence_type_id INTEGER,
     closed_at INTEGER,
     closed_by TEXT,
     branch_created_by TEXT,
@@ -280,6 +282,7 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
         "qa_at": int(payload.get("qa_at") or 0) or None,
         "status": payload.get("status") or "pending",
         "company_id": payload.get("company_id"),
+        "incidence_type_id": payload.get("incidence_type_id"),
         "closed_at": int(payload.get("closed_at") or 0) or None,
         "closed_by": payload.get("closed_by"),
         "branch_created_by": payload.get("branch_created_by"),
@@ -298,6 +301,13 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
         data["company_id"] = int(company_id) if company_id not in (None, "") else None
     except (TypeError, ValueError):
         data["company_id"] = None
+    incidence_id = data.get("incidence_type_id")
+    try:
+        data["incidence_type_id"] = (
+            int(incidence_id) if incidence_id not in (None, "") else None
+        )
+    except (TypeError, ValueError):
+        data["incidence_type_id"] = None
     return data
 
 
@@ -341,6 +351,28 @@ def _normalize_company(payload: dict) -> Dict[str, object]:
         data["next_sprint_number"] = 1
     if data["next_sprint_number"] <= 0:
         data["next_sprint_number"] = 1
+    return data
+
+
+def _normalize_incidence_type(payload: dict) -> Dict[str, object]:
+    data = {
+        "id": payload.get("id"),
+        "name": (payload.get("name") or "").strip(),
+        "color": (payload.get("color") or "").strip() or None,
+        "icon": payload.get("icon"),
+        "created_at": int(payload.get("created_at") or 0),
+        "created_by": payload.get("created_by"),
+        "updated_at": int(payload.get("updated_at") or 0),
+        "updated_by": payload.get("updated_by"),
+    }
+    if data["id"] in ("", None):
+        data["id"] = None
+    if data["color"]:
+        color = data["color"].strip()
+        data["color"] = color if color else None
+    icon_value = data.get("icon")
+    if icon_value is not None and not isinstance(icon_value, (bytes, bytearray)):
+        data["icon"] = None
     return data
 
 
@@ -392,6 +424,7 @@ class Card:
     qa_at: Optional[int] = None
     status: str = "pending"
     company_id: Optional[int] = None
+    incidence_type_id: Optional[int] = None
     closed_at: Optional[int] = None
     closed_by: Optional[str] = None
     branch_created_by: Optional[str] = None
@@ -433,6 +466,20 @@ class Company:
     name: str
     group_name: Optional[str] = None
     next_sprint_number: int = 1
+    created_at: int = 0
+    created_by: Optional[str] = None
+    updated_at: int = 0
+    updated_by: Optional[str] = None
+
+
+@dataclass(slots=True)
+class IncidenceType:
+    """Catalog entry describing an incident type with presentation metadata."""
+
+    id: Optional[int]
+    name: str
+    color: Optional[str] = None
+    icon: Optional[bytes] = None
     created_at: int = 0
     created_by: Optional[str] = None
     updated_at: int = 0
@@ -662,6 +709,7 @@ class _SqlServerBranchHistory:
                     qa_at BIGINT NULL,
                     status NVARCHAR(32) NOT NULL DEFAULT 'pending',
                     company_id INT NULL,
+                    incidence_type_id INT NULL,
                     closed_at BIGINT NULL,
                     closed_by NVARCHAR(255) NULL,
                     branch_created_by NVARCHAR(255) NULL,
@@ -671,6 +719,21 @@ class _SqlServerBranchHistory:
                     updated_at BIGINT NOT NULL DEFAULT 0,
                     updated_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_cards_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id) ON DELETE SET NULL
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'catalog_incidence_types')
+            BEGIN
+                CREATE TABLE catalog_incidence_types (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    name NVARCHAR(255) NOT NULL UNIQUE,
+                    color NVARCHAR(32) NULL,
+                    icon VARBINARY(MAX) NULL,
+                    created_at BIGINT NOT NULL DEFAULT 0,
+                    created_by NVARCHAR(255) NULL,
+                    updated_at BIGINT NOT NULL DEFAULT 0,
+                    updated_by NVARCHAR(255) NULL
                 );
             END
             """,
@@ -1065,6 +1128,12 @@ class _SqlServerBranchHistory:
             END
             """,
             """
+            IF COL_LENGTH('cards', 'incidence_type_id') IS NULL
+            BEGIN
+                ALTER TABLE cards ADD incidence_type_id INT NULL;
+            END
+            """,
+            """
             IF COL_LENGTH('cards', 'closed_at') IS NULL
             BEGIN
                 ALTER TABLE cards ADD closed_at BIGINT NULL;
@@ -1088,6 +1157,42 @@ class _SqlServerBranchHistory:
                 UPDATE catalog_companies
                    SET next_sprint_number = 1
                  WHERE next_sprint_number IS NULL OR next_sprint_number <= 0;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_incidence_types', 'color') IS NULL
+            BEGIN
+                ALTER TABLE catalog_incidence_types ADD color NVARCHAR(32) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_incidence_types', 'icon') IS NULL
+            BEGIN
+                ALTER TABLE catalog_incidence_types ADD icon VARBINARY(MAX) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_incidence_types', 'created_at') IS NULL
+            BEGIN
+                ALTER TABLE catalog_incidence_types ADD created_at BIGINT NOT NULL DEFAULT 0;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_incidence_types', 'created_by') IS NULL
+            BEGIN
+                ALTER TABLE catalog_incidence_types ADD created_by NVARCHAR(255) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_incidence_types', 'updated_at') IS NULL
+            BEGIN
+                ALTER TABLE catalog_incidence_types ADD updated_at BIGINT NOT NULL DEFAULT 0;
+            END
+            """,
+            """
+            IF COL_LENGTH('catalog_incidence_types', 'updated_by') IS NULL
+            BEGIN
+                ALTER TABLE catalog_incidence_types ADD updated_by NVARCHAR(255) NULL;
             END
             """,
             """
@@ -1749,6 +1854,7 @@ class _SqlServerBranchHistory:
             "qa_at",
             "status",
             "company_id",
+            "incidence_type_id",
             "closed_at",
             "closed_by",
             "branch_created_by",
@@ -2025,6 +2131,55 @@ class _SqlServerBranchHistory:
             cursor.execute(
                 "DELETE FROM catalog_companies WHERE id=%s",
                 (int(company_id),),
+            )
+
+    def fetch_incidence_types(self) -> List[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM catalog_incidence_types ORDER BY name")
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    def fetch_incidence_type(self, type_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM catalog_incidence_types WHERE id=%s",
+                (int(type_id),),
+            )
+            row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def upsert_incidence_type(self, payload: dict) -> int:
+        data = _normalize_incidence_type(payload)
+        columns = [
+            "id",
+            "name",
+            "color",
+            "icon",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            return int(
+                self._execute_upsert_generic(
+                    cursor,
+                    "catalog_incidence_types",
+                    "id",
+                    data,
+                    columns,
+                )
+            )
+
+    def delete_incidence_type(self, type_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM catalog_incidence_types WHERE id=%s",
+                (int(type_id),),
             )
 
     def prune_activity(self, valid_keys: Iterable[str]) -> None:

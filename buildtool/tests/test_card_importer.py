@@ -9,7 +9,7 @@ from buildtool.core.card_importer import (
     CardImportError,
     apply_card_entries,
 )
-from buildtool.core.branch_history_db import Card, Company
+from buildtool.core.branch_history_db import Card, Company, IncidenceType
 
 
 class CardImporterTests(unittest.TestCase):
@@ -36,6 +36,8 @@ class CardImporterTests(unittest.TestCase):
         self.assertEqual(entry.title, "Primera")
         self.assertIsNone(entry.assignee)
         self.assertEqual(entry.qa_assignee, "qa1")
+        self.assertIsNone(entry.incidence_type_name)
+        self.assertFalse(entry.incidence_type_provided)
 
     def test_load_card_entries_missing_column(self) -> None:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="", suffix=".csv", delete=False) as handle:
@@ -71,6 +73,8 @@ class CardImporterTests(unittest.TestCase):
         self.assertEqual(entry.title, "Título con acento")
         self.assertEqual(entry.assignee, "dév")
         self.assertEqual(entry.qa_assignee, "qa")
+        self.assertIsNone(entry.incidence_type_name)
+        self.assertFalse(entry.incidence_type_provided)
 
     def test_apply_card_entries_creates_and_updates(self) -> None:
         entries = [
@@ -81,6 +85,8 @@ class CardImporterTests(unittest.TestCase):
                 ticket_id="ABC-1",
                 title="Primera tarjeta",
                 assignee="dev1",
+                incidence_type_name="Bug",
+                incidence_type_provided=True,
             ),
             CardImportEntry(
                 row=3,
@@ -138,6 +144,8 @@ class CardImporterTests(unittest.TestCase):
 
         companies = [Company(id=10, name="Acme", group_name="Alpha")]
 
+        types = [IncidenceType(id=5, name="Bug", color="#ff0000")]
+
         summary = apply_card_entries(
             entries,
             username="tester",
@@ -145,6 +153,7 @@ class CardImporterTests(unittest.TestCase):
             list_cards_fn=list_cards_stub,
             upsert_card_fn=upsert_stub,
             list_companies_fn=lambda: companies,
+            list_incidence_types_fn=lambda: types,
         )
 
         self.assertEqual(summary.created, 1)
@@ -159,6 +168,7 @@ class CardImporterTests(unittest.TestCase):
         self.assertEqual(created.company_id, 10)
         self.assertEqual(created.assignee, "dev1")
         self.assertEqual(created.created_by, "tester")
+        self.assertEqual(created.incidence_type_id, 5)
 
         updated = saved[1]
         self.assertEqual(updated.id, 7)
@@ -183,6 +193,7 @@ class CardImporterTests(unittest.TestCase):
             list_cards_fn=lambda: [],
             upsert_card_fn=lambda card: card,
             list_companies_fn=lambda: [Company(id=10, name="Acme", group_name="Alpha")],
+            list_incidence_types_fn=lambda: [],
         )
 
         self.assertEqual(summary.created, 0)

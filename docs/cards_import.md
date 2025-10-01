@@ -14,6 +14,7 @@ Los archivos deben incluir los siguientes encabezados (en cualquier orden). El n
 | `Título` | Sí | Descripción corta de la tarjeta. |
 | `Desarrollador (opcional)` | No | Usuario responsable del desarrollo. Si el valor no coincide con un usuario registrado se conserva tal cual para que pueda asignarse más adelante. |
 | `QA (opcional)` | No | Usuario responsable de QA. |
+| `Tipo de incidencia (opcional)` | No | Nombre del tipo de incidencia. Debe coincidir con un tipo registrado en el catálogo. Si no existe o la celda está vacía se deja sin asignar. |
 
 Las filas completamente vacías se ignoran durante la importación.
 
@@ -49,5 +50,6 @@ Solo los usuarios con rol de líder pueden importar o crear tarjetas masivamente
 - Las tarjetas nuevas se crean sin sprint asignado y con estado **Pendiente**.
 - Si una fila hace referencia a una empresa inexistente se reporta en el resumen y no se crea la tarjeta correspondiente.
 - Los responsables de Desarrollo y QA se guardan tal como aparecen en el archivo, incluso si todavía no existen en el catálogo de usuarios.
+- Si incluyes la columna **Tipo de incidencia (opcional)**, el nombre debe coincidir con un registro del nuevo catálogo. Puedes dejar la celda vacía para limpiar el tipo de una tarjeta existente.
 - Los archivos CSV guardados en codificaciones comunes (UTF-8, Latin-1/CP1252) se leen automáticamente. Si el archivo utiliza otra codificación, ábrelo en tu editor y vuelve a guardarlo como UTF-8.
 

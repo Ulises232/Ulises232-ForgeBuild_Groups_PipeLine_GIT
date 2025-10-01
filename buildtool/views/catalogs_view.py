@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QColorDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -20,9 +23,18 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QFileDialog,
 )
 
-from ..core.catalog_queries import Company, list_companies, save_company
+from ..core.catalog_queries import (
+    Company,
+    IncidenceType,
+    list_companies,
+    list_incidence_types,
+    remove_incidence_type,
+    save_company,
+    save_incidence_type,
+)
 from ..core.config import load_config
 from ..core.session import current_username
 from ..ui.icons import get_icon
@@ -262,6 +274,334 @@ class CompanyCatalogView(QWidget):
         return text
 
 
+class IncidenceCatalogView(QWidget):
+    """Gestión del catálogo de tipos de incidencia."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._types: Dict[int, IncidenceType] = {}
+        self._current_id: Optional[int] = None
+        self._current_icon: Optional[bytes] = None
+        self._setup_ui()
+        self.reload()
+
+    # ------------------------------------------------------------------
+    def _setup_ui(self) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        left = QVBoxLayout()
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(8)
+
+        self.lstTypes = QListWidget()
+        self.lstTypes.setSelectionMode(QListWidget.SingleSelection)
+        self.lstTypes.currentItemChanged.connect(self._on_type_selected)
+        left.addWidget(self.lstTypes, 1)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(8)
+        self.btnNew = QPushButton("Nuevo tipo")
+        self.btnNew.clicked.connect(self._start_new)
+        self.btnDelete = QPushButton("Eliminar")
+        self.btnDelete.clicked.connect(self._delete)
+        self.btnDelete.setEnabled(False)
+        self.btnRefresh = QPushButton("Recargar")
+        self.btnRefresh.clicked.connect(self.reload)
+        buttons.addWidget(self.btnNew)
+        buttons.addWidget(self.btnDelete)
+        buttons.addWidget(self.btnRefresh)
+        left.addLayout(buttons)
+
+        layout.addLayout(left, 1)
+
+        self.grpForm = QGroupBox("Detalle del tipo")
+        form = QFormLayout(self.grpForm)
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setSpacing(8)
+
+        self.txtName = QLineEdit()
+        form.addRow("Nombre", self.txtName)
+
+        color_row = QHBoxLayout()
+        color_row.setContentsMargins(0, 0, 0, 0)
+        color_row.setSpacing(6)
+        self.txtColor = QLineEdit()
+        self.txtColor.setPlaceholderText("#RRGGBB")
+        color_row.addWidget(self.txtColor, 1)
+        self.btnPickColor = QPushButton("Seleccionar color")
+        self.btnPickColor.clicked.connect(self._pick_color)
+        color_row.addWidget(self.btnPickColor)
+        self.lblColorPreview = QLabel("    ")
+        self.lblColorPreview.setMinimumWidth(36)
+        self.lblColorPreview.setFixedHeight(24)
+        self.lblColorPreview.setFrameShape(QLabel.Box)
+        color_row.addWidget(self.lblColorPreview)
+        form.addRow("Color", color_row)
+
+        icon_row = QVBoxLayout()
+        icon_row.setContentsMargins(0, 0, 0, 0)
+        icon_row.setSpacing(6)
+        self.lblIconPreview = QLabel("Sin icono")
+        self.lblIconPreview.setAlignment(Qt.AlignCenter)
+        self.lblIconPreview.setFixedSize(96, 96)
+        self.lblIconPreview.setStyleSheet("border: 1px solid palette(mid);")
+        icon_row.addWidget(self.lblIconPreview, alignment=Qt.AlignCenter)
+
+        icon_buttons = QHBoxLayout()
+        icon_buttons.setContentsMargins(0, 0, 0, 0)
+        icon_buttons.setSpacing(6)
+        self.btnPickIcon = QPushButton("Seleccionar icono")
+        self.btnPickIcon.clicked.connect(self._pick_icon)
+        self.btnClearIcon = QPushButton("Quitar icono")
+        self.btnClearIcon.clicked.connect(self._clear_icon)
+        icon_buttons.addWidget(self.btnPickIcon)
+        icon_buttons.addWidget(self.btnClearIcon)
+        icon_row.addLayout(icon_buttons)
+        form.addRow("Icono", icon_row)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch(1)
+        self.btnCancel = QPushButton("Cancelar")
+        self.btnCancel.clicked.connect(self._cancel)
+        self.btnSave = QPushButton("Guardar")
+        self.btnSave.setIcon(get_icon("save"))
+        self.btnSave.clicked.connect(self._save)
+        action_row.addWidget(self.btnCancel)
+        action_row.addWidget(self.btnSave)
+        form.addRow("", action_row)
+
+        layout.addWidget(self.grpForm, 2)
+
+    # ------------------------------------------------------------------
+    def reload(self) -> None:
+        selected = self._current_id
+        try:
+            types = list_incidence_types()
+        except Exception as exc:  # pragma: no cover - errores de conexión
+            QMessageBox.critical(
+                self,
+                "Tipos de incidencia",
+                f"No fue posible cargar los tipos de incidencia: {exc}",
+            )
+            types = []
+        self._types = {entry.id: entry for entry in types if entry.id is not None}
+        self._populate_list(selected)
+
+    # ------------------------------------------------------------------
+    def _populate_list(self, selected: Optional[int]) -> None:
+        self.lstTypes.blockSignals(True)
+        self.lstTypes.clear()
+        for entry in sorted(self._types.values(), key=lambda inc: (inc.name or "").lower()):
+            if entry.id is None:
+                continue
+            item = QListWidgetItem(entry.name or "(sin nombre)")
+            item.setData(Qt.UserRole, entry.id)
+            self.lstTypes.addItem(item)
+            if selected is not None and entry.id == selected:
+                self.lstTypes.setCurrentItem(item)
+        self.lstTypes.blockSignals(False)
+        if self.lstTypes.currentItem() is None and self.lstTypes.count():
+            self.lstTypes.setCurrentRow(0)
+        if self.lstTypes.count() == 0:
+            self._start_new()
+
+    # ------------------------------------------------------------------
+    def _start_new(self) -> None:
+        self.lstTypes.clearSelection()
+        self._current_id = None
+        self._current_icon = None
+        self.txtName.clear()
+        self.txtColor.clear()
+        self._update_color_preview(None)
+        self._update_icon_preview(None)
+        self.txtName.setFocus()
+        self.btnDelete.setEnabled(False)
+
+    # ------------------------------------------------------------------
+    def _on_type_selected(
+        self, current: Optional[QListWidgetItem], previous: Optional[QListWidgetItem]
+    ) -> None:
+        if current is None:
+            self.btnDelete.setEnabled(False)
+            return
+        type_id = current.data(Qt.UserRole)
+        entry = self._types.get(type_id)
+        if not entry:
+            self.btnDelete.setEnabled(False)
+            return
+        self._current_id = entry.id
+        self.txtName.setText(entry.name or "")
+        self.txtColor.setText(entry.color or "")
+        self._update_color_preview(entry.color)
+        icon_value = getattr(entry, "icon", None)
+        if isinstance(icon_value, memoryview):
+            icon_value = icon_value.tobytes()
+        elif isinstance(icon_value, bytearray):
+            icon_value = bytes(icon_value)
+        self._current_icon = icon_value if isinstance(icon_value, (bytes, bytearray)) else None
+        self._update_icon_preview(self._current_icon)
+        self.btnDelete.setEnabled(self._current_id is not None)
+
+    # ------------------------------------------------------------------
+    def _pick_color(self) -> None:
+        initial_text = self.txtColor.text().strip() or "#ffffff"
+        initial_color = QColor(initial_text)
+        if not initial_color.isValid():
+            initial_color = QColor("#ffffff")
+        color = QColorDialog.getColor(initial_color, self, "Selecciona un color")
+        if not color.isValid():
+            return
+        self.txtColor.setText(color.name())
+        self._update_color_preview(color.name())
+
+    # ------------------------------------------------------------------
+    def _pick_icon(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Selecciona un icono",
+            "",
+            "Imágenes (*.png *.jpg *.jpeg *.bmp *.ico);;Todos los archivos (*)",
+        )
+        if not path:
+            return
+        try:
+            data = Path(path).read_bytes()
+        except Exception as exc:  # pragma: no cover - dependencias externas
+            QMessageBox.warning(
+                self,
+                "Icono",
+                f"No fue posible leer el archivo seleccionado: {exc}",
+            )
+            return
+        self._current_icon = data
+        self._update_icon_preview(self._current_icon)
+
+    # ------------------------------------------------------------------
+    def _clear_icon(self) -> None:
+        self._current_icon = None
+        self._update_icon_preview(None)
+
+    # ------------------------------------------------------------------
+    def _update_color_preview(self, value: Optional[str]) -> None:
+        color = (value or "").strip()
+        if not color:
+            self.lblColorPreview.setStyleSheet("border: 1px solid palette(mid);")
+            return
+        self.lblColorPreview.setStyleSheet(
+            f"background-color: {color}; border: 1px solid palette(mid);"
+        )
+
+    # ------------------------------------------------------------------
+    def _update_icon_preview(self, data: Optional[bytes]) -> None:
+        if not data:
+            self.lblIconPreview.setPixmap(QPixmap())
+            self.lblIconPreview.setText("Sin icono")
+            return
+        pixmap = QPixmap()
+        if pixmap.loadFromData(data):
+            scaled = pixmap.scaled(
+                self.lblIconPreview.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation,
+            )
+            self.lblIconPreview.setPixmap(scaled)
+            self.lblIconPreview.setText("")
+        else:
+            self.lblIconPreview.setPixmap(QPixmap())
+            self.lblIconPreview.setText("Sin icono")
+
+    # ------------------------------------------------------------------
+    def _cancel(self) -> None:
+        if self._current_id is None:
+            self._start_new()
+            return
+        entry = self._types.get(self._current_id)
+        if entry:
+            self.txtName.setText(entry.name or "")
+            self.txtColor.setText(entry.color or "")
+            self._update_color_preview(entry.color)
+            icon_value = getattr(entry, "icon", None)
+            if isinstance(icon_value, memoryview):
+                icon_value = icon_value.tobytes()
+            elif isinstance(icon_value, bytearray):
+                icon_value = bytes(icon_value)
+            self._current_icon = icon_value if isinstance(icon_value, (bytes, bytearray)) else None
+            self._update_icon_preview(self._current_icon)
+            self.btnDelete.setEnabled(True)
+            return
+        self._start_new()
+
+    # ------------------------------------------------------------------
+    def _save(self) -> None:
+        name = self.txtName.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Tipos de incidencia", "El nombre es obligatorio.")
+            return
+        color = (self.txtColor.text().strip() or None)
+        icon_data = self._current_icon
+
+        if self._current_id is not None:
+            base = self._types.get(self._current_id)
+            entry = IncidenceType(
+                id=self._current_id,
+                name=name,
+                color=color,
+                icon=icon_data,
+                created_at=base.created_at if base else 0,
+                created_by=base.created_by if base else current_username(""),
+                updated_at=base.updated_at if base else 0,
+                updated_by=base.updated_by if base else current_username(""),
+            )
+        else:
+            entry = IncidenceType(id=None, name=name, color=color, icon=icon_data)
+
+        try:
+            saved = save_incidence_type(entry)
+        except Exception as exc:  # pragma: no cover - errores de conexión
+            QMessageBox.critical(self, "Tipos de incidencia", f"No se pudo guardar el tipo: {exc}")
+            return
+
+        self._current_id = saved.id
+        if saved.id is not None:
+            self._types[saved.id] = saved
+        self.reload()
+        self._select_type(saved.id)
+
+    # ------------------------------------------------------------------
+    def _delete(self) -> None:
+        if self._current_id is None:
+            return
+        entry = self._types.get(self._current_id)
+        name = entry.name if entry else "este tipo"
+        confirm = QMessageBox.question(
+            self,
+            "Eliminar tipo",
+            f"¿Eliminar {name}?",
+        )
+        if confirm != QMessageBox.Yes:
+            return
+        try:
+            remove_incidence_type(self._current_id)
+        except Exception as exc:  # pragma: no cover - errores de conexión
+            QMessageBox.critical(self, "Tipos de incidencia", f"No se pudo eliminar: {exc}")
+            return
+        self._current_id = None
+        self._current_icon = None
+        self.reload()
+
+    # ------------------------------------------------------------------
+    def _select_type(self, type_id: Optional[int]) -> None:
+        if type_id is None:
+            return
+        for idx in range(self.lstTypes.count()):
+            item = self.lstTypes.item(idx)
+            if item.data(Qt.UserRole) == type_id:
+                self.lstTypes.setCurrentItem(item)
+                return
+
 class CatalogsView(QWidget):
     """Panel con los catálogos disponibles."""
 
@@ -286,12 +626,15 @@ class CatalogsView(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setTabPosition(QTabWidget.North)
         self.company_view = CompanyCatalogView(self)
+        self.incidence_view = IncidenceCatalogView(self)
         self.tabs.addTab(self.company_view, "Empresas")
+        self.tabs.addTab(self.incidence_view, "Tipos de incidencia")
         layout.addWidget(self.tabs, 1)
 
     # ------------------------------------------------------------------
     def reload(self) -> None:
         self.company_view.reload()
+        self.incidence_view.reload()
 
 
-__all__ = ["CatalogsView", "CompanyCatalogView"]
+__all__ = ["CatalogsView", "CompanyCatalogView", "IncidenceCatalogView"]

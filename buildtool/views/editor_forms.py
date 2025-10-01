@@ -128,6 +128,9 @@ class CardFormWidget(QWidget):
         self.cboCardCompany = QComboBox()
         form.addRow("Empresa", self.cboCardCompany)
 
+        self.cboCardIncidence = QComboBox()
+        form.addRow("Tipo de incidencia", self.cboCardIncidence)
+
         self.lblCardStatus = QLabel("Pendiente")
         form.addRow("Estado", self.lblCardStatus)
 
