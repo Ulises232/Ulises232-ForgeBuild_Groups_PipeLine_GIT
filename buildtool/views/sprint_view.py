@@ -65,6 +65,16 @@ from ..ui.icons import get_icon
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
 
+
+def _card_has_assigned_sprint(card: Card) -> bool:
+    sprint_id = getattr(card, "sprint_id", None)
+    if sprint_id in (None, "", 0):
+        return False
+    try:
+        return int(sprint_id) != 0
+    except (TypeError, ValueError):
+        return bool(sprint_id)
+
 class SprintView(QWidget):
     """Single window to manage sprints and cards."""
 
@@ -782,7 +792,7 @@ class SprintView(QWidget):
         background = None
         foreground = None
         status_value = getattr(card, "status", None)
-        if isinstance(status_value, str):
+        if isinstance(status_value, str) and _card_has_assigned_sprint(card):
             background, foreground = status_brushes(status_value)
 
         for column in range(item.columnCount()):
@@ -2922,7 +2932,7 @@ class CardBrowser(QWidget):
         background = None
         foreground = None
         status_value = getattr(card, "status", None)
-        if isinstance(status_value, str):
+        if isinstance(status_value, str) and _card_has_assigned_sprint(card):
             background, foreground = status_brushes(status_value)
 
         for column in range(item.columnCount()):

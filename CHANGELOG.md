@@ -16,6 +16,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - Las listas de tarjetas aplican un fondo semitransparente basado en el estado de cada tarjeta, conservando colores suaves y legibles.
 - El catálogo de incidencias elimina la captura manual de color para simplificar la administración conservando únicamente el icono.
+- Los colores de estado de tarjeta ahora distinguen backlog, tarjetas en sprint, pruebas unitarias, QA y terminadas con gamas suaves compatibles con modo claro/oscuro.
 
 ### Corregido
 - El tipo de incidencia seleccionado se guarda correctamente en las tarjetas creadas o editadas, así como en las importadas por plantilla.
