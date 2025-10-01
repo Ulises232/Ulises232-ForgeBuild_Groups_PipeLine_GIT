@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -41,7 +42,12 @@ from ..core.branch_store import (
     upsert_card,
     upsert_sprint,
 )
-from ..core.catalog_queries import Company, list_companies as list_company_catalog
+from ..core.catalog_queries import (
+    Company,
+    IncidenceType,
+    list_companies as list_company_catalog,
+    list_incidence_types as list_incidence_catalog,
+)
 from ..core.card_importer import (
     CardImportError,
     CardImportSummary,
@@ -54,9 +60,20 @@ from ..core.pipeline_history import PipelineHistory
 from ..core.session import current_username, get_active_user, require_roles
 from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
 from .sprint_helpers import filter_users_by_role
+from ..ui.color_utils import status_brushes
 from ..ui.icons import get_icon
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
+
+
+def _card_has_assigned_sprint(card: Card) -> bool:
+    sprint_id = getattr(card, "sprint_id", None)
+    if sprint_id in (None, "", 0):
+        return False
+    try:
+        return int(sprint_id) != 0
+    except (TypeError, ValueError):
+        return bool(sprint_id)
 
 class SprintView(QWidget):
     """Single window to manage sprints and cards."""
@@ -68,6 +85,8 @@ class SprintView(QWidget):
         self._branch_index: Dict[str, BranchRecord] = {}
         self._companies: Dict[int, Company] = {}
         self._companies_by_group: Dict[Optional[str], List[Company]] = {}
+        self._incidence_types: Dict[int, IncidenceType] = {}
+        self._incidence_icons: Dict[int, QIcon] = {}
         self._users: List[str] = []
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
@@ -175,6 +194,7 @@ class SprintView(QWidget):
             "cboCardSprint",
             "cboCardGroup",
             "cboCardCompany",
+            "cboCardIncidence",
             "lblCardStatus",
             "txtCardTicket",
             "txtCardTitle",
@@ -247,6 +267,7 @@ class SprintView(QWidget):
         self.tree.setHeaderLabels(
             [
                 "Sprint/Tarjeta",
+                "Tipo incidencia",
                 "Asignado",
                 "QA",
                 "Empresa",
@@ -314,6 +335,7 @@ class SprintView(QWidget):
         self.cboCardGroup.currentIndexChanged.connect(self._on_card_group_changed)
         self.cboCardCompany = form.cboCardCompany
         self.cboCardCompany.currentIndexChanged.connect(self._on_card_company_changed)
+        self.cboCardIncidence = form.cboCardIncidence
         self.lblCardStatus = form.lblCardStatus
         self.txtCardTicket = form.txtCardTicket
         self.txtCardTicket.textChanged.connect(self._on_ticket_changed)
@@ -496,6 +518,7 @@ class SprintView(QWidget):
         self._cards.clear()
         self._branch_index = load_index()
         self._load_companies()
+        self._load_incidence_types()
         self._populate_group_combo(self._current_sprint_group())
 
         for sprint in list_sprints():
@@ -540,7 +563,13 @@ class SprintView(QWidget):
         self._restore_selection()
         self._update_new_card_button()
         if hasattr(self, "card_browser"):
-            self.card_browser.update_sources(self._cards, self._sprints, self._companies)
+            self.card_browser.update_sources(
+                self._cards,
+                self._sprints,
+                self._companies,
+                self._incidence_types,
+                self._incidence_icons,
+            )
         self.update_permissions()
 
     # ------------------------------------------------------------------
@@ -565,6 +594,46 @@ class SprintView(QWidget):
             values.sort(key=lambda comp: (comp.name or "").lower())
         self._companies_by_group = grouped
         self._populate_company_combo(None)
+
+    # ------------------------------------------------------------------
+    def _load_incidence_types(self) -> None:
+        try:
+            types = list_incidence_catalog()
+        except Exception as exc:  # pragma: no cover - errores de conexión
+            QMessageBox.warning(
+                self,
+                "Tipos de incidencia",
+                f"No fue posible cargar el catálogo de tipos de incidencia: {exc}",
+            )
+            types = []
+        mapping: Dict[int, IncidenceType] = {}
+        icons: Dict[int, QIcon] = {}
+        for entry in types:
+            if entry.id is None:
+                continue
+            mapping[entry.id] = entry
+            icon = self._build_incidence_icon(entry)
+            if icon and not icon.isNull():
+                icons[entry.id] = icon
+        self._incidence_types = mapping
+        self._incidence_icons = icons
+        self._populate_card_incidence_combo(None)
+
+    # ------------------------------------------------------------------
+    def _build_incidence_icon(self, incidence: IncidenceType) -> QIcon:
+        data = getattr(incidence, "icon", None)
+        if data is None:
+            return QIcon()
+        if isinstance(data, memoryview):
+            data = data.tobytes()
+        elif isinstance(data, bytearray):
+            data = bytes(data)
+        if not isinstance(data, (bytes, bytearray)):
+            return QIcon()
+        pixmap = QPixmap()
+        if data and pixmap.loadFromData(data):
+            return QIcon(pixmap)
+        return QIcon()
 
     # ------------------------------------------------------------------
     def _populate_group_combo(self, selected: Optional[str]) -> None:
@@ -633,15 +702,16 @@ class SprintView(QWidget):
             if details:
                 sprint_label += f" ({', '.join(details)})"
             sprint_item.setText(0, sprint_label)
-            sprint_item.setText(1, sprint.lead_user or "")
-            sprint_item.setText(2, sprint.qa_user or "")
-            sprint_item.setText(3, self._company_name(sprint.company_id))
-            sprint_item.setText(4, "Cerrado" if sprint.status == "closed" else "Abierto")
-            sprint_item.setText(5, sprint.branch_key)
-            sprint_item.setText(6, sprint.qa_branch_key or "")
-            sprint_item.setText(7, "-")
+            sprint_item.setText(1, "")
+            sprint_item.setText(2, sprint.lead_user or "")
+            sprint_item.setText(3, sprint.qa_user or "")
+            sprint_item.setText(4, self._company_name(sprint.company_id))
+            sprint_item.setText(5, "Cerrado" if sprint.status == "closed" else "Abierto")
+            sprint_item.setText(6, sprint.branch_key)
+            sprint_item.setText(7, sprint.qa_branch_key or "")
             sprint_item.setText(8, "-")
-            sprint_item.setText(9, sprint.created_by or "")
+            sprint_item.setText(9, "-")
+            sprint_item.setText(10, sprint.created_by or "")
             sprint_item.setData(0, Qt.UserRole, ("sprint", sprint.id))
             self.tree.addTopLevelItem(sprint_item)
 
@@ -667,19 +737,24 @@ class SprintView(QWidget):
         if status_display:
             display += f" ({status_display})"
 
+        incidence = None
+        if card.incidence_type_id is not None:
+            incidence = self._incidence_types.get(int(card.incidence_type_id))
+
         item = QTreeWidgetItem()
         item.setText(0, display)
-        item.setText(1, card.assignee or "")
-        item.setText(2, card.qa_assignee or "")
+        item.setText(1, incidence.name if incidence else "")
+        item.setText(2, card.assignee or "")
+        item.setText(3, card.qa_assignee or "")
         checks = []
         checks.append("Unit ✔" if card.unit_tests_done else "Unit ✖")
         checks.append("QA ✔" if card.qa_done else "QA ✖")
         checks.append("Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖")
         company_name = self._company_name(card.company_id) or self._company_name(sprint.company_id)
-        item.setText(3, company_name or "")
-        item.setText(4, " / ".join(checks))
-        item.setText(5, card.branch)
-        item.setText(6, sprint.qa_branch_key or "")
+        item.setText(4, company_name or "")
+        item.setText(5, " / ".join(checks))
+        item.setText(6, card.branch)
+        item.setText(7, sprint.qa_branch_key or "")
 
         record = self._branch_record_for_card(card, sprint)
         has_branch = bool((card.branch or "").strip())
@@ -692,11 +767,43 @@ class SprintView(QWidget):
             origin_text = "No" if has_branch else "-"
             creator = card.branch_created_by or ""
 
-        item.setText(7, local_text)
-        item.setText(8, origin_text)
-        item.setText(9, creator or "")
+        item.setText(8, local_text)
+        item.setText(9, origin_text)
+        item.setText(10, creator or "")
         item.setData(0, Qt.UserRole, ("card", card.id))
+        self._apply_card_style(item, card, incidence)
         parent.addChild(item)
+
+    # ------------------------------------------------------------------
+    def _apply_card_style(
+        self,
+        item: QTreeWidgetItem,
+        card: Card,
+        incidence: Optional[IncidenceType],
+    ) -> None:
+        icon = QIcon()
+        if incidence and incidence.id is not None:
+            icon = self._incidence_icons.get(int(incidence.id), QIcon())
+        if icon and not icon.isNull():
+            item.setIcon(1, icon)
+        else:
+            item.setIcon(1, QIcon())
+
+        background = None
+        foreground = None
+        status_value = getattr(card, "status", None)
+        if isinstance(status_value, str) and _card_has_assigned_sprint(card):
+            background, foreground = status_brushes(status_value)
+
+        for column in range(item.columnCount()):
+            if background:
+                item.setBackground(column, background)
+            else:
+                item.setBackground(column, QBrush())
+            if foreground:
+                item.setForeground(column, foreground)
+            else:
+                item.setForeground(column, QBrush())
 
     # ------------------------------------------------------------------
     def _branch_record_for_card(
@@ -1146,6 +1253,30 @@ class SprintView(QWidget):
         self.cboCardCompany.blockSignals(False)
 
     # ------------------------------------------------------------------
+    def _populate_card_incidence_combo(self, selected: Optional[int]) -> None:
+        if not hasattr(self, "cboCardIncidence"):
+            return
+        self.cboCardIncidence.blockSignals(True)
+        self.cboCardIncidence.clear()
+        self.cboCardIncidence.addItem("Sin tipo", None)
+        for incidence in sorted(
+            self._incidence_types.values(),
+            key=lambda entry: (entry.name or "").lower(),
+        ):
+            if incidence.id is None:
+                continue
+            self.cboCardIncidence.addItem(incidence.name, incidence.id)
+        target = selected if selected not in (None, "") else None
+        index = 0
+        if target is not None:
+            for idx in range(self.cboCardIncidence.count()):
+                if self.cboCardIncidence.itemData(idx) == target:
+                    index = idx
+                    break
+        self.cboCardIncidence.setCurrentIndex(index)
+        self.cboCardIncidence.blockSignals(False)
+
+    # ------------------------------------------------------------------
     def _set_card_group(self, group_key: Optional[str]) -> None:
         if not hasattr(self, "cboCardGroup"):
             return
@@ -1514,6 +1645,7 @@ class SprintView(QWidget):
             self._set_card_company(company_value)
         else:
             self._set_card_company(None)
+        self._populate_card_incidence_combo(card.incidence_type_id)
         self.lblCardStatus.setText((card.status or 'pendiente').capitalize())
         self.cboCardSprint.setEnabled((card.status or '').lower() != 'terminated')
         self.txtCardTicket.blockSignals(True)
@@ -1944,6 +2076,7 @@ class SprintView(QWidget):
             "txtCardQAUrl",
             "cboCardGroup",
             "cboCardCompany",
+            "cboCardIncidence",
         ]
         missing = [name for name in required_attrs if not hasattr(self, name)]
         if missing:
@@ -2018,6 +2151,16 @@ class SprintView(QWidget):
                 card.company_id = sprint.company_id if sprint else None
         except (TypeError, ValueError):
             card.company_id = sprint.company_id if sprint else None
+
+        if hasattr(self, "cboCardIncidence"):
+            incidence_data = self.cboCardIncidence.currentData()
+            try:
+                if incidence_data not in (None, ""):
+                    card.incidence_type_id = int(incidence_data)
+                else:
+                    card.incidence_type_id = None
+            except (TypeError, ValueError):
+                card.incidence_type_id = None
 
         if (
             (card.status or "").lower() == "terminated"
@@ -2184,6 +2327,8 @@ class CardBrowser(QWidget):
         self._cards: Dict[int, Card] = {}
         self._sprints: Dict[int, Sprint] = {}
         self._companies: Dict[int, Company] = {}
+        self._incidence_types: Dict[int, IncidenceType] = {}
+        self._incidence_icons: Dict[int, QIcon] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -2242,10 +2387,11 @@ class CardBrowser(QWidget):
         layout.addLayout(button_row)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(8)
+        self.tree.setColumnCount(9)
         self.tree.setHeaderLabels(
             [
                 "Tarjeta",
+                "Tipo incidencia",
                 "Sprint",
                 "Grupo",
                 "Empresa",
@@ -2354,6 +2500,8 @@ class CardBrowser(QWidget):
         cards: Dict[int, Card],
         sprints: Dict[int, Sprint],
         companies: Dict[int, Company],
+        incidence_types: Dict[int, IncidenceType] | None = None,
+        incidence_icons: Dict[int, QIcon] | None = None,
     ) -> None:
         prev_group = self._current_group_filter()
         prev_company = self._current_company_filter()
@@ -2364,6 +2512,8 @@ class CardBrowser(QWidget):
         self._cards = dict(cards)
         self._sprints = dict(sprints)
         self._companies = dict(companies)
+        self._incidence_types = dict(incidence_types or {})
+        self._incidence_icons = dict(incidence_icons or {})
 
         self._update_group_filter_options(prev_group)
         self._update_status_filter_options(prev_status)
@@ -2615,6 +2765,22 @@ class CardBrowser(QWidget):
             return None
 
     # ------------------------------------------------------------------
+    def _incidence_for_card(self, card: Card) -> Optional[IncidenceType]:
+        raw_value = getattr(card, "incidence_type_id", None)
+        if raw_value in (None, "", 0):
+            return None
+        try:
+            type_id = int(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return self._incidence_types.get(type_id)
+
+    # ------------------------------------------------------------------
+    def _incidence_label(self, card: Card) -> str:
+        incidence = self._incidence_for_card(card)
+        return incidence.name if incidence else ""
+
+    # ------------------------------------------------------------------
     def _effective_group(self, card: Card) -> Optional[str]:
         if card.group_name:
             return card.group_name
@@ -2692,6 +2858,7 @@ class CardBrowser(QWidget):
                             sprint.name if sprint else "",
                             card.assignee or "",
                             card.qa_assignee or "",
+                            self._incidence_label(card),
                         ],
                     )
                 ).lower()
@@ -2730,19 +2897,53 @@ class CardBrowser(QWidget):
                 item.setText(0, card.title)
             else:
                 item.setText(0, card.ticket_id or "(sin título)")
-            item.setText(1, self._sprint_label(sprint) if sprint else "")
-            item.setText(2, group_value)
-            item.setText(3, company_name)
-            item.setText(4, card.assignee or "")
-            item.setText(5, card.qa_assignee or "")
-            item.setText(6, status_value)
-            item.setText(7, " / ".join(checks))
+            incidence = self._incidence_for_card(card)
+            item.setText(1, incidence.name if incidence else "")
+            item.setText(2, self._sprint_label(sprint) if sprint else "")
+            item.setText(3, group_value)
+            item.setText(4, company_name)
+            item.setText(5, card.assignee or "")
+            item.setText(6, card.qa_assignee or "")
+            item.setText(7, status_value)
+            item.setText(8, " / ".join(checks))
             if card.id is not None:
                 item.setData(0, Qt.UserRole, card.id)
+            self._apply_card_style(item, card, incidence)
             self.tree.addTopLevelItem(item)
         self.tree.setUpdatesEnabled(True)
         self.tree.resizeColumnToContents(0)
         self.tree.resizeColumnToContents(1)
+
+    # ------------------------------------------------------------------
+    def _apply_card_style(
+        self,
+        item: QTreeWidgetItem,
+        card: Card,
+        incidence: Optional[IncidenceType],
+    ) -> None:
+        icon = QIcon()
+        if incidence and incidence.id is not None:
+            icon = self._incidence_icons.get(int(incidence.id), QIcon())
+        if icon and not icon.isNull():
+            item.setIcon(1, icon)
+        else:
+            item.setIcon(1, QIcon())
+
+        background = None
+        foreground = None
+        status_value = getattr(card, "status", None)
+        if isinstance(status_value, str) and _card_has_assigned_sprint(card):
+            background, foreground = status_brushes(status_value)
+
+        for column in range(item.columnCount()):
+            if background:
+                item.setBackground(column, background)
+            else:
+                item.setBackground(column, QBrush())
+            if foreground:
+                item.setForeground(column, foreground)
+            else:
+                item.setForeground(column, QBrush())
 
     # ------------------------------------------------------------------
     def _on_item_activated(self, item: QTreeWidgetItem, _: int) -> None:

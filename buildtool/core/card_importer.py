@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .branch_store import Card, list_cards, upsert_card
-from .catalog_queries import list_companies
+from .catalog_queries import list_companies, list_incidence_types
 from .session import current_username, get_active_user
 
 try:  # pragma: no cover - optional dependency handled at runtime
@@ -48,6 +48,10 @@ _COLUMN_ALIASES = {
     "responsabledev": "assignee",
     "qa": "qa",
     "qaresponsable": "qa",
+    "tipoincidencia": "incidence_type",
+    "tipodeincidencia": "incidence_type",
+    "incidencia": "incidence_type",
+    "tipoerror": "incidence_type",
 }
 _TEMPLATE_HEADERS = [
     "Grupo",
@@ -56,6 +60,7 @@ _TEMPLATE_HEADERS = [
     "Título",
     "Desarrollador (opcional)",
     "QA (opcional)",
+    "Tipo de incidencia (opcional)",
 ]
 
 
@@ -74,6 +79,8 @@ class CardImportEntry:
     title: str
     assignee: Optional[str] = None
     qa_assignee: Optional[str] = None
+    incidence_type_name: Optional[str] = None
+    incidence_type_provided: bool = False
 
 
 @dataclass(slots=True)
@@ -133,6 +140,7 @@ def apply_card_entries(
     list_cards_fn: Callable[[], Iterable[Card]] | None = None,
     upsert_card_fn: Callable[[Card], Card] | None = None,
     list_companies_fn: Callable[[], Iterable] | None = None,
+    list_incidence_types_fn: Callable[[], Iterable] | None = None,
 ) -> CardImportSummary:
     """Inserta o actualiza tarjetas a partir de entradas ya validadas."""
 
@@ -144,6 +152,7 @@ def apply_card_entries(
     list_cards_fn = list_cards_fn or list_cards
     upsert_card_fn = upsert_card_fn or upsert_card
     list_companies_fn = list_companies_fn or list_companies
+    list_incidence_types_fn = list_incidence_types_fn or list_incidence_types
 
     companies = list(list_companies_fn())
     if not companies:
@@ -151,6 +160,8 @@ def apply_card_entries(
         return summary
 
     company_lookup = _build_company_lookup(companies)
+    incidence_types = list(list_incidence_types_fn())
+    incidence_lookup = _build_incidence_lookup(incidence_types)
     existing_cards = list(list_cards_fn())
     card_lookup = _build_card_lookup(existing_cards)
 
@@ -197,6 +208,16 @@ def apply_card_entries(
         base_card.company_id = company.id
         base_card.assignee = entry.assignee or None
         base_card.qa_assignee = entry.qa_assignee or None
+        if entry.incidence_type_provided:
+            if entry.incidence_type_name:
+                try:
+                    incidence = _match_incidence_type(entry.incidence_type_name, incidence_lookup)
+                except CardImportError as exc:
+                    summary.register_error(entry.row, str(exc))
+                    continue
+                base_card.incidence_type_id = getattr(incidence, "id", None)
+            else:
+                base_card.incidence_type_id = None
 
         try:
             saved = upsert_card_fn(base_card)
@@ -223,6 +244,7 @@ def import_cards_from_file(
     list_cards_fn: Callable[[], Iterable[Card]] | None = None,
     upsert_card_fn: Callable[[Card], Card] | None = None,
     list_companies_fn: Callable[[], Iterable] | None = None,
+    list_incidence_types_fn: Callable[[], Iterable] | None = None,
 ) -> CardImportSummary:
     """Carga un archivo y aplica la importación directamente."""
 
@@ -234,6 +256,7 @@ def import_cards_from_file(
         list_cards_fn=list_cards_fn,
         upsert_card_fn=upsert_card_fn,
         list_companies_fn=list_companies_fn,
+        list_incidence_types_fn=list_incidence_types_fn,
     )
 
 
@@ -393,6 +416,9 @@ def _entry_from_values(
 
     assignee = value_for("assignee") or None
     qa_assignee = value_for("qa") or None
+    incidence_present = "incidence_type" in header_map
+    incidence_value = value_for("incidence_type") if incidence_present else ""
+    incidence_type = incidence_value or None
 
     return CardImportEntry(
         row=row_index,
@@ -402,6 +428,8 @@ def _entry_from_values(
         title=title,
         assignee=assignee,
         qa_assignee=qa_assignee,
+        incidence_type_name=incidence_type,
+        incidence_type_provided=incidence_present,
     )
 
 
@@ -438,6 +466,7 @@ def _header_label(key: str) -> str:
         "title": "Título",
         "assignee": "Desarrollador",
         "qa": "QA",
+        "incidence_type": "Tipo de incidencia",
     }
     return labels.get(key, key)
 
@@ -452,6 +481,18 @@ def _build_company_lookup(companies: Iterable) -> Dict[Tuple[str, str], object]:
         if not name_key:
             continue
         lookup[(group_key, name_key)] = company
+    return lookup
+
+
+def _build_incidence_lookup(types: Iterable) -> Dict[str, List[object]]:
+    lookup: Dict[str, List[object]] = {}
+    for entry in types:
+        if getattr(entry, "id", None) in (None, ""):
+            continue
+        name_key = _normalize_token(getattr(entry, "name", ""))
+        if not name_key:
+            continue
+        lookup.setdefault(name_key, []).append(entry)
     return lookup
 
 
@@ -484,6 +525,20 @@ def _match_company(entry: CardImportEntry, lookup: Dict[Tuple[str, str], object]
     raise CardImportError(
         f"La empresa '{entry.company_name}' existe en varios grupos ({groups}); especifica el grupo correcto."
     )
+
+
+def _match_incidence_type(name: str, lookup: Dict[str, List[object]]):
+    normalized = _normalize_token(name)
+    matches = lookup.get(normalized, [])
+    if not matches:
+        raise CardImportError(
+            f"El tipo de incidencia '{name}' no existe en el catálogo."
+        )
+    if len(matches) > 1:
+        raise CardImportError(
+            f"El tipo de incidencia '{name}' está duplicado; verifica el catálogo."
+        )
+    return matches[0]
 
 
 def _normalize_token(value: Optional[str]) -> str:

@@ -5,6 +5,22 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.10.0] - 2025-02-20
+
+### Añadido
+- Catálogo de tipos de incidencia con soporte para icono dentro del panel de configuración de catálogos.
+- Selección de tipo de incidencia en el formulario de tarjetas y representación con icono tanto en la planeación como en el navegador de tarjetas.
+- Compatibilidad del importador masivo y la plantilla CSV/Excel con la nueva columna de tipo de incidencia, junto con la documentación actualizada.
+- Vista previa del icono al editar tipos de incidencia, mostrando cómo se verán las tarjetas y permitiendo limpiar o reemplazar la imagen rápidamente.
+
+### Cambiado
+- Las listas de tarjetas aplican un fondo semitransparente basado en el estado de cada tarjeta, conservando colores suaves y legibles.
+- El catálogo de incidencias elimina la captura manual de color para simplificar la administración conservando únicamente el icono.
+- Los colores de estado de tarjeta ahora distinguen backlog, tarjetas en sprint, pruebas unitarias, QA y terminadas con gamas suaves compatibles con modo claro/oscuro.
+
+### Corregido
+- El tipo de incidencia seleccionado se guarda correctamente en las tarjetas creadas o editadas, así como en las importadas por plantilla.
+
 ## [1.9.0] - 2025-02-19
 
 ### Añadido

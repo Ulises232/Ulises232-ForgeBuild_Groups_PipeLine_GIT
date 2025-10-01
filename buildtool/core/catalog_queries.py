@@ -5,9 +5,13 @@ from typing import Iterable, List, Optional
 
 from .branch_store import (
     Company,
+    IncidenceType,
     delete_company as _delete_company,
+    delete_incidence_type as _delete_incidence_type,
     list_companies as _list_companies,
+    list_incidence_types as _list_incidence_types,
     upsert_company as _upsert_company,
+    upsert_incidence_type as _upsert_incidence_type,
 )
 
 
@@ -52,11 +56,33 @@ def ensure_companies(companies: Iterable[Company]) -> List[Company]:
     return [save_company(company) for company in companies]
 
 
+def list_incidence_types() -> List[IncidenceType]:
+    """Regresa todos los tipos de incidencia registrados."""
+
+    return _list_incidence_types()
+
+
+def save_incidence_type(entry: IncidenceType) -> IncidenceType:
+    """Inserta o actualiza un tipo de incidencia."""
+
+    return _upsert_incidence_type(entry)
+
+
+def remove_incidence_type(type_id: int) -> None:
+    """Elimina un tipo de incidencia del catálogo."""
+
+    _delete_incidence_type(type_id)
+
+
 __all__ = [
     "Company",
+    "IncidenceType",
     "ensure_companies",
     "find_company",
     "list_companies",
+    "list_incidence_types",
     "remove_company",
+    "remove_incidence_type",
     "save_company",
+    "save_incidence_type",
 ]

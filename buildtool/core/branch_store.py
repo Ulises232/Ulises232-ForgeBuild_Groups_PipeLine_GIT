@@ -9,7 +9,15 @@ import hmac
 import os
 import time
 
-from .branch_history_db import BranchHistoryDB, Sprint, Card, User, Role, Company
+from .branch_history_db import (
+    BranchHistoryDB,
+    Sprint,
+    Card,
+    User,
+    Role,
+    Company,
+    IncidenceType,
+)
 from .session import current_username
 
 
@@ -338,6 +346,7 @@ def _row_to_card(row: dict) -> Card:
         qa_at=int(qa_at) if qa_at else None,
         status=row.get("status") or "pending",
         company_id=int(row.get("company_id") or 0) or None,
+        incidence_type_id=int(row.get("incidence_type_id") or 0) or None,
         closed_at=int(row.get("closed_at") or 0) or None,
         closed_by=row.get("closed_by") or None,
         branch_created_by=row.get("branch_created_by") or None,
@@ -355,6 +364,18 @@ def _row_to_company(row: dict) -> Company:
         name=row.get("name") or "",
         group_name=row.get("group_name") or None,
         next_sprint_number=int(row.get("next_sprint_number") or 0) or 1,
+        created_at=int(row.get("created_at") or 0),
+        created_by=row.get("created_by") or None,
+        updated_at=int(row.get("updated_at") or 0),
+        updated_by=row.get("updated_by") or None,
+    )
+
+
+def _row_to_incidence_type(row: dict) -> IncidenceType:
+    return IncidenceType(
+        id=int(row["id"]) if row.get("id") is not None else None,
+        name=row.get("name") or "",
+        icon=row.get("icon"),
         created_at=int(row.get("created_at") or 0),
         created_by=row.get("created_by") or None,
         updated_at=int(row.get("updated_at") or 0),
@@ -703,6 +724,48 @@ def delete_company(company_id: int, *, path: Optional[Path] = None) -> None:
     _get_db(base).delete_company(int(company_id))
 
 
+def list_incidence_types(*, path: Optional[Path] = None) -> List[IncidenceType]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_incidence_types()
+    return [_row_to_incidence_type(row) for row in rows]
+
+
+def upsert_incidence_type(
+    entry: IncidenceType, *, path: Optional[Path] = None
+) -> IncidenceType:
+    base = _resolve_base(path)
+    now = int(time.time())
+    username = _current_username()
+    entry.name = (entry.name or "").strip()
+    if entry.id is None:
+        if not entry.created_at:
+            entry.created_at = now
+        entry.created_by = entry.created_by or username
+    if not entry.created_at:
+        entry.created_at = now
+    if not entry.created_by:
+        entry.created_by = username
+    entry.updated_at = now
+    entry.updated_by = username
+    payload = {
+        "id": entry.id,
+        "name": entry.name,
+        "icon": bytes(entry.icon) if isinstance(entry.icon, (bytes, bytearray)) else entry.icon,
+        "created_at": entry.created_at,
+        "created_by": entry.created_by,
+        "updated_at": entry.updated_at,
+        "updated_by": entry.updated_by,
+    }
+    type_id = _get_db(base).upsert_incidence_type(payload)
+    entry.id = type_id
+    return entry
+
+
+def delete_incidence_type(type_id: int, *, path: Optional[Path] = None) -> None:
+    base = _resolve_base(path)
+    _get_db(base).delete_incidence_type(int(type_id))
+
+
 def list_cards(
     *,
     sprint_ids: Optional[Iterable[int]] = None,
@@ -863,6 +926,7 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
         "qa_at": card.qa_at,
         "status": card.status,
         "company_id": card.company_id,
+        "incidence_type_id": card.incidence_type_id,
         "closed_at": card.closed_at,
         "closed_by": card.closed_by,
         "branch_created_by": card.branch_created_by,
