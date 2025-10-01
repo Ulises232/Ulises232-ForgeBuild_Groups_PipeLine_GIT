@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QListWidgetItem,
@@ -288,6 +289,8 @@ class SprintView(QWidget):
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
         self.btnNewCard.clicked.connect(self._start_new_card)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemActivated.connect(self._on_planning_item_activated)
+        self.tree.itemDoubleClicked.connect(self._on_planning_item_activated)
 
         return page
 
@@ -400,9 +403,30 @@ class SprintView(QWidget):
         if dialog is None:
             return
         self._card_dialog = None
+        was_visible = dialog.isVisible()
+        if was_visible:
+            try:
+                dialog.hide()
+            except RuntimeError:
+                pass
+        handled = False
+        if was_visible:
+            try:
+                dialog.done(QDialog.Rejected)
+                handled = True
+            except RuntimeError:
+                try:
+                    dialog.reject()
+                    handled = True
+                except RuntimeError:
+                    pass
         if dialog.isVisible():
-            dialog.close()
-        else:
+            try:
+                dialog.close()
+                handled = True
+            except RuntimeError:
+                pass
+        if not handled:
             self._on_dialog_closed("card")
 
     # ------------------------------------------------------------------
@@ -890,21 +914,20 @@ class SprintView(QWidget):
     def _restore_selection(self) -> None:
         if self._selected_card_id and self._selected_card_id in self._cards:
             card = self._cards[self._selected_card_id]
-            sprint_id = None
-            try:
-                if getattr(card, "sprint_id", None) not in (None, ""):
-                    sprint_id = int(card.sprint_id)
-            except (TypeError, ValueError):
-                sprint_id = None
-            sprint = self._sprints.get(sprint_id) if sprint_id is not None else None
-            if sprint and card.id is not None:
+            if card.id is not None:
                 self._select_tree_item("card", card.id)
                 return
-            self._show_card_form(card, sprint)
-            return
+        else:
+            self._selected_card_id = None
+
         if self._selected_sprint_id and self._selected_sprint_id in self._sprints:
             self._select_tree_item("sprint", self._selected_sprint_id)
             return
+        else:
+            self._selected_sprint_id = None
+
+        self.tree.clearSelection()
+        self._card_parent_id = None
         self._close_sprint_dialog()
         self._close_card_dialog()
 
@@ -1408,31 +1431,131 @@ class SprintView(QWidget):
         if not item:
             self._selected_card_id = None
             self._selected_sprint_id = None
+            self._card_parent_id = None
             self._close_sprint_dialog()
             self._close_card_dialog()
             self.update_permissions()
             return
 
         kind, ident = item.data(0, Qt.UserRole) or (None, None)
+        self._card_parent_id = None
         if kind == "sprint" and ident is not None:
-            sprint_id = int(ident)
+            sprint_id: Optional[int]
+            try:
+                sprint_id = int(ident)
+            except (TypeError, ValueError):
+                sprint_id = None
             self._selected_sprint_id = sprint_id
             self._selected_card_id = None
-            sprint = self._sprints.get(sprint_id)
-            if sprint:
-                self._show_sprint_form(sprint)
+            if self._active_form == "card":
+                self._close_card_dialog()
+            if self._active_form == "sprint" and (
+                sprint_id is None or self._sprint_form_sprint is None or self._sprint_form_sprint.id != sprint_id
+            ):
+                self._close_sprint_dialog()
         elif kind == "card" and ident is not None:
-            card_id = int(ident)
+            card_id: Optional[int]
+            try:
+                card_id = int(ident)
+            except (TypeError, ValueError):
+                card_id = None
             self._selected_card_id = card_id
-            card = self._cards.get(card_id)
-            sprint = None
-            if card:
-                sprint = self._sprints.get(card.sprint_id)
-            if sprint:
-                self._selected_sprint_id = sprint.id
-                self._show_card_form(card, sprint)
+            sprint_id: Optional[int] = None
+            if card_id is not None:
+                card = self._cards.get(card_id)
+                if card:
+                    try:
+                        if getattr(card, "sprint_id", None) not in (None, ""):
+                            sprint_id = int(card.sprint_id)
+                    except (TypeError, ValueError):
+                        sprint_id = None
+            self._selected_sprint_id = sprint_id
+            self._card_parent_id = sprint_id
+            if self._active_form == "sprint" and (
+                self._sprint_form_sprint is None or self._sprint_form_sprint.id != sprint_id
+            ):
+                self._close_sprint_dialog()
+            if self._active_form == "card" and (
+                card_id is None or self._card_form_card is None or self._card_form_card.id != card_id
+            ):
+                self._close_card_dialog()
+        else:
+            self._selected_sprint_id = None
+            self._selected_card_id = None
+            self._close_sprint_dialog()
+            self._close_card_dialog()
+
         self._update_new_card_button()
         self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _on_planning_item_activated(self, item: QTreeWidgetItem, _: int) -> None:
+        if not item:
+            return
+        kind, ident = item.data(0, Qt.UserRole) or (None, None)
+        if kind == "sprint" and ident is not None:
+            try:
+                sprint_id = int(ident)
+            except (TypeError, ValueError):
+                return
+            sprint = self._sprints.get(sprint_id)
+            if not sprint:
+                QMessageBox.warning(
+                    self,
+                    "Sprint",
+                    "El sprint seleccionado ya no existe.",
+                )
+                self.refresh()
+                return
+            if (
+                self._sprint_dialog
+                and self._sprint_dialog.isVisible()
+                and self._sprint_form_sprint
+                and self._sprint_form_sprint.id == sprint.id
+            ):
+                try:
+                    self._sprint_dialog.raise_()
+                    self._sprint_dialog.activateWindow()
+                except AttributeError:
+                    pass
+                return
+            self._selected_sprint_id = sprint.id
+            self._selected_card_id = None
+            self._card_parent_id = None
+            self._show_sprint_form(sprint)
+            return
+
+        if kind == "card" and ident is not None:
+            try:
+                card_id = int(ident)
+            except (TypeError, ValueError):
+                return
+            card = self._cards.get(card_id)
+            if not card:
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    "La tarjeta seleccionada ya no existe o fue movida.",
+                )
+                self.refresh()
+                return
+            sprint = self._sprints.get(card.sprint_id) if card.sprint_id else None
+            if (
+                self._card_dialog
+                and self._card_dialog.isVisible()
+                and self._card_form_card
+                and self._card_form_card.id == card.id
+            ):
+                try:
+                    self._card_dialog.raise_()
+                    self._card_dialog.activateWindow()
+                except AttributeError:
+                    pass
+                return
+            self._selected_card_id = card.id
+            self._card_parent_id = sprint.id if sprint and sprint.id is not None else None
+            self._selected_sprint_id = sprint.id if sprint and sprint.id is not None else None
+            self._show_card_form(card, sprint)
 
     # ------------------------------------------------------------------
     def _start_new_sprint(self) -> None:
@@ -1476,10 +1599,6 @@ class SprintView(QWidget):
         card.company_id = company_id if company_id not in (None, "") else None
         card.status = card.status or "pending"
 
-        planning_index = self.tabs.indexOf(self.planning_page)
-        if planning_index >= 0:
-            self.tabs.setCurrentIndex(planning_index)
-
         self.tree.clearSelection()
         self._show_card_form(card, None, new=True)
         self.update_permissions()
@@ -1498,9 +1617,6 @@ class SprintView(QWidget):
             self.refresh()
             return
         sprint = self._sprints.get(card.sprint_id) if card.sprint_id else None
-        planning_index = self.tabs.indexOf(self.planning_page)
-        if planning_index >= 0:
-            self.tabs.setCurrentIndex(planning_index)
         self._selected_sprint_id = sprint.id if sprint else None
         self._selected_card_id = card.id
         self._card_parent_id = sprint.id if sprint else None
@@ -1605,6 +1721,7 @@ class SprintView(QWidget):
         self._close_card_dialog()
         form = self._create_card_form()
         dialog = FormDialog(self, 'Tarjeta', form)
+        dialog.finished.connect(lambda _=None, kind='card': self._on_dialog_closed(kind))
         dialog.destroyed.connect(lambda _=None, kind='card': self._on_dialog_closed(kind))
         self._card_dialog = dialog
         self._active_form = 'card'
@@ -1691,7 +1808,7 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
-    def _prepare_branch_inputs(self, card: Card, sprint: Sprint) -> None:
+    def _prepare_branch_inputs(self, card: Card, sprint: Optional[Sprint]) -> None:
         self._current_card_base = self._qa_branch_base(sprint)
         branch_value = (card.branch or "").strip()
         ticket_value = (card.ticket_id or "").strip()
@@ -1986,6 +2103,7 @@ class SprintView(QWidget):
 
         sprint_id = self._selected_sprint_id
         sprint = self._sprints.get(sprint_id) if sprint_id else Sprint(id=None, branch_key="", name="", version="")
+        was_new = sprint.id is None
         now = int(time.time())
         user = self._current_user()
         sprint.branch_key = branch_key
@@ -2027,8 +2145,14 @@ class SprintView(QWidget):
         if saved.id is not None:
             self._sprints[saved.id] = saved
             self._selected_sprint_id = saved.id
+
+        message = "Sprint creado correctamente." if was_new else "Sprint actualizado correctamente."
+
+        self._close_sprint_dialog()
         self.refresh()
-        self._select_tree_item("sprint", saved.id)
+        if saved.id:
+            self._select_tree_item("sprint", saved.id)
+        QMessageBox.information(self, "Sprint", message)
 
     # ------------------------------------------------------------------
     def _combo_value(self, combo: QComboBox) -> Optional[str]:
@@ -2049,9 +2173,11 @@ class SprintView(QWidget):
         delete_sprint(self._selected_sprint_id)
         self._selected_sprint_id = None
         self._selected_card_id = None
-        self.refresh()
         self._close_sprint_dialog()
         self._close_card_dialog()
+        self._card_parent_id = None
+        self.refresh()
+        QMessageBox.information(self, "Sprint", "Sprint eliminado correctamente.")
 
     # ------------------------------------------------------------------
     def _full_branch_name(self) -> str:
@@ -2093,7 +2219,9 @@ class SprintView(QWidget):
         target_data = self.cboCardSprint.currentData()
         target_sprint_id: Optional[int] = None
         sprint: Optional[Sprint] = None
-        if target_data not in (None, ""):
+        if target_data in (None, "", 0, "0"):
+            target_sprint_id = None
+        else:
             try:
                 target_sprint_id = int(target_data)
             except (TypeError, ValueError):
@@ -2130,6 +2258,7 @@ class SprintView(QWidget):
             card.created_at = now
             card.created_by = user
 
+        was_new = card.id is None
         previous_sprint_id = card.sprint_id
         card.sprint_id = target_sprint_id
         card.ticket_id = ticket
@@ -2185,6 +2314,8 @@ class SprintView(QWidget):
         if saved.id is not None:
             self._cards[saved.id] = saved
             self._selected_card_id = saved.id
+        else:
+            self._selected_card_id = None
         self._card_parent_id = saved.sprint_id if saved.sprint_id is not None else None
         if saved.sprint_id is not None:
             try:
@@ -2202,9 +2333,13 @@ class SprintView(QWidget):
                 qa_status="approved" if saved.qa_done else "pending",
             )
 
+        message = "Tarjeta creada correctamente." if was_new else "Tarjeta actualizada correctamente."
+
+        self._close_card_dialog()
         self.refresh()
         if saved.id:
             self._select_tree_item("card", saved.id)
+        QMessageBox.information(self, "Tarjeta", message)
 
     # ------------------------------------------------------------------
     def _on_delete_card(self) -> None:
@@ -2220,10 +2355,24 @@ class SprintView(QWidget):
         )
         if confirm != QMessageBox.Yes:
             return
+        dialog = self._card_dialog
+        if dialog and dialog.isVisible():
+            try:
+                dialog.hide()
+            except RuntimeError:
+                pass
         delete_card(card.id)
         self._selected_card_id = None
+        self._card_parent_id = None
+        self.tree.clearSelection()
         self._close_card_dialog()
         self.refresh()
+        QMessageBox.information(self, "Tarjeta", "Tarjeta eliminada correctamente.")
+        if dialog and dialog.isVisible():
+            try:
+                dialog.close()
+            except RuntimeError:
+                pass
 
     # ------------------------------------------------------------------
     def _on_cancel(self) -> None:
