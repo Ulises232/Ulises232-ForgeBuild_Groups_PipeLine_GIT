@@ -7,6 +7,7 @@ ForgeBuild es una herramienta de escritorio (PySide6/Qt) pensada para automatiza
 - **Copia y publicación de artefactos** hacia carpetas de QA, producción, hotfix y otros destinos definidos por perfil.
 - **Operaciones coordinadas de Git** (cambio de ramas, creación, push, eliminación y ramas de versión) sobre todos los repositorios vinculados a un proyecto.
 - **Asistente visual de configuración** para administrar grupos, proyectos, módulos, perfiles, rutas de NAS y variables de entorno.
+- **Importación masiva de tarjetas** desde archivos CSV/Excel mediante una plantilla descargable directamente en la aplicación ([ver detalles](docs/cards_import.md)).
 
 El objetivo es centralizar la configuración en un YAML único por usuario y ofrecer una interfaz uniforme que evite scripts manuales dispersos.
 
@@ -26,6 +27,7 @@ El proyecto depende de:
 - `pydantic` 1.10.14
 - `python-dotenv` 1.0.1 (carga de variables desde `.env`)
 - `pymssql` 2.3+ (cliente nativo para SQL Server 2019)
+- `openpyxl` 3.1.5 (lectura y escritura de plantillas para importar tarjetas)
 
 Se instalan automáticamente con los scripts descritos más adelante.
 

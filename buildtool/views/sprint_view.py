@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QHBoxLayout,
     QListWidgetItem,
     QInputDialog,
@@ -41,6 +42,12 @@ from ..core.branch_store import (
     upsert_sprint,
 )
 from ..core.catalog_queries import Company, list_companies as list_company_catalog
+from ..core.card_importer import (
+    CardImportError,
+    CardImportSummary,
+    import_cards_from_file,
+    write_cards_template,
+)
 from ..core.config import load_config
 from ..core.git_tasks_local import create_branches_local
 from ..core.pipeline_history import PipelineHistory
@@ -120,6 +127,7 @@ class SprintView(QWidget):
         self.card_browser = CardBrowser(self)
         self.card_browser.cardActivated.connect(self._open_card_from_browser)
         self.card_browser.newCardRequested.connect(self._start_new_card_from_browser)
+        self.card_browser.cardsImported.connect(self.refresh)
         self.tabs.addTab(self.card_browser, "Tarjetas")
 
         self.btnRefresh.clicked.connect(self.refresh)
@@ -476,6 +484,11 @@ class SprintView(QWidget):
         if hasattr(self, 'cboCardSprint'):
             enabled = card_mode and (card is None or (card.status or '').lower() != 'terminated')
             self.cboCardSprint.setEnabled(enabled)
+
+        if hasattr(self, "card_browser"):
+            self.card_browser.set_new_card_enabled(can_lead)
+            self.card_browser.set_import_enabled(can_lead)
+            self.card_browser.set_template_enabled(True)
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -2161,6 +2174,7 @@ class CardBrowser(QWidget):
 
     cardActivated = Signal(int)
     newCardRequested = Signal(object, object)
+    cardsImported = Signal()
 
     _ALL_VALUE = "__all__"
     _NONE_VALUE = "__none__"
@@ -2215,6 +2229,12 @@ class CardBrowser(QWidget):
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
         button_row.setSpacing(6)
+        self.btnImportCards = QPushButton("Importar tarjetas")
+        self.btnImportCards.setIcon(get_icon("cloud-upload"))
+        button_row.addWidget(self.btnImportCards)
+        self.btnDownloadTemplate = QPushButton("Descargar plantilla")
+        self.btnDownloadTemplate.setIcon(get_icon("cloud-download"))
+        button_row.addWidget(self.btnDownloadTemplate)
         button_row.addStretch(1)
         self.btnNewCard = QPushButton("Nueva tarjeta")
         self.btnNewCard.setIcon(get_icon("build"))
@@ -2247,6 +2267,8 @@ class CardBrowser(QWidget):
         self.tree.itemActivated.connect(self._on_item_activated)
         self.tree.itemDoubleClicked.connect(self._on_item_activated)
         self.btnNewCard.clicked.connect(self._on_new_card_clicked)
+        self.btnImportCards.clicked.connect(self._on_import_cards_clicked)
+        self.btnDownloadTemplate.clicked.connect(self._on_download_template_clicked)
 
         self._initialize_filters()
 
@@ -2262,12 +2284,69 @@ class CardBrowser(QWidget):
         self.btnNewCard.setEnabled(enabled)
 
     # ------------------------------------------------------------------
+    def set_import_enabled(self, enabled: bool) -> None:
+        self.btnImportCards.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
+    def set_template_enabled(self, enabled: bool) -> None:
+        self.btnDownloadTemplate.setEnabled(enabled)
+
+    # ------------------------------------------------------------------
     def _on_new_card_clicked(self) -> None:
         group_filter = self._current_group_filter()
         if group_filter == self._NONE_VALUE:
             group_filter = None
         company_filter = self._normalize_company_id(self._current_company_filter())
         self.newCardRequested.emit(group_filter, company_filter)
+
+    # ------------------------------------------------------------------
+    def _on_import_cards_clicked(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Importar tarjetas",
+            "",
+            "Archivos de tarjetas (*.csv *.xlsx *.xlsm);;Todos los archivos (*)",
+        )
+        if not path:
+            return
+
+        try:
+            summary = import_cards_from_file(path, username=self._active_username())
+        except CardImportError as exc:
+            QMessageBox.critical(self, "Importar tarjetas", str(exc))
+            return
+
+        message = self._format_import_summary(summary)
+        if summary.errors:
+            QMessageBox.warning(self, "Importar tarjetas", message)
+        else:
+            QMessageBox.information(self, "Importar tarjetas", message)
+
+        if summary.created or summary.updated:
+            self.cardsImported.emit()
+
+    # ------------------------------------------------------------------
+    def _on_download_template_clicked(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar plantilla de tarjetas",
+            "tarjetas",
+            "CSV (*.csv);;Excel (*.xlsx)",
+        )
+        if not path:
+            return
+
+        try:
+            saved_path = write_cards_template(path)
+        except CardImportError as exc:
+            QMessageBox.critical(self, "Plantilla de tarjetas", str(exc))
+            return
+
+        QMessageBox.information(
+            self,
+            "Plantilla de tarjetas",
+            f"La plantilla se guardó en:\n{saved_path}",
+        )
 
     # ------------------------------------------------------------------
     def update_sources(
@@ -2445,6 +2524,30 @@ class CardBrowser(QWidget):
             index = 0
         self.cboSprint.setCurrentIndex(index)
         self.cboSprint.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _format_import_summary(self, summary: CardImportSummary) -> str:
+        parts = [
+            f"Tarjetas creadas: {summary.created}",
+            f"Tarjetas actualizadas: {summary.updated}",
+        ]
+        if summary.skipped:
+            parts.append(f"Filas omitidas: {summary.skipped}")
+        if summary.errors:
+            errors = [f"Fila {row}: {message}" for row, message in summary.errors[:5]]
+            if len(summary.errors) > 5:
+                remaining = len(summary.errors) - 5
+                errors.append(f"... ({remaining} errores adicionales)")
+            parts.append("Errores:\n" + "\n".join(errors))
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    def _active_username(self) -> str:
+        username = current_username("")
+        if username:
+            return username
+        active = get_active_user()
+        return active.username if active else ""
 
     # ------------------------------------------------------------------
     def _current_group_filter(self) -> Optional[str]:
