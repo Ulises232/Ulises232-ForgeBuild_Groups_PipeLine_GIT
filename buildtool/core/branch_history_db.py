@@ -1739,6 +1739,18 @@ class _SqlServerBranchHistory:
                 (int(sprint_id),),
             )
 
+    def _card_sprint_links_allows_null(self, cursor) -> bool:
+        cursor.execute(
+            """
+            SELECT is_nullable
+              FROM sys.columns
+             WHERE object_id = OBJECT_ID('card_sprint_links')
+               AND name = 'sprint_id'
+            """
+        )
+        row = cursor.fetchone()
+        return bool(row and row.get("is_nullable"))
+
     def delete_sprint(self, sprint_id: int) -> None:
         with self._connect() as conn:
             cursor = conn.cursor()
@@ -1754,10 +1766,16 @@ class _SqlServerBranchHistory:
                 """,
                 (timestamp, username, int(sprint_id)),
             )
-            cursor.execute(
-                "UPDATE card_sprint_links SET sprint_id=NULL WHERE sprint_id=%s",
-                (int(sprint_id),),
-            )
+            if self._card_sprint_links_allows_null(cursor):
+                cursor.execute(
+                    "UPDATE card_sprint_links SET sprint_id=NULL WHERE sprint_id=%s",
+                    (int(sprint_id),),
+                )
+            else:
+                cursor.execute(
+                    "DELETE FROM card_sprint_links WHERE sprint_id=%s",
+                    (int(sprint_id),),
+                )
             cursor.execute(
                 "UPDATE cards SET sprint_id=NULL WHERE sprint_id=%s",
                 (int(sprint_id),),

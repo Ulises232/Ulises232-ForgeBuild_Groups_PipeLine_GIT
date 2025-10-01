@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.10.1] - 2025-10-01
+
+### Corregido
+- Evita que la eliminación de sprints falle cuando la columna `card_sprint_links.sprint_id` no admite valores nulos eliminando los vínculos como alternativa.
+
 ## [1.10.0] - 2025-02-20
 
 ### Añadido
