@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.8.1] - 2025-02-18
+
+### Cambiado
+- El catálogo de empresas ahora permite ajustar manualmente el consecutivo del próximo sprint desde la interfaz de edición.
+
 ## [1.8.0] - 2025-02-17
 
 ### Añadido
