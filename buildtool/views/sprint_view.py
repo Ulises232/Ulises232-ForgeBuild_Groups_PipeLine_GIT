@@ -403,7 +403,10 @@ class SprintView(QWidget):
             return
         self._card_dialog = None
         if dialog.isVisible():
-            dialog.close()
+            try:
+                dialog.reject()
+            except RuntimeError:
+                dialog.close()
         else:
             self._on_dialog_closed("card")
 
@@ -1577,10 +1580,6 @@ class SprintView(QWidget):
         card.company_id = company_id if company_id not in (None, "") else None
         card.status = card.status or "pending"
 
-        planning_index = self.tabs.indexOf(self.planning_page)
-        if planning_index >= 0:
-            self.tabs.setCurrentIndex(planning_index)
-
         self.tree.clearSelection()
         self._show_card_form(card, None, new=True)
         self.update_permissions()
@@ -1703,6 +1702,7 @@ class SprintView(QWidget):
         self._close_card_dialog()
         form = self._create_card_form()
         dialog = FormDialog(self, 'Tarjeta', form)
+        dialog.finished.connect(lambda _=None, kind='card': self._on_dialog_closed(kind))
         dialog.destroyed.connect(lambda _=None, kind='card': self._on_dialog_closed(kind))
         self._card_dialog = dialog
         self._active_form = 'card'
