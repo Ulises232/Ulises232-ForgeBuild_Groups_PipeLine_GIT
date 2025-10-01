@@ -2334,12 +2334,19 @@ class SprintView(QWidget):
         )
         if confirm != QMessageBox.Yes:
             return
+        dialog = self._card_dialog
         delete_card(card.id)
         self._selected_card_id = None
         self._card_parent_id = None
+        self.tree.clearSelection()
         self._close_card_dialog()
         self.refresh()
         QMessageBox.information(self, "Tarjeta", "Tarjeta eliminada correctamente.")
+        if dialog and dialog.isVisible():
+            try:
+                dialog.close()
+            except RuntimeError:
+                pass
 
     # ------------------------------------------------------------------
     def _on_cancel(self) -> None:
