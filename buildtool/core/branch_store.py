@@ -929,6 +929,7 @@ def upsert_card(card: Card, *, path: Optional[Path] = None) -> Card:
         "qa_at": card.qa_at,
         "status": card.status,
         "company_id": card.company_id,
+        "incidence_type_id": card.incidence_type_id,
         "closed_at": card.closed_at,
         "closed_by": card.closed_by,
         "branch_created_by": card.branch_created_by,

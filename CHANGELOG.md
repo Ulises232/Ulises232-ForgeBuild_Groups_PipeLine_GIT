@@ -11,9 +11,14 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Catálogo de tipos de incidencia con soporte para color de fondo e icono dentro del panel de configuración de catálogos.
 - Selección de tipo de incidencia en el formulario de tarjetas y resaltado con color e icono tanto en la planeación como en el navegador de tarjetas.
 - Compatibilidad del importador masivo y la plantilla CSV/Excel con la nueva columna de tipo de incidencia, junto con la documentación actualizada.
+- Vista previa interactiva del color e icono al editar tipos de incidencia, mostrando cómo se verán las tarjetas, e incluyendo soporte para transparencias.
 
 ### Cambiado
 - Las listas de tarjetas aplican automáticamente el color de fondo definido en el catálogo para cada tipo de incidencia.
+- Se ajusta el color del texto y el icono según el contraste del fondo para mantener la legibilidad incluso con tonos claros.
+
+### Corregido
+- El tipo de incidencia seleccionado se guarda correctamente en las tarjetas creadas o editadas, así como en las importadas por plantilla.
 
 ## [1.9.0] - 2025-02-19
 

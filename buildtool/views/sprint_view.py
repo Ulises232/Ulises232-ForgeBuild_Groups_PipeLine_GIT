@@ -7,7 +7,7 @@ from dataclasses import replace
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QIcon, QPixmap
+from PySide6.QtGui import QBrush, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -60,6 +60,7 @@ from ..core.pipeline_history import PipelineHistory
 from ..core.session import current_username, get_active_user, require_roles
 from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
 from .sprint_helpers import filter_users_by_role
+from ..ui.color_utils import incidence_brushes
 from ..ui.icons import get_icon
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
@@ -77,6 +78,7 @@ class SprintView(QWidget):
         self._incidence_types: Dict[int, IncidenceType] = {}
         self._incidence_icons: Dict[int, QIcon] = {}
         self._incidence_brushes: Dict[int, QBrush] = {}
+        self._incidence_foregrounds: Dict[int, QBrush] = {}
         self._users: List[str] = []
         self._user_roles: Dict[str, List[str]] = {}
         self._cfg = load_config()
@@ -184,6 +186,7 @@ class SprintView(QWidget):
             "cboCardSprint",
             "cboCardGroup",
             "cboCardCompany",
+            "cboCardIncidence",
             "lblCardStatus",
             "txtCardTicket",
             "txtCardTitle",
@@ -559,6 +562,7 @@ class SprintView(QWidget):
                 self._incidence_types,
                 self._incidence_icons,
                 self._incidence_brushes,
+                self._incidence_foregrounds,
             )
         self.update_permissions()
 
@@ -599,6 +603,7 @@ class SprintView(QWidget):
         mapping: Dict[int, IncidenceType] = {}
         icons: Dict[int, QIcon] = {}
         brushes: Dict[int, QBrush] = {}
+        foregrounds: Dict[int, QBrush] = {}
         for entry in types:
             if entry.id is None:
                 continue
@@ -606,12 +611,15 @@ class SprintView(QWidget):
             icon = self._build_incidence_icon(entry)
             if icon and not icon.isNull():
                 icons[entry.id] = icon
-            brush = self._build_incidence_brush(entry)
-            if brush:
-                brushes[entry.id] = brush
+            background, foreground = incidence_brushes(getattr(entry, "color", None))
+            if background:
+                brushes[entry.id] = background
+            if foreground:
+                foregrounds[entry.id] = foreground
         self._incidence_types = mapping
         self._incidence_icons = icons
         self._incidence_brushes = brushes
+        self._incidence_foregrounds = foregrounds
         self._populate_card_incidence_combo(None)
 
     # ------------------------------------------------------------------
@@ -629,16 +637,6 @@ class SprintView(QWidget):
         if data and pixmap.loadFromData(data):
             return QIcon(pixmap)
         return QIcon()
-
-    # ------------------------------------------------------------------
-    def _build_incidence_brush(self, incidence: IncidenceType) -> Optional[QBrush]:
-        color_value = getattr(incidence, "color", None) or ""
-        if not color_value:
-            return None
-        color = QColor(color_value)
-        if not color.isValid():
-            return None
-        return QBrush(color)
 
     # ------------------------------------------------------------------
     def _populate_group_combo(self, selected: Optional[str]) -> None:
@@ -784,19 +782,25 @@ class SprintView(QWidget):
         self, item: QTreeWidgetItem, incidence: Optional[IncidenceType]
     ) -> None:
         icon = QIcon()
-        brush = None
+        background = None
+        foreground = None
         if incidence and incidence.id is not None:
             icon = self._incidence_icons.get(int(incidence.id), QIcon())
-            brush = self._incidence_brushes.get(int(incidence.id))
+            background = self._incidence_brushes.get(int(incidence.id))
+            foreground = self._incidence_foregrounds.get(int(incidence.id))
         if icon and not icon.isNull():
-            item.setIcon(0, icon)
+            item.setIcon(1, icon)
         else:
-            item.setIcon(0, QIcon())
+            item.setIcon(1, QIcon())
         for column in range(item.columnCount()):
-            if brush:
-                item.setBackground(column, brush)
+            if background:
+                item.setBackground(column, background)
             else:
                 item.setBackground(column, QBrush())
+            if foreground:
+                item.setForeground(column, foreground)
+            else:
+                item.setForeground(column, QBrush())
 
     # ------------------------------------------------------------------
     def _branch_record_for_card(
@@ -2323,6 +2327,7 @@ class CardBrowser(QWidget):
         self._incidence_types: Dict[int, IncidenceType] = {}
         self._incidence_icons: Dict[int, QIcon] = {}
         self._incidence_brushes: Dict[int, QBrush] = {}
+        self._incidence_foregrounds: Dict[int, QBrush] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -2497,6 +2502,7 @@ class CardBrowser(QWidget):
         incidence_types: Dict[int, IncidenceType] | None = None,
         incidence_icons: Dict[int, QIcon] | None = None,
         incidence_brushes: Dict[int, QBrush] | None = None,
+        incidence_foregrounds: Dict[int, QBrush] | None = None,
     ) -> None:
         prev_group = self._current_group_filter()
         prev_company = self._current_company_filter()
@@ -2510,6 +2516,7 @@ class CardBrowser(QWidget):
         self._incidence_types = dict(incidence_types or {})
         self._incidence_icons = dict(incidence_icons or {})
         self._incidence_brushes = dict(incidence_brushes or {})
+        self._incidence_foregrounds = dict(incidence_foregrounds or {})
 
         self._update_group_filter_options(prev_group)
         self._update_status_filter_options(prev_status)
@@ -2915,19 +2922,25 @@ class CardBrowser(QWidget):
         self, item: QTreeWidgetItem, incidence: Optional[IncidenceType]
     ) -> None:
         icon = QIcon()
-        brush = None
+        background = None
+        foreground = None
         if incidence and incidence.id is not None:
             icon = self._incidence_icons.get(int(incidence.id), QIcon())
-            brush = self._incidence_brushes.get(int(incidence.id))
+            background = self._incidence_brushes.get(int(incidence.id))
+            foreground = self._incidence_foregrounds.get(int(incidence.id))
         if icon and not icon.isNull():
-            item.setIcon(0, icon)
+            item.setIcon(1, icon)
         else:
-            item.setIcon(0, QIcon())
+            item.setIcon(1, QIcon())
         for column in range(item.columnCount()):
-            if brush:
-                item.setBackground(column, brush)
+            if background:
+                item.setBackground(column, background)
             else:
                 item.setBackground(column, QBrush())
+            if foreground:
+                item.setForeground(column, foreground)
+            else:
+                item.setForeground(column, QBrush())
 
     # ------------------------------------------------------------------
     def _on_item_activated(self, item: QTreeWidgetItem, _: int) -> None:
