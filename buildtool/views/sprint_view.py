@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QListWidgetItem,
@@ -402,12 +403,30 @@ class SprintView(QWidget):
         if dialog is None:
             return
         self._card_dialog = None
+        was_visible = dialog.isVisible()
+        if was_visible:
+            try:
+                dialog.hide()
+            except RuntimeError:
+                pass
+        handled = False
+        if was_visible:
+            try:
+                dialog.done(QDialog.Rejected)
+                handled = True
+            except RuntimeError:
+                try:
+                    dialog.reject()
+                    handled = True
+                except RuntimeError:
+                    pass
         if dialog.isVisible():
             try:
-                dialog.reject()
-            except RuntimeError:
                 dialog.close()
-        else:
+                handled = True
+            except RuntimeError:
+                pass
+        if not handled:
             self._on_dialog_closed("card")
 
     # ------------------------------------------------------------------
@@ -1789,7 +1808,7 @@ class SprintView(QWidget):
         self.update_permissions()
 
     # ------------------------------------------------------------------
-    def _prepare_branch_inputs(self, card: Card, sprint: Sprint) -> None:
+    def _prepare_branch_inputs(self, card: Card, sprint: Optional[Sprint]) -> None:
         self._current_card_base = self._qa_branch_base(sprint)
         branch_value = (card.branch or "").strip()
         ticket_value = (card.ticket_id or "").strip()
@@ -2200,7 +2219,9 @@ class SprintView(QWidget):
         target_data = self.cboCardSprint.currentData()
         target_sprint_id: Optional[int] = None
         sprint: Optional[Sprint] = None
-        if target_data not in (None, ""):
+        if target_data in (None, "", 0, "0"):
+            target_sprint_id = None
+        else:
             try:
                 target_sprint_id = int(target_data)
             except (TypeError, ValueError):
@@ -2335,6 +2356,11 @@ class SprintView(QWidget):
         if confirm != QMessageBox.Yes:
             return
         dialog = self._card_dialog
+        if dialog and dialog.isVisible():
+            try:
+                dialog.hide()
+            except RuntimeError:
+                pass
         delete_card(card.id)
         self._selected_card_id = None
         self._card_parent_id = None
