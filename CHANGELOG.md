@@ -9,6 +9,8 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ### Corregido
 - Evita que la eliminación de sprints falle cuando la columna `card_sprint_links.sprint_id` no admite valores nulos eliminando los vínculos como alternativa.
+- Los formularios de sprint y tarjeta se abren ahora con doble clic, se cierran tras guardar o eliminar y dejan de reaparecer al refrescar la vista.
+- Editar tarjetas desde la pestaña **Tarjetas** respeta la pestaña activa, evita saltos a Planeación y muestra avisos de éxito al completar cada acción.
 
 ## [1.10.0] - 2025-02-20
 
