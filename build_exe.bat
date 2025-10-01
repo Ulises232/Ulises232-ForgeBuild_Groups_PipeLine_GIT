@@ -134,6 +134,14 @@ if not "%DEPLOY_PATH%"=="" (
     exit /b 1
   )
   echo Copia completada.
+
+  echo Copiando Version a "%DEPLOY_PATH%/_internal"...
+  copy /y "VERSION" "%DEPLOY_PATH%/_internal" >nul
+  if errorlevel 1 (
+    echo No se pudo copiar el ejecutable a la ruta indicada.
+    exit /b 1
+  )
+  echo Copia completada.
 )
 
 exit /b 0
