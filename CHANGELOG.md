@@ -5,6 +5,19 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.9.0] - 2025-02-19
+
+### Añadido
+- Importación masiva de tarjetas desde archivos CSV o Excel con validaciones de catálogo y resumen de resultados en la interfaz.
+- Botones para importar tarjetas y descargar la plantilla directamente desde la pestaña **Tarjetas**, disponibles para usuarios con rol de líder.
+- Documentación dedicada (`docs/cards_import.md`) y plantilla base (`docs/templates/cards_template.csv`) para preparar la información a importar.
+
+### Cambiado
+- Se añadió la dependencia `openpyxl` para soportar la lectura y generación de plantillas en formato Excel.
+
+### Corregido
+- La importación desde CSV admite también archivos guardados con codificaciones Latin-1/CP1252 para evitar errores de lectura en ambientes Windows.
+
 ## [1.8.1] - 2025-02-18
 
 ### Cambiado
