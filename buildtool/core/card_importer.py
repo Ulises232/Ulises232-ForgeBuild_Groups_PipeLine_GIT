@@ -267,15 +267,24 @@ def write_cards_template(path: Path | str) -> Path:
 
 
 def _load_from_csv(path: Path) -> Tuple[List[CardImportEntry], int]:
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        sample = handle.read(4096)
-        handle.seek(0)
+    rows: Optional[List[List[str]]] = None
+    last_error: Optional[UnicodeDecodeError] = None
+    for encoding in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
         try:
-            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
-        except csv.Error:
-            dialect = csv.excel
-        reader = csv.reader(handle, dialect)
-        rows = list(reader)
+            rows = _read_csv_rows(path, encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+            continue
+        if rows is not None:
+            break
+
+    if rows is None:
+        message = (
+            "No se pudo leer el archivo CSV. Guarda el archivo en UTF-8 o Latin-1 e inténtalo nuevamente."
+        )
+        if last_error is not None:
+            raise CardImportError(message) from last_error
+        raise CardImportError(message)
 
     if not rows:
         raise CardImportError("El archivo no contiene encabezados ni filas.")
@@ -294,6 +303,18 @@ def _load_from_csv(path: Path) -> Tuple[List[CardImportEntry], int]:
         entries.append(entry)
 
     return entries, skipped
+
+
+def _read_csv_rows(path: Path, encoding: str) -> List[List[str]]:
+    with path.open("r", encoding=encoding, newline="") as handle:
+        sample = handle.read(4096)
+        handle.seek(0)
+        try:
+            dialect = csv.Sniffer().sniff(sample or "", delimiters=",;\t|")
+        except csv.Error:
+            dialect = csv.excel
+        reader = csv.reader(handle, dialect)
+        return [list(row) for row in reader]
 
 
 def _load_from_excel(path: Path) -> Tuple[List[CardImportEntry], int]:

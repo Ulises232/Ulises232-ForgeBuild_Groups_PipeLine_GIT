@@ -49,4 +49,5 @@ Solo los usuarios con rol de líder pueden importar o crear tarjetas masivamente
 - Las tarjetas nuevas se crean sin sprint asignado y con estado **Pendiente**.
 - Si una fila hace referencia a una empresa inexistente se reporta en el resumen y no se crea la tarjeta correspondiente.
 - Los responsables de Desarrollo y QA se guardan tal como aparecen en el archivo, incluso si todavía no existen en el catálogo de usuarios.
+- Los archivos CSV guardados en codificaciones comunes (UTF-8, Latin-1/CP1252) se leen automáticamente. Si el archivo utiliza otra codificación, ábrelo en tu editor y vuelve a guardarlo como UTF-8.
 

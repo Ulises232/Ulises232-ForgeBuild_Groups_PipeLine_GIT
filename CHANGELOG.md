@@ -15,6 +15,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Cambiado
 - Se añadió la dependencia `openpyxl` para soportar la lectura y generación de plantillas en formato Excel.
 
+### Corregido
+- La importación desde CSV admite también archivos guardados con codificaciones Latin-1/CP1252 para evitar errores de lectura en ambientes Windows.
+
 ## [1.8.1] - 2025-02-18
 
 ### Cambiado

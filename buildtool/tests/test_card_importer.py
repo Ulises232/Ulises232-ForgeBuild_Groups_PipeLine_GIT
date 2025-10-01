@@ -48,6 +48,30 @@ class CardImporterTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_load_card_entries_from_cp1252_csv(self) -> None:
+        content = (
+            "Grupo;Empresa;Ticket;Título;Desarrollador (opcional);QA (opcional)\r\n"
+            "Álpha;Acmé;ABC-5;Título con acento;dév;qa\r\n"
+        )
+        with tempfile.NamedTemporaryFile("wb", suffix=".csv", delete=False) as handle:
+            handle.write(content.encode("cp1252"))
+            path = Path(handle.name)
+
+        try:
+            entries, skipped = card_importer.load_card_entries(path)
+        finally:
+            os.unlink(path)
+
+        self.assertEqual(skipped, 0)
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry.group_name, "Álpha")
+        self.assertEqual(entry.company_name, "Acmé")
+        self.assertEqual(entry.ticket_id, "ABC-5")
+        self.assertEqual(entry.title, "Título con acento")
+        self.assertEqual(entry.assignee, "dév")
+        self.assertEqual(entry.qa_assignee, "qa")
+
     def test_apply_card_entries_creates_and_updates(self) -> None:
         entries = [
             CardImportEntry(
