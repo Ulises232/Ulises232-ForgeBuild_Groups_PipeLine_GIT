@@ -22,6 +22,19 @@ def _import_cards(source: BranchHistoryRepo, target: BranchHistoryRepo) -> None:
         target.upsert_card(row)
 
 
+def _import_card_scripts(source: BranchHistoryRepo, target: BranchHistoryRepo) -> None:
+    for row in source.fetch_cards():
+        card_id = row.get("id")
+        if not card_id:
+            continue
+        script = source.fetch_card_script(int(card_id))
+        if not script:
+            continue
+        payload = script.copy()
+        payload["card_id"] = int(card_id)
+        target.upsert_card_script(payload)
+
+
 def _import_users(source: BranchHistoryRepo, target: BranchHistoryRepo) -> None:
     for row in source.fetch_users():
         target.upsert_user(row)
@@ -53,6 +66,7 @@ def migrate(sqlite_path: Path, sqlserver_url: str, *, pool_size: int = 5) -> Non
     target.replace_branches(branches)
     _import_sprints(source, target)
     _import_cards(source, target)
+    _import_card_scripts(source, target)
     _import_users(source, target)
     _import_activity(source, target)
 
