@@ -523,7 +523,7 @@ class SprintView(QWidget):
         if hasattr(self, 'btnCardDelete'):
             self.btnCardDelete.setEnabled(can_lead and card_mode and self._selected_card_id is not None)
         if hasattr(self, 'btnCardCreateBranch'):
-            self.btnCardCreateBranch.setEnabled(card_mode and can_lead)
+            self.btnCardCreateBranch.setEnabled(card_mode and (can_lead or is_card_assignee))
 
         if hasattr(self, 'btnCardMarkUnit'):
             if card and card.unit_tests_done:
@@ -2212,6 +2212,7 @@ class SprintView(QWidget):
             card.branch = branch_name
             card.branch_created_by = user
             card.branch_created_at = int(time.time())
+            card.branch_created_flag = True
             card.updated_at = card.branch_created_at
             card.updated_by = card.branch_created_by
             updated = upsert_card(card)

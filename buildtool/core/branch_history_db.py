@@ -105,6 +105,7 @@ CARD_COLUMNS = [
     "closed_by",
     "branch_created_by",
     "branch_created_at",
+    "branch_created_flag",
     "created_at",
     "created_by",
     "updated_at",
@@ -287,6 +288,7 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
         "closed_by": payload.get("closed_by"),
         "branch_created_by": payload.get("branch_created_by"),
         "branch_created_at": int(payload.get("branch_created_at") or 0) or None,
+        "branch_created_flag": 1 if payload.get("branch_created_flag") else 0,
         "created_at": int(payload.get("created_at") or 0),
         "created_by": payload.get("created_by") or "",
         "updated_at": int(payload.get("updated_at") or 0),
@@ -450,6 +452,7 @@ class Card:
     closed_by: Optional[str] = None
     branch_created_by: Optional[str] = None
     branch_created_at: Optional[int] = None
+    branch_created_flag: bool = False
     created_at: int = 0
     created_by: str = ""
     updated_at: int = 0
@@ -752,6 +755,7 @@ class _SqlServerBranchHistory:
                     closed_by NVARCHAR(255) NULL,
                     branch_created_by NVARCHAR(255) NULL,
                     branch_created_at BIGINT NULL,
+                    branch_created_flag BIT NOT NULL DEFAULT 0,
                     created_at BIGINT NOT NULL DEFAULT 0,
                     created_by NVARCHAR(255) NULL,
                     updated_at BIGINT NOT NULL DEFAULT 0,
@@ -1196,6 +1200,24 @@ class _SqlServerBranchHistory:
             IF COL_LENGTH('cards', 'closed_by') IS NULL
             BEGIN
                 ALTER TABLE cards ADD closed_by NVARCHAR(255) NULL;
+            END
+            """,
+            """
+            IF COL_LENGTH('cards', 'branch_created_flag') IS NULL
+            BEGIN
+                ALTER TABLE cards ADD branch_created_flag BIT NOT NULL DEFAULT 0;
+            END
+            """,
+            """
+            IF COL_LENGTH('cards', 'branch_created_flag') IS NOT NULL
+            BEGIN
+                UPDATE cards
+                   SET branch_created_flag = CASE
+                        WHEN branch_created_at IS NOT NULL
+                             OR (branch IS NOT NULL AND LTRIM(RTRIM(branch)) <> '')
+                        THEN 1
+                        ELSE 0
+                    END;
             END
             """,
             """
@@ -1952,6 +1974,7 @@ class _SqlServerBranchHistory:
             "closed_by",
             "branch_created_by",
             "branch_created_at",
+            "branch_created_flag",
             "created_at",
             "created_by",
             "updated_at",

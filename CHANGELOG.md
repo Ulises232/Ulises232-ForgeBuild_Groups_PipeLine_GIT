@@ -5,6 +5,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.11.1] - 2025-10-21
+
+### Añadido
+- Columna `cards.branch_created_flag` para marcar automáticamente las tarjetas cuya rama se generó desde la aplicación al crearla.
+
+### Cambiado
+- El botón **Crear rama** en la planeación también se habilita para la persona asignada como desarrolladora de la tarjeta, sin requerir rol de líder.
+
 ## [1.11.0] - 2025-10-20
 
 ### Añadido
