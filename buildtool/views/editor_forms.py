@@ -93,36 +93,6 @@ class SprintFormWidget(QWidget):
 
         layout.addWidget(self.group_box)
 
-        self.script_box = QGroupBox("Script SQL asociado")
-        script_layout = QVBoxLayout(self.script_box)
-        script_layout.setContentsMargins(12, 12, 12, 12)
-        script_layout.setSpacing(6)
-
-        toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(0, 0, 0, 0)
-        toolbar.setSpacing(6)
-
-        self.lblCardScriptInfo = QLabel("Sin script adjunto")
-        toolbar.addWidget(self.lblCardScriptInfo, 1)
-
-        self.btnCardLoadScript = QPushButton("Cargar archivo…")
-        self.btnCardLoadScript.setIcon(get_icon("cloud-upload"))
-        toolbar.addWidget(self.btnCardLoadScript)
-
-        self.btnCardDeleteScript = QPushButton("Quitar script")
-        self.btnCardDeleteScript.setIcon(get_icon("delete"))
-        toolbar.addWidget(self.btnCardDeleteScript)
-
-        script_layout.addLayout(toolbar)
-
-        self.txtCardScript = QPlainTextEdit()
-        self.txtCardScript.setPlaceholderText("Escribe o pega el script SQL de la tarjeta…")
-        self.txtCardScript.setTabChangesFocus(True)
-        self.txtCardScript.setMinimumHeight(160)
-        script_layout.addWidget(self.txtCardScript)
-
-        layout.addWidget(self.script_box)
-
         self.pending_box = QGroupBox("Tarjetas pendientes sin sprint")
         pending_layout = QVBoxLayout(self.pending_box)
         self.lstUnassignedCards = QListWidget()
@@ -229,3 +199,33 @@ class CardFormWidget(QWidget):
         form.addRow("", button_row)
 
         layout.addWidget(self.group_box)
+
+        self.script_box = QGroupBox("Script SQL asociado")
+        script_layout = QVBoxLayout(self.script_box)
+        script_layout.setContentsMargins(12, 12, 12, 12)
+        script_layout.setSpacing(6)
+
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setSpacing(6)
+
+        self.lblCardScriptInfo = QLabel("Sin script adjunto")
+        toolbar.addWidget(self.lblCardScriptInfo, 1)
+
+        self.btnCardLoadScript = QPushButton("Cargar archivo…")
+        self.btnCardLoadScript.setIcon(get_icon("cloud-upload"))
+        toolbar.addWidget(self.btnCardLoadScript)
+
+        self.btnCardDeleteScript = QPushButton("Quitar script")
+        self.btnCardDeleteScript.setIcon(get_icon("delete"))
+        toolbar.addWidget(self.btnCardDeleteScript)
+
+        script_layout.addLayout(toolbar)
+
+        self.txtCardScript = QPlainTextEdit()
+        self.txtCardScript.setPlaceholderText("Escribe o pega el script SQL de la tarjeta…")
+        self.txtCardScript.setTabChangesFocus(True)
+        self.txtCardScript.setMinimumHeight(160)
+        script_layout.addWidget(self.txtCardScript)
+
+        layout.addWidget(self.script_box)
