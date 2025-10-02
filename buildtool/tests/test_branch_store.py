@@ -8,6 +8,7 @@ from buildtool.core import branch_store
 from buildtool.core.branch_store import (
     BranchRecord,
     Card,
+    CardScript,
     Sprint,
     load_activity_log,
     load_index,
@@ -22,11 +23,13 @@ class FakeBranchHistory:
         self.sprints: dict[int, dict] = {}
         self.sprint_groups: dict[int, str | None] = {}
         self.cards: dict[int, dict] = {}
+        self.card_scripts: dict[int, dict] = {}
         self.users: dict[str, dict] = {}
         self.roles: dict[str, dict] = {}
         self.user_roles: list[dict] = []
         self.next_sprint_id = 1
         self.next_card_id = 1
+        self.next_script_id = 1
 
     # Branches ---------------------------------------------------------
     def fetch_branches(self, filter_origin: bool = False, username: str | None = None) -> list[dict]:
@@ -243,7 +246,23 @@ class FakeBranchHistory:
             ]
         if without_sprint:
             rows = [row for row in rows if row.get("sprint_id") in (None, "")]
-        return [row.copy() for row in rows]
+        result: list[dict] = []
+        for row in rows:
+            entry = row.copy()
+            card_id = int(entry.get("id") or 0)
+            script = self.card_scripts.get(card_id)
+            if script:
+                entry["script_id"] = script.get("id")
+                entry["script_name"] = script.get("file_name")
+                entry["script_updated_at"] = script.get("updated_at")
+                entry["script_updated_by"] = script.get("updated_by")
+            else:
+                entry["script_id"] = None
+                entry["script_name"] = None
+                entry["script_updated_at"] = None
+                entry["script_updated_by"] = None
+            result.append(entry)
+        return result
 
     def upsert_card(self, payload: dict) -> int:
         ident = payload.get("id")
@@ -259,6 +278,51 @@ class FakeBranchHistory:
 
     def delete_card(self, card_id: int) -> None:
         self.cards.pop(int(card_id), None)
+        self.card_scripts.pop(int(card_id), None)
+
+    def fetch_card_script(self, card_id: int) -> dict | None:
+        entry = self.card_scripts.get(int(card_id))
+        return entry.copy() if entry else None
+
+    def upsert_card_script(self, payload: dict) -> int:
+        ident = payload.get("id")
+        if ident:
+            ident = int(ident)
+        else:
+            ident = self.next_script_id
+            self.next_script_id += 1
+        stored = payload.copy()
+        stored["id"] = ident
+        card_id = int(payload.get("card_id") or 0)
+        self.card_scripts[card_id] = stored
+        return ident
+
+    def delete_card_script(self, card_id: int) -> None:
+        self.card_scripts.pop(int(card_id), None)
+
+    def fetch_card_scripts_for_sprint(self, sprint_id: int) -> list[dict]:
+        rows: list[dict] = []
+        for card_id, script in self.card_scripts.items():
+            card = self.cards.get(int(card_id))
+            if not card:
+                continue
+            try:
+                card_sprint = int(card.get("sprint_id") or 0)
+            except (TypeError, ValueError):
+                card_sprint = 0
+            if card_sprint != int(sprint_id):
+                continue
+            entry = card.copy()
+            entry["script_id"] = script.get("id")
+            entry["script_name"] = script.get("file_name")
+            entry["script_content"] = script.get("content")
+            entry["script_created_at"] = script.get("created_at")
+            entry["script_created_by"] = script.get("created_by")
+            entry["script_updated_at"] = script.get("updated_at")
+            entry["script_updated_by"] = script.get("updated_by")
+            rows.append(entry)
+        rows.sort(key=lambda row: ((row.get("ticket_id") or "").lower(), (row.get("title") or "").lower()))
+        return rows
 
     def assign_cards_to_sprint(self, sprint_id: int, card_ids: list[int]) -> None:
         for cid in card_ids:
@@ -746,6 +810,89 @@ class BranchStoreSqlServerTest(unittest.TestCase):
         self.assertEqual(len(refreshed), 1)
         self.assertEqual(refreshed[0].ticket_id, "BUG-123")
         self.assertEqual(refreshed[0].sprint_id, sprint.id)
+
+    def test_card_script_crud(self) -> None:
+        now = int(time.time())
+        self.fake.sprints[1] = {
+            "id": 1,
+            "branch_key": "g/proyecto/base",
+            "qa_branch_key": "g/proyecto/base_QA",
+            "name": "Sprint activo",
+            "version": "1.0",
+            "lead_user": "alice",
+            "qa_user": None,
+            "company_id": None,
+            "company_sequence": None,
+            "description": "",
+            "status": "open",
+            "closed_at": None,
+            "closed_by": None,
+            "created_at": now,
+            "created_by": "alice",
+            "updated_at": now,
+            "updated_by": "alice",
+        }
+        self.fake.cards[1] = {
+            "id": 1,
+            "sprint_id": 1,
+            "branch_key": "g/proyecto/base/feature/test",
+            "title": "Corrección",
+            "ticket_id": "BUG-321",
+            "branch": "feature/test",
+            "group_name": None,
+            "assignee": None,
+            "qa_assignee": None,
+            "description": "",
+            "unit_tests_url": None,
+            "qa_url": None,
+            "unit_tests_done": 0,
+            "qa_done": 0,
+            "status": "pending",
+            "company_id": None,
+            "incidence_type_id": None,
+            "closed_at": None,
+            "closed_by": None,
+            "branch_created_by": None,
+            "branch_created_at": None,
+            "created_at": now,
+            "created_by": "alice",
+            "updated_at": now,
+            "updated_by": "alice",
+        }
+
+        script = CardScript(
+            id=None,
+            card_id=1,
+            file_name="script.sql",
+            content="SELECT 1;",
+            created_at=now,
+            created_by="alice",
+            updated_at=now,
+            updated_by="alice",
+        )
+
+        saved = branch_store.save_card_script(script, path=self.base_path)
+        self.assertIsNotNone(saved.id)
+        stored = self.fake.card_scripts.get(1)
+        self.assertIsNotNone(stored)
+        if stored:
+            self.assertEqual(stored.get("content"), "SELECT 1;")
+
+        loaded = branch_store.load_card_script(1, path=self.base_path)
+        self.assertIsNotNone(loaded)
+        if loaded:
+            self.assertEqual(loaded.content, "SELECT 1;")
+            self.assertEqual(loaded.file_name, "script.sql")
+
+        bundle = branch_store.collect_sprint_scripts(1, path=self.base_path)
+        self.assertEqual(len(bundle), 1)
+        card, script_entry = bundle[0]
+        self.assertEqual(card.id, 1)
+        self.assertEqual(script_entry.file_name, "script.sql")
+        self.assertEqual(script_entry.content, "SELECT 1;")
+
+        branch_store.delete_card_script(1, path=self.base_path)
+        self.assertNotIn(1, self.fake.card_scripts)
 
     def test_delete_sprint_unassigns_cards_instead_of_removing(self) -> None:
         now = int(time.time())

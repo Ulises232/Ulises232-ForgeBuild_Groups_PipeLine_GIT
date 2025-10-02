@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import replace
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, Signal
@@ -31,15 +32,20 @@ from PySide6.QtWidgets import (
 from ..core.branch_store import (
     BranchRecord,
     Card,
+    CardScript,
     Sprint,
     assign_cards_to_sprint,
+    collect_sprint_scripts,
     delete_card,
+    delete_card_script,
     delete_sprint,
     list_cards,
     list_sprints,
     list_users,
     list_user_roles,
+    load_card_script,
     load_index,
+    save_card_script,
     upsert_card,
     upsert_sprint,
 )
@@ -103,6 +109,12 @@ class SprintView(QWidget):
         self._sprint_filter_status: Optional[str] = None
         self._card_form_card: Optional[Card] = None
         self._card_form_sprint: Optional[Sprint] = None
+        self._card_form_script: Optional[CardScript] = None
+        self._card_script_dirty: bool = False
+        self._card_script_deleted: bool = False
+        self._card_script_filename: Optional[str] = None
+        self._card_script_original_text: str = ""
+        self._updating_script_text: bool = False
         self._sprint_form_sprint: Optional[Sprint] = None
         self._unassigned_cards: Dict[int, Card] = {}
         self._sprint_dialog: Optional[FormDialog] = None
@@ -189,6 +201,12 @@ class SprintView(QWidget):
         """Remove card-form widgets so deleted Qt objects aren't reused."""
         self._card_form_card = None
         self._card_form_sprint = None
+        self._card_form_script = None
+        self._card_script_dirty = False
+        self._card_script_deleted = False
+        self._card_script_filename = None
+        self._card_script_original_text = ""
+        self._updating_script_text = False
         names = [
             "pageCard",
             "lblCardSprint",
@@ -216,6 +234,11 @@ class SprintView(QWidget):
             "btnCardCreateBranch",
             "btnCardCancel",
             "btnCardSave",
+            "script_box",
+            "lblCardScriptInfo",
+            "btnCardLoadScript",
+            "btnCardDeleteScript",
+            "txtCardScript",
         ]
         for name in names:
             if hasattr(self, name):
@@ -261,6 +284,10 @@ class SprintView(QWidget):
         self.btnNewCard.setIcon(get_icon("build"))
         action_row.addWidget(self.btnNewCard)
 
+        self.btnExportScripts = QPushButton("Exportar scripts del sprint")
+        self.btnExportScripts.setIcon(get_icon("cloud-download"))
+        action_row.addWidget(self.btnExportScripts)
+
         action_row.addStretch(1)
         layout.addLayout(action_row)
 
@@ -272,6 +299,7 @@ class SprintView(QWidget):
                 "Asignado",
                 "QA",
                 "Empresa",
+                "Script",
                 "Estado / Checks",
                 "Rama",
                 "Rama QA",
@@ -288,6 +316,7 @@ class SprintView(QWidget):
         self.cboSprintFilterStatus.currentIndexChanged.connect(self._apply_sprint_filters)
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
         self.btnNewCard.clicked.connect(self._start_new_card)
+        self.btnExportScripts.clicked.connect(self._on_export_sprint_scripts)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemActivated.connect(self._on_planning_item_activated)
         self.tree.itemDoubleClicked.connect(self._on_planning_item_activated)
@@ -361,12 +390,20 @@ class SprintView(QWidget):
         self.btnCardCreateBranch = form.btnCardCreateBranch
         self.btnCardCancel = form.btnCardCancel
         self.btnCardSave = form.btnCardSave
+        self.script_box = form.script_box
+        self.lblCardScriptInfo = form.lblCardScriptInfo
+        self.btnCardLoadScript = form.btnCardLoadScript
+        self.btnCardDeleteScript = form.btnCardDeleteScript
+        self.txtCardScript = form.txtCardScript
         self.btnCardSave.clicked.connect(self._on_save_card)
         self.btnCardCancel.clicked.connect(self._on_cancel)
         self.btnCardDelete.clicked.connect(self._on_delete_card)
         self.btnCardCreateBranch.clicked.connect(self._on_create_branch)
         self.btnCardMarkUnit.clicked.connect(lambda: self._mark_card("unit"))
         self.btnCardMarkQA.clicked.connect(lambda: self._mark_card("qa"))
+        self.btnCardLoadScript.clicked.connect(self._on_load_card_script_from_file)
+        self.btnCardDeleteScript.clicked.connect(self._on_delete_card_script)
+        self.txtCardScript.textChanged.connect(self._on_card_script_changed)
         return form
 
     # ------------------------------------------------------------------
@@ -479,6 +516,7 @@ class SprintView(QWidget):
         is_card_qa = bool(card and card.qa_assignee and card.qa_assignee == username)
         allow_unit_toggle = card_mode and has_card and (can_lead or is_card_assignee)
         allow_qa_toggle = card_mode and has_card and (can_lead or is_card_qa)
+        can_edit_card = card_mode and (can_lead or is_card_assignee or is_card_qa)
 
         if hasattr(self, 'btnCardSave'):
             self.btnCardSave.setEnabled(card_mode and (can_lead or is_card_assignee or is_card_qa))
@@ -531,10 +569,38 @@ class SprintView(QWidget):
             enabled = card_mode and (card is None or (card.status or '').lower() != 'terminated')
             self.cboCardSprint.setEnabled(enabled)
 
+        if hasattr(self, 'txtCardScript'):
+            self.txtCardScript.setEnabled(can_edit_card)
+        if hasattr(self, 'btnCardLoadScript'):
+            self.btnCardLoadScript.setEnabled(can_edit_card)
+        if hasattr(self, 'btnCardDeleteScript'):
+            allow_delete_script = can_edit_card and (
+                bool(self._card_form_script and (
+                    (self._card_form_script.content or '').strip()
+                    or (self._card_form_script.file_name or '')
+                ))
+                or bool(self.txtCardScript.toPlainText())
+            )
+            self.btnCardDeleteScript.setEnabled(allow_delete_script)
+            if allow_delete_script:
+                self.btnCardDeleteScript.setToolTip('')
+            else:
+                tooltip = (
+                    'Guarda la tarjeta o solicita permisos para editar el script'
+                    if not can_edit_card
+                    else 'No hay script para eliminar'
+                )
+                self.btnCardDeleteScript.setToolTip(tooltip)
+
         if hasattr(self, "card_browser"):
             self.card_browser.set_new_card_enabled(can_lead)
             self.card_browser.set_import_enabled(can_lead)
             self.card_browser.set_template_enabled(True)
+
+        if hasattr(self, 'btnExportScripts'):
+            sprint_id = self._selected_sprint_id
+            allow_export = sprint_id is not None and sprint_id in self._sprints
+            self.btnExportScripts.setEnabled(bool(allow_export))
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -730,12 +796,13 @@ class SprintView(QWidget):
             sprint_item.setText(2, sprint.lead_user or "")
             sprint_item.setText(3, sprint.qa_user or "")
             sprint_item.setText(4, self._company_name(sprint.company_id))
-            sprint_item.setText(5, "Cerrado" if sprint.status == "closed" else "Abierto")
-            sprint_item.setText(6, sprint.branch_key)
-            sprint_item.setText(7, sprint.qa_branch_key or "")
-            sprint_item.setText(8, "-")
+            sprint_item.setText(5, "-")
+            sprint_item.setText(6, "Cerrado" if sprint.status == "closed" else "Abierto")
+            sprint_item.setText(7, sprint.branch_key)
+            sprint_item.setText(8, sprint.qa_branch_key or "")
             sprint_item.setText(9, "-")
-            sprint_item.setText(10, sprint.created_by or "")
+            sprint_item.setText(10, "-")
+            sprint_item.setText(11, sprint.created_by or "")
             sprint_item.setData(0, Qt.UserRole, ("sprint", sprint.id))
             self.tree.addTopLevelItem(sprint_item)
 
@@ -776,9 +843,10 @@ class SprintView(QWidget):
         checks.append("Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖")
         company_name = self._company_name(card.company_id) or self._company_name(sprint.company_id)
         item.setText(4, company_name or "")
-        item.setText(5, " / ".join(checks))
-        item.setText(6, card.branch)
-        item.setText(7, sprint.qa_branch_key or "")
+        item.setText(5, "Sí" if card.script_id else "No")
+        item.setText(6, " / ".join(checks))
+        item.setText(7, card.branch)
+        item.setText(8, sprint.qa_branch_key or "")
 
         record = self._branch_record_for_card(card, sprint)
         has_branch = bool((card.branch or "").strip())
@@ -791,9 +859,9 @@ class SprintView(QWidget):
             origin_text = "No" if has_branch else "-"
             creator = card.branch_created_by or ""
 
-        item.setText(8, local_text)
-        item.setText(9, origin_text)
-        item.setText(10, creator or "")
+        item.setText(9, local_text)
+        item.setText(10, origin_text)
+        item.setText(11, creator or "")
         item.setData(0, Qt.UserRole, ("card", card.id))
         self._apply_card_style(item, card, incidence)
         parent.addChild(item)
@@ -1727,6 +1795,7 @@ class SprintView(QWidget):
         self._active_form = 'card'
         self._card_form_card = card
         self._card_form_sprint = sprint
+        self._load_card_script(card)
         self.lblCardSprint.setText(self._card_sprint_label(sprint, card))
 
         target_sprint_id: Optional[int] = None
@@ -1806,6 +1875,146 @@ class SprintView(QWidget):
         self._update_branch_preview()
         dialog.show()
         self.update_permissions()
+
+    # ------------------------------------------------------------------
+    def _load_card_script(self, card: Card) -> None:
+        if not hasattr(self, "txtCardScript"):
+            return
+        script: Optional[CardScript] = None
+        if card.id:
+            try:
+                script = load_card_script(int(card.id))
+            except Exception as exc:  # pragma: no cover - errores de conexión
+                logging.getLogger(__name__).warning(
+                    "No se pudo cargar el script de la tarjeta %s: %s", card.id, exc
+                )
+                script = None
+        self._card_form_script = script
+        self._card_script_dirty = False
+        self._card_script_deleted = False
+        self._card_script_filename = script.file_name if script else None
+        content = script.content if script and script.content is not None else ""
+        self._card_script_original_text = content
+        self._updating_script_text = True
+        self.txtCardScript.blockSignals(True)
+        try:
+            self.txtCardScript.setPlainText(content)
+        finally:
+            self.txtCardScript.blockSignals(False)
+            self._updating_script_text = False
+        self._update_card_script_info(card)
+
+    # ------------------------------------------------------------------
+    def _update_card_script_info(self, card: Optional[Card]) -> None:
+        if not hasattr(self, "lblCardScriptInfo"):
+            return
+        if self._card_script_deleted:
+            text = "El script se eliminará al guardar."
+        else:
+            pieces: List[str] = []
+            file_name = self._card_script_filename or (
+                self._card_form_script.file_name if self._card_form_script else None
+            )
+            if file_name:
+                pieces.append(file_name)
+            script = self._card_form_script
+            if script and script.updated_at:
+                timestamp = time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(script.updated_at)
+                )
+                if script.updated_by:
+                    pieces.append(f"Actualizado {timestamp} por {script.updated_by}")
+                else:
+                    pieces.append(f"Actualizado {timestamp}")
+            elif script and script.updated_by:
+                pieces.append(f"Actualizado por {script.updated_by}")
+            if not pieces and self.txtCardScript.toPlainText().strip():
+                pieces.append("Script sin guardar")
+            text = " · ".join(pieces) if pieces else "Sin script adjunto"
+            if self._card_script_dirty and not self._card_script_deleted:
+                text += " — cambios sin guardar"
+        self.lblCardScriptInfo.setText(text)
+
+    # ------------------------------------------------------------------
+    def _on_card_script_changed(self) -> None:
+        if getattr(self, "_updating_script_text", False):
+            return
+        if not hasattr(self, "txtCardScript"):
+            return
+        current = self.txtCardScript.toPlainText()
+        original = self._card_script_original_text
+        self._card_script_dirty = current != original
+        if self._card_form_script and not current.strip():
+            self._card_script_deleted = True
+        elif current.strip():
+            self._card_script_deleted = False
+        self._update_card_script_info(self._card_form_card)
+
+    # ------------------------------------------------------------------
+    def _on_load_card_script_from_file(self) -> None:
+        if not hasattr(self, "txtCardScript"):
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Seleccionar script SQL",
+            "",
+            "Archivos SQL (*.sql);;Todos los archivos (*)",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                content = handle.read()
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Script",
+                f"No se pudo leer el archivo seleccionado:\n{exc}",
+            )
+            return
+        self._updating_script_text = True
+        self.txtCardScript.blockSignals(True)
+        try:
+            self.txtCardScript.setPlainText(content)
+        finally:
+            self.txtCardScript.blockSignals(False)
+            self._updating_script_text = False
+        self._card_script_filename = Path(path).name
+        self._card_script_deleted = False
+        self._on_card_script_changed()
+
+    # ------------------------------------------------------------------
+    def _on_delete_card_script(self) -> None:
+        if not hasattr(self, "txtCardScript"):
+            return
+        has_existing = bool(self._card_form_script and self._card_form_script.id)
+        has_text = bool(self.txtCardScript.toPlainText())
+        if not has_existing and not has_text:
+            return
+        if has_existing:
+            confirm = QMessageBox.question(
+                self,
+                "Script",
+                "¿Eliminar el script asociado a esta tarjeta?",
+            )
+            if confirm != QMessageBox.Yes:
+                return
+        self._updating_script_text = True
+        self.txtCardScript.blockSignals(True)
+        try:
+            self.txtCardScript.clear()
+        finally:
+            self.txtCardScript.blockSignals(False)
+            self._updating_script_text = False
+        self._card_script_filename = None
+        if has_existing:
+            self._card_script_deleted = True
+            self._card_script_dirty = True
+        else:
+            self._card_script_deleted = False
+            self._card_script_dirty = False
+            self._card_script_original_text = ""
+        self._update_card_script_info(self._card_form_card)
 
     # ------------------------------------------------------------------
     def _prepare_branch_inputs(self, card: Card, sprint: Optional[Sprint]) -> None:
@@ -2312,6 +2521,19 @@ class SprintView(QWidget):
             return
 
         if saved.id is not None:
+            try:
+                self._persist_card_script(saved)
+            except Exception as exc:  # pragma: no cover - errores de conexión
+                logging.getLogger(__name__).error(
+                    "No se pudo guardar el script de la tarjeta %s: %s", saved.id, exc
+                )
+                QMessageBox.warning(
+                    self,
+                    "Tarjeta",
+                    f"La tarjeta se guardó, pero el script no pudo actualizarse:\n{exc}",
+                )
+
+        if saved.id is not None:
             self._cards[saved.id] = saved
             self._selected_card_id = saved.id
         else:
@@ -2340,6 +2562,67 @@ class SprintView(QWidget):
         if saved.id:
             self._select_tree_item("card", saved.id)
         QMessageBox.information(self, "Tarjeta", message)
+
+    # ------------------------------------------------------------------
+    def _persist_card_script(self, card: Card) -> None:
+        if not hasattr(self, "txtCardScript"):
+            return
+        if card.id is None:
+            return
+        content = self.txtCardScript.toPlainText()
+        has_content = bool(content.strip())
+        script = self._card_form_script
+        filename_changed = False
+        if script:
+            filename_changed = (script.file_name or None) != (
+                self._card_script_filename or script.file_name
+            )
+        elif self._card_script_filename:
+            filename_changed = True
+
+        should_delete = self._card_script_deleted or (
+            script is not None and not has_content
+        )
+
+        if should_delete:
+            delete_card_script(int(card.id))
+            self._card_form_script = None
+            self._card_script_dirty = False
+            self._card_script_deleted = False
+            self._card_script_filename = None
+            self._card_script_original_text = ""
+            card.script_id = None
+            card.script_name = None
+            card.script_updated_at = None
+            card.script_updated_by = None
+            self._update_card_script_info(card)
+            return
+
+        if not has_content:
+            self._card_script_dirty = False
+            self._card_script_filename = None
+            self._card_script_original_text = ""
+            self._update_card_script_info(card)
+            return
+
+        if not self._card_script_dirty and not filename_changed:
+            return
+
+        script = script or CardScript(id=None, card_id=int(card.id))
+        script.card_id = int(card.id)
+        script.content = content
+        script.file_name = self._card_script_filename or script.file_name
+        saved_script = save_card_script(script)
+        self._card_form_script = saved_script
+        self._card_script_dirty = False
+        self._card_script_deleted = False
+        self._card_script_filename = saved_script.file_name
+        self._card_script_original_text = saved_script.content or ""
+        card.script_id = saved_script.id
+        card.script_name = saved_script.file_name
+        card.script_updated_at = saved_script.updated_at
+        card.script_updated_by = saved_script.updated_by
+        self._update_card_script_info(card)
 
     # ------------------------------------------------------------------
     def _on_delete_card(self) -> None:
@@ -2453,12 +2736,140 @@ class SprintView(QWidget):
                 "QA ✔" if card.qa_done else "QA ✖",
                 "Merge ✔" if is_card_ready_for_merge(card) else "Merge ✖",
             ]
-            current_item.setText(4, " / ".join(card_checks))
+            current_item.setText(6, " / ".join(card_checks))
         self.update_permissions()
         self._cards[card.id] = card
         self.refresh()
         if card.id:
             self._select_tree_item("card", card.id)
+
+
+    # ------------------------------------------------------------------
+    def _sanitize_slug(self, value: str) -> str:
+        trimmed = (value or "").strip()
+        return "".join(
+            ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in trimmed
+        )
+
+    # ------------------------------------------------------------------
+    def _default_script_filename(self, sprint: Sprint) -> str:
+        parts: List[str] = ["scripts"]
+        version_slug = self._sanitize_slug(sprint.version or "")
+        name_slug = self._sanitize_slug(sprint.name or "")
+        if version_slug:
+            parts.append(version_slug)
+        if name_slug:
+            parts.append(name_slug)
+        if len(parts) == 1 and sprint.id:
+            parts.append(str(sprint.id))
+        filename = "_".join(parts)
+        return f"{filename}.sql"
+
+    # ------------------------------------------------------------------
+    def _compose_sprint_scripts(
+        self, sprint: Sprint, bundle: List[Tuple[Card, CardScript]]
+    ) -> str:
+        lines: List[str] = []
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        sprint_parts = []
+        if sprint.version:
+            sprint_parts.append(sprint.version)
+        if sprint.name:
+            sprint_parts.append(sprint.name)
+        sprint_label = " — ".join(sprint_parts)
+        if not sprint_label:
+            sprint_label = f"Sprint #{sprint.id}" if sprint.id else "Sprint"
+        lines.append(f"-- Scripts del sprint {sprint_label}")
+        lines.append(f"-- Generado el {timestamp}")
+        lines.append("")
+        for card, script in bundle:
+            ticket = card.ticket_id or (f"Tarjeta #{card.id}" if card.id else "Tarjeta")
+            title = card.title or "(sin título)"
+            lines.append("--" + "=" * 70)
+            lines.append(f"-- Tarjeta: {ticket} — {title}")
+            if script.file_name:
+                lines.append(f"-- Archivo original: {script.file_name}")
+            if script.updated_at:
+                updated_ts = time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(script.updated_at)
+                )
+                if script.updated_by:
+                    lines.append(
+                        f"-- Última actualización: {updated_ts} por {script.updated_by}"
+                    )
+                else:
+                    lines.append(f"-- Última actualización: {updated_ts}")
+            elif script.updated_by:
+                lines.append(
+                    f"-- Última actualización registrada por {script.updated_by}"
+                )
+            lines.append("--" + "=" * 70)
+            content = script.content or ""
+            cleaned = content.rstrip("\n")
+            if cleaned:
+                lines.append(cleaned)
+            else:
+                lines.append("-- (Sin contenido)")
+            lines.append("")
+            lines.append("GO")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    # ------------------------------------------------------------------
+    def _on_export_sprint_scripts(self) -> None:
+        sprint_id = self._selected_sprint_id
+        if sprint_id is None:
+            QMessageBox.information(
+                self,
+                "Scripts",
+                "Selecciona un sprint para exportar sus scripts.",
+            )
+            return
+        sprint = self._sprints.get(sprint_id)
+        if not sprint:
+            QMessageBox.warning(self, "Scripts", "El sprint seleccionado ya no existe.")
+            return
+        try:
+            bundle = collect_sprint_scripts(int(sprint_id))
+        except Exception as exc:  # pragma: no cover - errores de conexión
+            QMessageBox.critical(
+                self,
+                "Scripts",
+                f"No se pudieron obtener los scripts:\n{exc}",
+            )
+            return
+        if not bundle:
+            QMessageBox.information(
+                self,
+                "Scripts",
+                "El sprint seleccionado no tiene tarjetas con script.",
+            )
+            return
+        default_name = self._default_script_filename(sprint)
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Guardar scripts del sprint",
+            default_name,
+            "Archivos SQL (*.sql);;Todos los archivos (*)",
+        )
+        if not path:
+            return
+        try:
+            payload = self._compose_sprint_scripts(sprint, bundle)
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Scripts",
+                f"No se pudo guardar el archivo:\n{exc}",
+            )
+            return
+        QMessageBox.information(
+            self,
+            "Scripts",
+            f"Los scripts se guardaron en:\n{path}",
+        )
 
 
 class CardBrowser(QWidget):
@@ -2536,7 +2947,7 @@ class CardBrowser(QWidget):
         layout.addLayout(button_row)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(9)
+        self.tree.setColumnCount(10)
         self.tree.setHeaderLabels(
             [
                 "Tarjeta",
@@ -2547,6 +2958,7 @@ class CardBrowser(QWidget):
                 "Asignado",
                 "QA",
                 "Estado",
+                "Script",
                 "Checks",
             ]
         )
@@ -3054,7 +3466,8 @@ class CardBrowser(QWidget):
             item.setText(5, card.assignee or "")
             item.setText(6, card.qa_assignee or "")
             item.setText(7, status_value)
-            item.setText(8, " / ".join(checks))
+            item.setText(8, "Sí" if card.script_id else "No")
+            item.setText(9, " / ".join(checks))
             if card.id is not None:
                 item.setData(0, Qt.UserRole, card.id)
             self._apply_card_style(item, card, incidence)

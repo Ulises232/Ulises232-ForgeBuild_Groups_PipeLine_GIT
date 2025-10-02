@@ -5,6 +5,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.11.0] - 2025-10-20
+
+### Añadido
+- Captura y edición de un script SQL por tarjeta, permitiendo escribirlo directamente o cargarlo desde un archivo dentro del formulario de tarjetas.
+- Indicadores en la planeación y en el navegador de tarjetas para identificar cuáles tarjetas cuentan con script asociado.
+- Exportación consolidada de los scripts de un sprint en un único archivo SQL con encabezados por tarjeta.
+- Tabla `card_scripts` y migración correspondiente para preservar la relación tarjeta-script durante traslados de datos.
+
 ## [1.10.1] - 2025-10-01
 
 ### Corregido

@@ -311,6 +311,31 @@ def _normalize_card(payload: dict) -> Dict[str, object]:
     return data
 
 
+def _normalize_card_script(payload: dict) -> Dict[str, object]:
+    raw_card = payload.get("card_id")
+    try:
+        card_id = int(raw_card) if raw_card not in (None, "") else None
+    except (TypeError, ValueError):
+        card_id = None
+    data = {
+        "id": payload.get("id"),
+        "card_id": card_id,
+        "file_name": payload.get("file_name") or None,
+        "content": payload.get("content") or "",
+        "created_at": int(payload.get("created_at") or 0),
+        "created_by": payload.get("created_by") or "",
+        "updated_at": int(payload.get("updated_at") or 0),
+        "updated_by": payload.get("updated_by") or "",
+    }
+    if data["id"] in ("", None):
+        data["id"] = None
+    if isinstance(data["file_name"], str):
+        data["file_name"] = data["file_name"].strip() or None
+    if not isinstance(data["content"], str):
+        data["content"] = ""
+    return data
+
+
 def _normalize_user(payload: dict) -> Dict[str, object]:
     data = {
         "username": payload.get("username") or "",
@@ -425,6 +450,24 @@ class Card:
     closed_by: Optional[str] = None
     branch_created_by: Optional[str] = None
     branch_created_at: Optional[int] = None
+    created_at: int = 0
+    created_by: str = ""
+    updated_at: int = 0
+    updated_by: str = ""
+    script_id: Optional[int] = None
+    script_name: Optional[str] = None
+    script_updated_at: Optional[int] = None
+    script_updated_by: Optional[str] = None
+
+
+@dataclass(slots=True)
+class CardScript:
+    """SQL script associated to a card."""
+
+    id: Optional[int]
+    card_id: int
+    file_name: Optional[str] = None
+    content: str = ""
     created_at: int = 0
     created_by: str = ""
     updated_at: int = 0
@@ -771,6 +814,22 @@ class _SqlServerBranchHistory:
                     unassigned_by NVARCHAR(255) NULL,
                     CONSTRAINT fk_card_sprint_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
                     CONSTRAINT fk_card_sprint_sprint FOREIGN KEY (sprint_id) REFERENCES sprints(id)
+                );
+            END
+            """,
+            """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'card_scripts')
+            BEGIN
+                CREATE TABLE card_scripts (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    card_id INT NOT NULL UNIQUE,
+                    file_name NVARCHAR(255) NULL,
+                    content NVARCHAR(MAX) NOT NULL,
+                    created_at BIGINT NOT NULL DEFAULT 0,
+                    created_by NVARCHAR(255) NULL,
+                    updated_at BIGINT NOT NULL DEFAULT 0,
+                    updated_by NVARCHAR(255) NULL,
+                    CONSTRAINT fk_card_scripts_card FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
                 );
             END
             """,
@@ -1793,43 +1852,51 @@ class _SqlServerBranchHistory:
         include_closed: bool = True,
         without_sprint: bool = False,
     ) -> List[dict]:
-        sql = "SELECT * FROM cards"
+        sql = (
+            "SELECT cards.*, "
+            "cs.id AS script_id, "
+            "cs.file_name AS script_name, "
+            "cs.updated_at AS script_updated_at, "
+            "cs.updated_by AS script_updated_by "
+            "FROM cards "
+            "LEFT JOIN card_scripts cs ON cs.card_id = cards.id"
+        )
         params: List[object] = []
         clauses: List[str] = []
         ids = [int(x) for x in (sprint_ids or []) if x is not None]
         if ids:
             placeholders = ",".join("%s" for _ in ids)
-            clauses.append(f"sprint_id IN ({placeholders})")
+            clauses.append(f"cards.sprint_id IN ({placeholders})")
             params.extend(ids)
         names = [b for b in (branches or []) if b]
         if names:
             placeholders = ",".join("%s" for _ in names)
-            clauses.append(f"branch IN ({placeholders})")
+            clauses.append(f"cards.branch IN ({placeholders})")
             params.extend(names)
         companies = [int(cid) for cid in (company_ids or []) if cid not in (None, "")]
         if companies:
             placeholders = ",".join("%s" for _ in companies)
-            clauses.append(f"company_id IN ({placeholders})")
+            clauses.append(f"cards.company_id IN ({placeholders})")
             params.extend(companies)
         groups = [(g or "").strip() for g in (group_names or []) if g is not None]
         groups = [g for g in groups if g]
         if groups:
             placeholders = ",".join("%s" for _ in groups)
-            clauses.append(f"group_name IN ({placeholders})")
+            clauses.append(f"cards.group_name IN ({placeholders})")
             params.extend(groups)
         status_list = [(s or "").lower() for s in (statuses or []) if s]
         status_list = [s for s in status_list if s]
         if status_list:
             placeholders = ",".join("%s" for _ in status_list)
-            clauses.append(f"LOWER(status) IN ({placeholders})")
+            clauses.append(f"LOWER(cards.status) IN ({placeholders})")
             params.extend(status_list)
         if not include_closed:
-            clauses.append("LOWER(status) <> 'terminated'")
+            clauses.append("LOWER(cards.status) <> 'terminated'")
         if without_sprint:
-            clauses.append("sprint_id IS NULL")
+            clauses.append("cards.sprint_id IS NULL")
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY id DESC"
+        sql += " ORDER BY cards.id DESC"
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(params))
@@ -1840,6 +1907,20 @@ class _SqlServerBranchHistory:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM cards WHERE id=%s", (int(card_id),))
+            row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def fetch_card_script(self, card_id: int) -> Optional[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, card_id, file_name, content, created_at, created_by, updated_at, updated_by
+                  FROM card_scripts
+                 WHERE card_id=%s
+                """,
+                (int(card_id),),
+            )
             row = cursor.fetchone()
         return dict(row) if row else None
 
@@ -1885,10 +1966,36 @@ class _SqlServerBranchHistory:
                 self._sync_card_links(cursor, card_id, data)
             return card_id
 
+    def upsert_card_script(self, payload: dict) -> int:
+        data = _normalize_card_script(payload)
+        if not data.get("card_id"):
+            raise ValueError("card_id es obligatorio para guardar un script de tarjeta")
+        columns = [
+            "id",
+            "card_id",
+            "file_name",
+            "content",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "updated_by",
+        ]
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            script_id = self._execute_upsert_generic(
+                cursor, "card_scripts", "id", data, columns
+            )
+            return int(script_id or 0)
+
     def delete_card(self, card_id: int) -> None:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM cards WHERE id=%s", (int(card_id),))
+
+    def delete_card_script(self, card_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM card_scripts WHERE card_id=%s", (int(card_id),))
 
     def assign_cards_to_sprint(self, sprint_id: int, card_ids: Sequence[int]) -> None:
         ids = [int(cid) for cid in card_ids if cid not in (None, "")]
@@ -1905,6 +2012,30 @@ class _SqlServerBranchHistory:
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, tuple(params))
+
+    def fetch_card_scripts_for_sprint(self, sprint_id: int) -> List[dict]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    cards.*,
+                    cs.id AS script_id,
+                    cs.file_name AS script_name,
+                    cs.content AS script_content,
+                    cs.created_at AS script_created_at,
+                    cs.created_by AS script_created_by,
+                    cs.updated_at AS script_updated_at,
+                    cs.updated_by AS script_updated_by
+                FROM card_scripts cs
+                INNER JOIN cards ON cards.id = cs.card_id
+                WHERE cards.sprint_id=%s
+                ORDER BY cards.ticket_id, cards.title, cards.id
+                """,
+                (int(sprint_id),),
+            )
+            rows = cursor.fetchall()
+        return [dict(row) for row in rows]
 
     def fetch_users(self) -> List[dict]:
         with self._connect() as conn:

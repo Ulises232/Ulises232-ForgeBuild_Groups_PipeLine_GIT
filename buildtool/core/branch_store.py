@@ -13,6 +13,7 @@ from .branch_history_db import (
     BranchHistoryDB,
     Sprint,
     Card,
+    CardScript,
     User,
     Role,
     Company,
@@ -355,6 +356,43 @@ def _row_to_card(row: dict) -> Card:
         created_by=row.get("created_by") or "",
         updated_at=int(row.get("updated_at") or 0),
         updated_by=row.get("updated_by") or "",
+        script_id=int(row.get("script_id") or 0) or None,
+        script_name=row.get("script_name") or None,
+        script_updated_at=int(row.get("script_updated_at") or 0) or None,
+        script_updated_by=row.get("script_updated_by") or None,
+    )
+
+
+def _row_to_card_script(row: dict) -> CardScript:
+    script_id = row.get("id")
+    if not script_id:
+        script_id = row.get("script_id")
+    card_id = row.get("card_id")
+    if not card_id:
+        card_id = row.get("script_card_id")
+    file_name = row.get("file_name")
+    if file_name is None:
+        file_name = row.get("script_name")
+    content = row.get("content")
+    if content is None:
+        content = row.get("script_content")
+    created_at = row.get("created_at")
+    if created_at in (None, ""):
+        created_at = row.get("script_created_at")
+    updated_at = row.get("updated_at")
+    if updated_at in (None, ""):
+        updated_at = row.get("script_updated_at")
+    created_by = row.get("created_by") or row.get("script_created_by") or ""
+    updated_by = row.get("updated_by") or row.get("script_updated_by") or ""
+    return CardScript(
+        id=int(script_id) if script_id not in (None, "") else None,
+        card_id=int(card_id) if card_id not in (None, "") else 0,
+        file_name=file_name or None,
+        content=content or "",
+        created_at=int(created_at or 0),
+        created_by=created_by,
+        updated_at=int(updated_at or 0),
+        updated_by=updated_by,
     )
 
 
@@ -793,6 +831,65 @@ def list_cards(
         without_sprint=without_sprint,
     )
     return [_row_to_card(row) for row in rows]
+
+
+def load_card_script(card_id: int, *, path: Optional[Path] = None) -> Optional[CardScript]:
+    if card_id in (None, 0):
+        return None
+    base = _resolve_base(path)
+    row = _get_db(base).fetch_card_script(int(card_id))
+    if not row:
+        return None
+    return _row_to_card_script(row)
+
+
+def save_card_script(script: CardScript, *, path: Optional[Path] = None) -> CardScript:
+    if not getattr(script, "card_id", None):
+        raise ValueError("card_id es obligatorio para guardar un script")
+    base = _resolve_base(path)
+    now = int(time.time())
+    username = _current_username()
+    if not script.created_at:
+        script.created_at = now
+    if not script.created_by:
+        script.created_by = username
+    script.updated_at = now
+    script.updated_by = username
+    payload = {
+        "id": script.id,
+        "card_id": script.card_id,
+        "file_name": script.file_name,
+        "content": script.content,
+        "created_at": script.created_at,
+        "created_by": script.created_by,
+        "updated_at": script.updated_at,
+        "updated_by": script.updated_by,
+    }
+    script_id = _get_db(base).upsert_card_script(payload)
+    script.id = script_id
+    return script
+
+
+def delete_card_script(card_id: int, *, path: Optional[Path] = None) -> None:
+    if card_id in (None, 0):
+        return
+    base = _resolve_base(path)
+    _get_db(base).delete_card_script(int(card_id))
+
+
+def collect_sprint_scripts(
+    sprint_id: int, *, path: Optional[Path] = None
+) -> List[Tuple[Card, CardScript]]:
+    base = _resolve_base(path)
+    rows = _get_db(base).fetch_card_scripts_for_sprint(int(sprint_id))
+    scripts: List[Tuple[Card, CardScript]] = []
+    for row in rows:
+        card = _row_to_card(row)
+        script = _row_to_card_script(row)
+        if not script.card_id and card.id:
+            script.card_id = card.id
+        scripts.append((card, script))
+    return scripts
 
 
 def _qa_branch_base_from_row(row: Optional[dict]) -> str:
