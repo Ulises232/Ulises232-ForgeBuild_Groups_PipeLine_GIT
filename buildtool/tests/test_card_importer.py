@@ -124,6 +124,7 @@ class CardImporterTests(unittest.TestCase):
                 closed_by=None,
                 branch_created_by=None,
                 branch_created_at=None,
+                branch_created_flag=False,
                 created_at=0,
                 created_by="",
                 updated_at=0,

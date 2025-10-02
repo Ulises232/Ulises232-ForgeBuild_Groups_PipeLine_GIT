@@ -261,6 +261,7 @@ class FakeBranchHistory:
                 entry["script_name"] = None
                 entry["script_updated_at"] = None
                 entry["script_updated_by"] = None
+            entry.setdefault("branch_created_flag", 0)
             result.append(entry)
         return result
 
@@ -272,6 +273,7 @@ class FakeBranchHistory:
             ident = self.next_card_id
             self.next_card_id += 1
         stored = payload.copy()
+        stored.setdefault("branch_created_flag", 0)
         stored["id"] = ident
         self.cards[ident] = stored
         return ident
@@ -320,6 +322,7 @@ class FakeBranchHistory:
             entry["script_created_by"] = script.get("created_by")
             entry["script_updated_at"] = script.get("updated_at")
             entry["script_updated_by"] = script.get("updated_by")
+            entry.setdefault("branch_created_flag", 0)
             rows.append(entry)
         rows.sort(key=lambda row: ((row.get("ticket_id") or "").lower(), (row.get("title") or "").lower()))
         return rows
@@ -854,6 +857,7 @@ class BranchStoreSqlServerTest(unittest.TestCase):
             "closed_by": None,
             "branch_created_by": None,
             "branch_created_at": None,
+            "branch_created_flag": 0,
             "created_at": now,
             "created_by": "alice",
             "updated_at": now,
