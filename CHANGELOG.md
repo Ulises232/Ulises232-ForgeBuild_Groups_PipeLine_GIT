@@ -13,6 +13,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Exportación consolidada de los scripts de un sprint en un único archivo SQL con encabezados por tarjeta.
 - Tabla `card_scripts` y migración correspondiente para preservar la relación tarjeta-script durante traslados de datos.
 
+### Cambiado
+- Formularios de sprint y tarjeta con panel desplazable para asegurar que todos los controles permanezcan visibles en pantallas con menor altura.
+
 ### Corregido
 - El formulario de tarjetas vuelve a incluir la sección de script SQL, evitando el fallo al abrir una tarjeta tras habilitar la nueva funcionalidad.
 

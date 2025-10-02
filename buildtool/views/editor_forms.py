@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QScrollArea,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -28,6 +29,17 @@ class SprintFormWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll)
+
+        container = QWidget()
+        scroll.setWidget(container)
+
+        content = QVBoxLayout(container)
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(8)
 
         self.group_box = QGroupBox("Detalles del sprint")
         form = QFormLayout(self.group_box)
@@ -91,7 +103,7 @@ class SprintFormWidget(QWidget):
         button_row.addWidget(self.btnSprintSave)
         form.addRow("", button_row)
 
-        layout.addWidget(self.group_box)
+        content.addWidget(self.group_box)
 
         self.pending_box = QGroupBox("Tarjetas pendientes sin sprint")
         pending_layout = QVBoxLayout(self.pending_box)
@@ -101,7 +113,9 @@ class SprintFormWidget(QWidget):
         self.btnAssignCards = QPushButton("Asignar tarjetas seleccionadas")
         self.btnAssignCards.setIcon(get_icon("check"))
         pending_layout.addWidget(self.btnAssignCards)
-        layout.addWidget(self.pending_box)
+        content.addWidget(self.pending_box)
+
+        content.addStretch(1)
 
 
 class CardFormWidget(QWidget):
@@ -112,6 +126,17 @@ class CardFormWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll)
+
+        container = QWidget()
+        scroll.setWidget(container)
+
+        content = QVBoxLayout(container)
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(8)
 
         self.group_box = QGroupBox("Detalles de la tarjeta")
         form = QFormLayout(self.group_box)
@@ -198,7 +223,7 @@ class CardFormWidget(QWidget):
         button_row.addWidget(self.btnCardSave)
         form.addRow("", button_row)
 
-        layout.addWidget(self.group_box)
+        content.addWidget(self.group_box)
 
         self.script_box = QGroupBox("Script SQL asociado")
         script_layout = QVBoxLayout(self.script_box)
@@ -228,4 +253,6 @@ class CardFormWidget(QWidget):
         self.txtCardScript.setMinimumHeight(160)
         script_layout.addWidget(self.txtCardScript)
 
-        layout.addWidget(self.script_box)
+        content.addWidget(self.script_box)
+
+        content.addStretch(1)
