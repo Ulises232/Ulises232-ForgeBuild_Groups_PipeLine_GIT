@@ -5,6 +5,12 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.12.0] - 2025-10-22
+
+### Añadido
+- Selección múltiple de tarjetas en la pestaña de planeación para ejecutar acciones sobre varias al mismo tiempo.
+- Botón de asignación masiva que permite definir o limpiar en un paso los responsables de desarrollo y QA de todas las tarjetas seleccionadas.
+
 ## [1.11.1] - 2025-10-21
 
 ### Añadido
