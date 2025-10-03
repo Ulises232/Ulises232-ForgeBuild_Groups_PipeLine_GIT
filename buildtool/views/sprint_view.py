@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QListWidgetItem,
     QInputDialog,
@@ -117,6 +119,7 @@ class SprintView(QWidget):
         self._updating_script_text: bool = False
         self._sprint_form_sprint: Optional[Sprint] = None
         self._unassigned_cards: Dict[int, Card] = {}
+        self._selected_card_ids: List[int] = []
         self._sprint_dialog: Optional[FormDialog] = None
         self._card_dialog: Optional[FormDialog] = None
         self._active_form: Optional[str] = None
@@ -288,6 +291,11 @@ class SprintView(QWidget):
         self.btnExportScripts.setIcon(get_icon("cloud-download"))
         action_row.addWidget(self.btnExportScripts)
 
+        self.btnBulkAssign = QPushButton("Asignar responsables")
+        self.btnBulkAssign.setIcon(get_icon("sync"))
+        self.btnBulkAssign.setEnabled(False)
+        action_row.addWidget(self.btnBulkAssign)
+
         action_row.addStretch(1)
         layout.addLayout(action_row)
 
@@ -308,7 +316,7 @@ class SprintView(QWidget):
                 "Creada por",
             ]
         )
-        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setUniformRowHeights(True)
         layout.addWidget(self.tree, 1)
 
@@ -317,6 +325,7 @@ class SprintView(QWidget):
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
         self.btnNewCard.clicked.connect(self._start_new_card)
         self.btnExportScripts.clicked.connect(self._on_export_sprint_scripts)
+        self.btnBulkAssign.clicked.connect(self._on_bulk_assign_clicked)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         self.tree.itemActivated.connect(self._on_planning_item_activated)
         self.tree.itemDoubleClicked.connect(self._on_planning_item_activated)
@@ -601,6 +610,16 @@ class SprintView(QWidget):
             sprint_id = self._selected_sprint_id
             allow_export = sprint_id is not None and sprint_id in self._sprints
             self.btnExportScripts.setEnabled(bool(allow_export))
+
+        if hasattr(self, "btnBulkAssign"):
+            allow_bulk = can_lead and bool(self._selected_card_ids)
+            self.btnBulkAssign.setEnabled(allow_bulk)
+            if allow_bulk:
+                self.btnBulkAssign.setToolTip("")
+            elif not can_lead:
+                self.btnBulkAssign.setToolTip("Solo líderes pueden asignar tarjetas masivamente.")
+            else:
+                self.btnBulkAssign.setToolTip("Selecciona al menos una tarjeta para asignar responsables.")
 
     # ------------------------------------------------------------------
     def refresh(self) -> None:
@@ -980,6 +999,12 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _restore_selection(self) -> None:
+        if self._selected_card_ids:
+            if self._select_cards_in_tree(self._selected_card_ids):
+                return
+            self._selected_card_ids = []
+            self._selected_card_id = None
+
         if self._selected_card_id and self._selected_card_id in self._cards:
             card = self._cards[self._selected_card_id]
             if card.id is not None:
@@ -1001,12 +1026,43 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _select_tree_item(self, kind: str, ident: int) -> None:
-        iters: Iterable[QTreeWidgetItem] = self.tree.findItems("*", Qt.MatchWildcard | Qt.MatchRecursive, 0)
+        item = self._find_tree_item(kind, ident)
+        if item is not None:
+            self.tree.setCurrentItem(item)
+
+    # ------------------------------------------------------------------
+    def _find_tree_item(self, kind: str, ident: int) -> Optional[QTreeWidgetItem]:
+        iters: Iterable[QTreeWidgetItem] = self.tree.findItems(
+            "*", Qt.MatchWildcard | Qt.MatchRecursive, 0
+        )
         for item in iters:
             data = item.data(0, Qt.UserRole) or (None, None)
             if data == (kind, ident):
-                self.tree.setCurrentItem(item)
-                return
+                return item
+        return None
+
+    # ------------------------------------------------------------------
+    def _select_cards_in_tree(self, card_ids: Iterable[int]) -> bool:
+        items: List[QTreeWidgetItem] = []
+        for card_id in card_ids:
+            item = self._find_tree_item("card", card_id)
+            if item is not None:
+                items.append(item)
+        if not items:
+            return False
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clearSelection()
+            last_item: Optional[QTreeWidgetItem] = None
+            for item in items:
+                item.setSelected(True)
+                last_item = item
+            if last_item is not None:
+                self.tree.setCurrentItem(last_item)
+        finally:
+            self.tree.blockSignals(False)
+        self._on_selection_changed()
+        return True
 
     # ------------------------------------------------------------------
     def _populate_user_combo(
@@ -1495,6 +1551,17 @@ class SprintView(QWidget):
 
     # ------------------------------------------------------------------
     def _on_selection_changed(self) -> None:
+        selected_items = self.tree.selectedItems()
+        selected_card_ids: List[int] = []
+        for selected in selected_items:
+            kind_value, ident_value = selected.data(0, Qt.UserRole) or (None, None)
+            if kind_value == "card" and ident_value is not None:
+                try:
+                    selected_card_ids.append(int(ident_value))
+                except (TypeError, ValueError):
+                    continue
+        self._selected_card_ids = selected_card_ids
+
         item = self.tree.currentItem()
         if not item:
             self._selected_card_id = None
@@ -1551,6 +1618,9 @@ class SprintView(QWidget):
             self._selected_sprint_id = None
             self._selected_card_id = None
             self._close_sprint_dialog()
+            self._close_card_dialog()
+
+        if len(self._selected_card_ids) != 1 and self._active_form == "card":
             self._close_card_dialog()
 
         self._update_new_card_button()
@@ -2815,6 +2885,160 @@ class SprintView(QWidget):
             lines.append("GO")
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
+
+    # ------------------------------------------------------------------
+    def _on_bulk_assign_clicked(self) -> None:
+        if not require_roles("leader"):
+            QMessageBox.warning(
+                self,
+                "Asignar responsables",
+                "No tienes permisos para asignar responsables masivamente.",
+            )
+            return
+
+        card_ids = [card_id for card_id in self._selected_card_ids if card_id in self._cards]
+        if not card_ids:
+            QMessageBox.information(
+                self,
+                "Asignar responsables",
+                "Selecciona al menos una tarjeta para actualizar.",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Asignar responsables")
+        layout = QVBoxLayout(dialog)
+        message = QLabel(
+            f"Se actualizarán {len(card_ids)} tarjetas. Elige los cambios a aplicar."
+        )
+        message.setWordWrap(True)
+        layout.addWidget(message)
+
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        layout.addLayout(form)
+
+        sentinel_no_change = "__no_change__"
+
+        cbo_dev = QComboBox()
+        cbo_dev.addItem("Sin cambios", sentinel_no_change)
+        cbo_dev.addItem("Sin responsable", "")
+        developer_names = sorted(
+            filter_users_by_role(self._users, self._user_roles, "developer")
+        )
+        for name in developer_names:
+            cbo_dev.addItem(name, name)
+        form.addRow("Desarrollo:", cbo_dev)
+
+        cbo_qa = QComboBox()
+        cbo_qa.addItem("Sin cambios", sentinel_no_change)
+        cbo_qa.addItem("Sin responsable", "")
+        qa_names = sorted(filter_users_by_role(self._users, self._user_roles, "qa"))
+        for name in qa_names:
+            cbo_qa.addItem(name, name)
+        form.addRow("QA:", cbo_qa)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        dev_data = cbo_dev.currentData()
+        qa_data = cbo_qa.currentData()
+        apply_dev = dev_data != sentinel_no_change
+        apply_qa = qa_data != sentinel_no_change
+        if not apply_dev and not apply_qa:
+            QMessageBox.information(
+                self,
+                "Asignar responsables",
+                "No se seleccionó ningún cambio para aplicar.",
+            )
+            return
+
+        dev_value = None
+        if apply_dev and dev_data not in (None, ""):
+            dev_value = str(dev_data)
+        qa_value = None
+        if apply_qa and qa_data not in (None, ""):
+            qa_value = str(qa_data)
+
+        now = int(time.time())
+        user = self._current_user()
+        updated_cards: List[int] = []
+        failures: List[str] = []
+
+        for card_id in card_ids:
+            card = self._cards.get(card_id)
+            if not card:
+                continue
+            updated = replace(card)
+            if apply_dev:
+                updated.assignee = dev_value
+            if apply_qa:
+                updated.qa_assignee = qa_value
+            updated.updated_at = now
+            updated.updated_by = user
+            try:
+                saved = upsert_card(updated)
+            except sqlite3.IntegrityError:
+                failures.append(
+                    f"{card.ticket_id or card.title or card.id}: la rama indicada ya existe"
+                )
+                continue
+            except Exception as exc:  # pragma: no cover - errores de conexión
+                failures.append(f"{card.ticket_id or card.title or card.id}: {exc}")
+                continue
+            if saved.id is None:
+                continue
+            self._cards[saved.id] = saved
+            updated_cards.append(saved.id)
+
+        if not updated_cards:
+            if failures:
+                details = "\n".join(failures[:5])
+                if len(failures) > 5:
+                    details += f"\n... ({len(failures) - 5} más)"
+                QMessageBox.warning(
+                    self,
+                    "Asignar responsables",
+                    f"No se pudo actualizar ninguna tarjeta:\n{details}",
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "Asignar responsables",
+                    "No hubo cambios que guardar en las tarjetas seleccionadas.",
+                )
+            return
+
+        self._selected_card_ids = list(updated_cards)
+        self._selected_card_id = updated_cards[-1]
+        last_card = self._cards.get(updated_cards[-1])
+        if last_card and getattr(last_card, "sprint_id", None) not in (None, ""):
+            try:
+                self._selected_sprint_id = int(last_card.sprint_id)
+            except (TypeError, ValueError):
+                self._selected_sprint_id = None
+        else:
+            self._selected_sprint_id = None
+
+        self.refresh()
+
+        summary = f"Se actualizaron {len(updated_cards)} tarjetas correctamente."
+        if failures:
+            details = "\n".join(failures[:5])
+            if len(failures) > 5:
+                details += f"\n... ({len(failures) - 5} más)"
+            QMessageBox.warning(
+                self,
+                "Asignar responsables",
+                f"{summary}\nSin embargo, {len(failures)} tarjetas no pudieron actualizarse:\n{details}",
+            )
+        else:
+            QMessageBox.information(self, "Asignar responsables", summary)
 
     # ------------------------------------------------------------------
     def _on_export_sprint_scripts(self) -> None:
