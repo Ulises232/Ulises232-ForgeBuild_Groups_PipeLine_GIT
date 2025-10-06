@@ -1,10 +1,11 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Literal
+from typing import List, Optional, Dict, Literal, Callable, Tuple
 import yaml, pathlib, os, sys
 from datetime import datetime
 
+from .branch_history_db import BranchHistoryDB
 from .config_store import ConfigStore
 class PipelinePreset(BaseModel):
     name: str
@@ -74,6 +75,7 @@ class Config(BaseModel):
     max_build_workers: Optional[int] = None
 
 _APPLIED_ENV_KEYS: set[str] = set()
+_GROUPS_CACHE: Dict[Tuple[int, Optional[str]], List[Group]] = {}
 
 
 def _package_data_dir() -> pathlib.Path:
@@ -105,6 +107,61 @@ def _model_to_dict(model) -> Dict:
         return model.dict()
     return model.model_dump()
 
+
+_CONFIG_REPO_FACTORY: Optional[Callable[[], BranchHistoryDB]] = None
+
+
+def set_config_repo_factory(factory: Optional[Callable[[], BranchHistoryDB]]) -> None:
+    """Permite inyectar un factory de repositorio para pruebas."""
+
+    global _CONFIG_REPO_FACTORY
+    _CONFIG_REPO_FACTORY = factory
+    _GROUPS_CACHE.clear()
+
+
+def _create_config_store() -> ConfigStore:
+    repo: Optional[BranchHistoryDB] = None
+    if _CONFIG_REPO_FACTORY is not None:
+        repo = _CONFIG_REPO_FACTORY()
+    else:
+        try:
+            repo = BranchHistoryDB()
+        except Exception:
+            repo = None
+    if repo is not None:
+        return ConfigStore(repo=repo)
+    return ConfigStore()
+
+
+def groups_for_user(cfg: Config, username: Optional[str] = None) -> List[Group]:
+    """Return groups with overrides applied for the requested username."""
+
+    if username:
+        user = username
+    else:
+        try:
+            from .session import current_username as _current_username
+
+            user = _current_username("")
+        except Exception:
+            user = ""
+    key = (id(cfg), user or None)
+    cached = _GROUPS_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    if not user:
+        groups = list(cfg.groups or [])
+    else:
+        store = _create_config_store()
+        try:
+            groups = store.list_groups(username=user)
+        except Exception:
+            groups = list(cfg.groups or [])
+
+    _GROUPS_CACHE[key] = groups
+    return groups
+
 def apply_environment(cfg: Config) -> None:
     """Apply configured environment variables to the current process."""
     global _APPLIED_ENV_KEYS
@@ -125,8 +182,9 @@ def apply_environment(cfg: Config) -> None:
 
 
 def load_config() -> Config:
+    _GROUPS_CACHE.clear()
     cfg_path = _cfg_file()
-    store = ConfigStore()
+    store = _create_config_store()
     legacy_groups_data = []
     if cfg_path.exists():
         with open(cfg_path, "r", encoding="utf-8") as f:
@@ -186,8 +244,9 @@ def load_config() -> Config:
 
 def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()
-    store = ConfigStore()
+    store = _create_config_store()
     store.replace_groups(cfg.groups or [])
+    _GROUPS_CACHE.clear()
     data = _model_to_dict(cfg)
     data.pop("groups", None)
     cfg_path = _cfg_file()

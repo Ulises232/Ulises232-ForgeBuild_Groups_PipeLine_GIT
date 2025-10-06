@@ -1,6 +1,6 @@
 # buildtool/core/tasks.py
 from __future__ import annotations
-from .config import Config
+from .config import Config, groups_for_user
 from .maven import run_maven
 from .copier import copy_artifacts
 from .pipeline_history import PipelineHistory
@@ -16,13 +16,14 @@ _RUNONCE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _locate_project(cfg: Config, project_key: str, group_key: str | None):
+    groups = groups_for_user(cfg)
     if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
+        grp = next((g for g in groups if g.key == group_key), None)
         if grp:
             project = next((p for p in grp.projects if p.key == project_key), None)
             if project:
                 return grp, project
-    for grp in cfg.groups:
+    for grp in groups:
         project = next((p for p in grp.projects if p.key == project_key), None)
         if project:
             return grp, project
@@ -31,22 +32,26 @@ def _locate_project(cfg: Config, project_key: str, group_key: str | None):
 
 def _resolve_repo_path(cfg: Config, project_key: str, group_key: str | None,
                        project_repo: str | None, project_workspace: str | None) -> pathlib.Path:
+    groups = groups_for_user(cfg)
     if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
+        grp = next((g for g in groups if g.key == group_key), None)
         if grp and project_repo and project_repo in grp.repos:
-            return pathlib.Path(grp.repos[project_repo])
-    if project_workspace and project_workspace in cfg.paths.workspaces:
-        return pathlib.Path(cfg.paths.workspaces[project_workspace])
-    if project_repo and project_repo in cfg.paths.workspaces:
-        return pathlib.Path(cfg.paths.workspaces[project_repo])
-    return pathlib.Path(project_workspace or project_repo or ".")
+            return pathlib.Path(grp.repos[project_repo]).expanduser()
+    if project_workspace:
+        workspace_value = cfg.paths.workspaces.get(project_workspace, project_workspace)
+        return pathlib.Path(workspace_value).expanduser()
+    if project_repo:
+        repo_value = cfg.paths.workspaces.get(project_repo, project_repo)
+        return pathlib.Path(repo_value).expanduser()
+    return pathlib.Path(project_workspace or project_repo or ".").expanduser()
 
 def _resolve_output_base(cfg: Config, project_key: str, profile: str, group_key: str | None) -> pathlib.Path:
+    groups = groups_for_user(cfg)
     if group_key:
-        grp = next((g for g in cfg.groups if g.key == group_key), None)
+        grp = next((g for g in groups if g.key == group_key), None)
         if grp and grp.output_base:
-            return pathlib.Path(grp.output_base) / project_key / profile
-    return pathlib.Path(cfg.paths.output_base) / project_key / profile
+            return pathlib.Path(grp.output_base).expanduser() / project_key / profile
+    return pathlib.Path(cfg.paths.output_base).expanduser() / project_key / profile
 
 def _ensure(dir_path: pathlib.Path) -> pathlib.Path:
     dir_path.mkdir(parents=True, exist_ok=True)

@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.bg import run_in_thread
-from ..core.config import Config, PipelinePreset, save_config
+from ..core.config import Config, PipelinePreset, save_config, load_config
 from ..core.config_queries import (
     first_group_key,
     find_project,
@@ -27,12 +27,12 @@ from ..core.config_queries import (
     project_module_names,
     project_profiles,
 )
-from ..core.tasks import build_project_scheduled
+from ..core.tasks import build_project_scheduled, _resolve_repo_path, _resolve_output_base
 from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker, build_worker
 
 from ..ui.multi_select import MultiSelectComboBox
-from ..ui.widgets import combo_with_arrow, setup_quick_filter
+from ..ui.widgets import combo_with_arrow, setup_quick_filter, set_combo_enabled
 from .preset_manager import PresetManagerDialog
 
 
@@ -55,9 +55,10 @@ class BuildView(QWidget):
         if group_keys:
             for key in group_keys:
                 self.cboGroup.addItem(key, key)
+            set_combo_enabled(self.cboGroup, True)
         else:
             self.cboGroup.addItem("Sin grupos", None)
-            self.cboGroup.setEnabled(False)
+            set_combo_enabled(self.cboGroup, False)
         self.cboGroupContainer = combo_with_arrow(self.cboGroup)
         row.addWidget(self.cboGroupContainer)
 
@@ -194,6 +195,73 @@ class BuildView(QWidget):
                 label += f" ({' / '.join(extra)})"
             self.cboPresets.addItem(label, preset)
 
+    def _reload_cfg_from_store(self) -> None:
+        current_group = self._current_group()
+        current_project = self.cboProject.currentData()
+        selected_profiles = self.cboProfiles.checked_items()
+        selected_modules = self.cboModules.checked_items()
+        current_preset = self.cboPresets.currentData()
+        selected_preset_name = getattr(current_preset, "name", None)
+
+        try:
+            refreshed = load_config()
+        except Exception as exc:  # pragma: no cover - defensive UI logging
+            self.log.append(f"<< No se pudo recargar la configuración: {exc}")
+            return
+
+        self.cfg = refreshed
+        group_keys = [grp.key for grp in iter_groups(self.cfg)]
+
+        blocker = QSignalBlocker(self.cboGroup)
+        _ = blocker
+        self.cboGroup.clear()
+        if group_keys:
+            for key in group_keys:
+                self.cboGroup.addItem(key, key)
+            set_combo_enabled(self.cboGroup, True)
+        else:
+            self.cboGroup.addItem("Sin grupos", None)
+            set_combo_enabled(self.cboGroup, False)
+        target_index = self.cboGroup.findData(current_group)
+        if target_index != -1:
+            self.cboGroup.setCurrentIndex(target_index)
+        elif group_keys:
+            self.cboGroup.setCurrentIndex(0)
+        else:
+            self.cboGroup.setCurrentIndex(-1)
+
+        self.refresh_group()
+
+        if current_project:
+            project_blocker = QSignalBlocker(self.cboProject)
+            _ = project_blocker
+            proj_idx = self.cboProject.findData(current_project)
+            if proj_idx != -1:
+                self.cboProject.setCurrentIndex(proj_idx)
+            self.refresh_project_data()
+
+        self.cboProfiles.set_checked_items(selected_profiles)
+        self.cboModules.set_checked_items(selected_modules)
+
+        has_groups = bool(group_keys)
+        self.btnBuildSel.setEnabled(has_groups)
+        self.btnBuildAll.setEnabled(has_groups)
+        self.cboProfiles.setEnabled(has_groups)
+        self.cboModules.setEnabled(has_groups)
+
+        previous_index = self.cboPresets.currentIndex()
+        self._refresh_presets()
+        if selected_preset_name:
+            for idx in range(self.cboPresets.count()):
+                preset = self.cboPresets.itemData(idx)
+                if preset and getattr(preset, "name", None) == selected_preset_name:
+                    self.cboPresets.setCurrentIndex(idx)
+                    break
+            else:
+                self.cboPresets.setCurrentIndex(0)
+        else:
+            self.cboPresets.setCurrentIndex(previous_index if previous_index >= 0 else 0)
+
     @Slot(int)
     def _on_preset_selected(self, _index: int = -1) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
@@ -295,7 +363,7 @@ class BuildView(QWidget):
         self.lblProject.setVisible(show_proj)
         self.cboProjectContainer.setVisible(show_proj)
         self.cboProject.setVisible(show_proj)
-        self.cboProject.setEnabled(bool(projects))
+        set_combo_enabled(self.cboProject, bool(projects))
 
         self.refresh_project_data()
 
@@ -314,11 +382,36 @@ class BuildView(QWidget):
         self.cboModules.set_items(modules or [], checked_all=True)
 
     def _start_schedule(self, profiles):
+        profiles = list(profiles)
         proj, gkey = self._get_current_project()
         if not proj:
             self.log.append("<< No hay proyecto configurado en este grupo.")
             return
         selected_modules = self.cboModules.checked_items() or self.cboModules.all_items()
+
+        try:
+            repo_path = _resolve_repo_path(
+                self.cfg,
+                proj.key,
+                gkey,
+                getattr(proj, "repo", None),
+                getattr(proj, "workspace", None),
+            )
+            self.log.append(f"<< Repo base (usuario actual): {repo_path}")
+        except Exception as exc:  # pragma: no cover - defensive UI logging
+            self.log.append(f"<< No se pudo resolver la ruta del repo: {exc}")
+
+        output_lines: list[str] = []
+        for prof in profiles:
+            try:
+                base = _resolve_output_base(self.cfg, proj.key, prof, gkey)
+                output_lines.append(f"   [{prof}] {base}")
+            except Exception as exc:  # pragma: no cover - defensive UI logging
+                output_lines.append(f"   [{prof}] error al resolver salida ({exc})")
+        if output_lines:
+            self.log.append("<< Carpetas de salida por perfil:")
+            for line in output_lines:
+                self.log.append(line)
 
         self.btnBuildSel.setEnabled(False)
         self.btnBuildAll.setEnabled(False)
@@ -355,6 +448,7 @@ class BuildView(QWidget):
 
     @Slot(bool)
     def start_build_selected(self, _checked: bool = False) -> None:
+        self._reload_cfg_from_store()
         profiles = self.cboProfiles.checked_items()
         if not profiles:
             self.log.append("<< Elige al menos un perfil.")
@@ -363,6 +457,7 @@ class BuildView(QWidget):
 
     @Slot(bool)
     def start_build_all(self, _checked: bool = False) -> None:
+        self._reload_cfg_from_store()
         profiles = self.cboProfiles.all_items()
         if not profiles:
             self.log.append("<< No hay perfiles configurados.")
