@@ -18,6 +18,9 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - Las vistas de Build y Deploy recargan la configuración antes de ejecutar pipelines y registran en la bitácora las rutas resueltas para el usuario activo.
 - Se descartó la migración/creación de tablas `sprints`, `cards` y `card_assignments` dentro del almacén de configuración al no ser necesarias en la persistencia compartida.
 
+### Corregido
+- Se reordenó la creación de `catalog_companies` antes de `card_company_links` en el esquema de Branch History para evitar fallos de llaves foráneas al inicializar una base limpia.
+
 ### Interno
 - Pruebas de configuración actualizadas con un `FakeBranchHistoryRepo` basado en SQLite para validar la nueva capa SQL.
 - Casos adicionales que verifican la composición global+usuario y la API de overrides dentro de `test_config_store`.

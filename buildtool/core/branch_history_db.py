@@ -838,6 +838,20 @@ class _SqlServerBranchHistory:
             END
             """,
             """
+            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'catalog_companies')
+            BEGIN
+                CREATE TABLE catalog_companies (
+                    id INT IDENTITY(1,1) PRIMARY KEY,
+                    name NVARCHAR(255) NOT NULL UNIQUE,
+                    group_name NVARCHAR(255) NULL,
+                    created_at BIGINT NOT NULL DEFAULT 0,
+                    created_by NVARCHAR(255) NULL,
+                    updated_at BIGINT NOT NULL DEFAULT 0,
+                    updated_by NVARCHAR(255) NULL
+                );
+            END
+            """,
+            """
             IF EXISTS (
                 SELECT 1
                 FROM sys.foreign_keys
@@ -897,20 +911,6 @@ class _SqlServerBranchHistory:
                     password_changed_at BIGINT NULL,
                     require_password_reset BIT NOT NULL DEFAULT 0,
                     active_since BIGINT NULL
-                );
-            END
-            """,
-            """
-            IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'catalog_companies')
-            BEGIN
-                CREATE TABLE catalog_companies (
-                    id INT IDENTITY(1,1) PRIMARY KEY,
-                    name NVARCHAR(255) NOT NULL UNIQUE,
-                    group_name NVARCHAR(255) NULL,
-                    created_at BIGINT NOT NULL DEFAULT 0,
-                    created_by NVARCHAR(255) NULL,
-                    updated_at BIGINT NOT NULL DEFAULT 0,
-                    updated_by NVARCHAR(255) NULL
                 );
             END
             """,
