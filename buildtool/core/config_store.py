@@ -502,6 +502,11 @@ class SqlConfigStore:
         with self._repo.connection() as conn:
             yield conn
 
+    def _cursor(self, conn):
+        if self._dialect == "sqlserver":
+            return conn.cursor(as_dict=False)
+        return conn.cursor()
+
     def _ensure_schema(self) -> None:
         if self._dialect == "sqlite":
             script = _sqlite_schema_script(self._prefix)
@@ -512,7 +517,7 @@ class SqlConfigStore:
         else:
             statements = _sqlserver_schema_statements(self._prefix)
             with self._connect() as conn:
-                cursor = conn.cursor()
+                cursor = self._cursor(conn)
                 for stmt in statements:
                     try:
                         cursor.execute(stmt)
@@ -552,7 +557,7 @@ class SqlConfigStore:
     # ------------------------------------------------------------------
     def save_metadata(self, key: str, value: str) -> None:
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"UPDATE {self._table('metadata')} SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
@@ -567,7 +572,7 @@ class SqlConfigStore:
 
     def get_metadata(self, key: str) -> Optional[str]:
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"SELECT value FROM {self._table('metadata')} WHERE key = ?",
@@ -581,7 +586,7 @@ class SqlConfigStore:
     # ------------------------------------------------------------------
     def is_empty(self) -> bool:
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"SELECT COUNT(*) FROM {self._table('groups')}",
@@ -606,7 +611,7 @@ class SqlConfigStore:
                     continue
 
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"SELECT [key] FROM {self._table('groups')}",
@@ -886,10 +891,10 @@ class SqlConfigStore:
 
         groups: List[Group] = []
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
-                f"SELECT key, position, output_base, config_json FROM {self._table('groups')} ORDER BY position, key",
+                f"SELECT [key], position, output_base, config_json FROM {self._table('groups')} ORDER BY position, [key]",
             )
             group_rows = cursor.fetchall()
 
@@ -1082,7 +1087,7 @@ class SqlConfigStore:
         for repo_key, path in (repos or {}).items():
             rows.append((str(group_key), str(username), "repo", str(repo_key), str(path)))
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"DELETE FROM {self._table('group_user_paths')} WHERE group_key = ? AND username = ?",
@@ -1107,7 +1112,7 @@ class SqlConfigStore:
         if not group_key or not project_key or not module_name or not username:
             return
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             if path is None or path == "":
                 self._execute(
                     cursor,
@@ -1142,7 +1147,7 @@ class SqlConfigStore:
         if not group_key or not target_name or not username:
             return
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             if path_template is None and hotfix_path_template is None:
                 self._execute(
                     cursor,
@@ -1183,7 +1188,7 @@ class SqlConfigStore:
         if not group_key or not username:
             return {}, None
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"SELECT kind, item_key, value FROM {self._table('group_user_paths')} WHERE group_key = ? AND username = ?",
@@ -1207,7 +1212,7 @@ class SqlConfigStore:
         if not group_key or not username:
             return mapping
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"SELECT project_key, module_name, path FROM {self._table('module_user_paths')} WHERE group_key = ? AND username = ?",
@@ -1227,7 +1232,7 @@ class SqlConfigStore:
         if not group_key or not username:
             return mapping
         with self._connect() as conn:
-            cursor = conn.cursor()
+            cursor = self._cursor(conn)
             self._execute(
                 cursor,
                 f"SELECT target_name, path_template, hotfix_path_template FROM {self._table('deploy_user_paths')} WHERE group_key = ? AND username = ?",

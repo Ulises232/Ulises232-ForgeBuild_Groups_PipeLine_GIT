@@ -21,6 +21,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ### Corregido
 - Se reordenó la creación de `catalog_companies` antes de `card_company_links` en el esquema de Branch History para evitar fallos de llaves foráneas al inicializar una base limpia.
 - El repositorio de Branch History expone un context manager `connection()` para reutilizar el pool SQL Server desde el almacén de configuración sin errores de atributo.
+- `SqlConfigStore` fuerza cursores sin `as_dict` en SQL Server y evita errores `ColumnsWithoutNamesError` al contar registros durante el arranque.
 
 ### Interno
 - Pruebas de configuración actualizadas con un `FakeBranchHistoryRepo` basado en SQLite para validar la nueva capa SQL.
