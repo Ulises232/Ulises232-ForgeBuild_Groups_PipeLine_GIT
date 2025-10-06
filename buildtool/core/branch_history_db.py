@@ -1301,6 +1301,13 @@ class _SqlServerBranchHistory:
                         continue
                     raise
 
+    @contextmanager
+    def connection(self) -> Iterator["pymssql.Connection"]:
+        """Expone el context manager de conexión del pool subyacente."""
+
+        with self._connect() as conn:
+            yield conn
+
     # ------------------------------------------------------------------
     # helpers
     def _execute_upsert_branch(self, cursor: "pymssql.Cursor", data: Dict[str, object]) -> None:
