@@ -5,6 +5,12 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.1] - 2025-10-24
+
+### Documentación
+- Se añadió `docs/sqlserver_schema.sql` con el DDL completo de las tablas e índices del backend SQL Server para Branch History.
+- Se complementó el script con la definición de todas las tablas `config_*`, sus relaciones, índices y triggers para la capa compartida de configuración.
+
 ## [1.13.0] - 2025-10-23
 
 ### Añadido
