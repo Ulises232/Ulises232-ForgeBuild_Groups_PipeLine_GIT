@@ -5,6 +5,17 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.0] - 2025-10-23
+
+### Añadido
+- Persistencia de configuración sobre SQL Server a través de `SqlConfigStore`, incluyendo tablas `config_*` para grupos, proyectos, módulos, despliegues, sprints y tarjetas.
+
+### Cambiado
+- `load_config` y `save_config` ahora construyen el almacén desde el repositorio compartido y permiten inyectar un repositorio alterno para pruebas.
+
+### Interno
+- Pruebas de configuración actualizadas con un `FakeBranchHistoryRepo` basado en SQLite para validar la nueva capa SQL.
+
 ## [1.12.0] - 2025-10-22
 
 ### Añadido

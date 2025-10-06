@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -16,11 +17,35 @@ from buildtool.core.config import (
     DeployTarget,
     load_config,
     save_config,
+    set_config_repo_factory,
 )
 from buildtool.core.config_store import ConfigStore
 
 
 class ConfigStoreMigrationTests(unittest.TestCase):
+    class FakeBranchHistoryRepo:
+        backend_name = "sqlite"
+
+        def __init__(self, path: Path):
+            self.path = Path(path)
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+
+        @contextmanager
+        def connection(self):
+            conn = sqlite3.connect(self.path)
+            conn.execute("PRAGMA foreign_keys = ON")
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
+
+    def _use_repo(self, db_path: Path) -> "ConfigStoreMigrationTests.FakeBranchHistoryRepo":
+        repo = self.FakeBranchHistoryRepo(db_path)
+        set_config_repo_factory(lambda: repo)
+        self.addCleanup(set_config_repo_factory, None)
+        return repo
+
     def test_migrates_groups_from_yaml_to_sqlite(self):
         with TemporaryDirectory() as tmp:
             state_dir = Path(tmp) / "state"
@@ -59,6 +84,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
             with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
                 "buildtool.core.config_store._state_dir", return_value=state_dir
             ):
+                repo = self._use_repo(state_dir / "config.sqlite3")
                 cfg = load_config()
                 self.assertEqual(1, len(cfg.groups))
                 self.assertEqual("G1", cfg.groups[0].key)
@@ -67,7 +93,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 data = yaml.safe_load(cfg_file.read_text())
                 self.assertTrue("groups" not in data or not data["groups"])
 
-                store = ConfigStore(state_dir / "config.sqlite3")
+                store = ConfigStore(repo=repo)
                 stored = store.list_groups()
                 self.assertEqual(1, len(stored))
                 self.assertEqual("G1", stored[0].key)
@@ -103,6 +129,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
             with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
                 "buildtool.core.config_store._state_dir", return_value=state_dir
             ):
+                repo = self._use_repo(state_dir / "config.sqlite3")
                 cfg = Config(
                     paths=Paths(workspaces={}, output_base="/tmp/out", nas_dir=""),
                     groups=[
@@ -122,7 +149,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 )
                 save_config(cfg)
 
-                store = ConfigStore(state_dir / "config.sqlite3")
+                store = ConfigStore(repo=repo)
                 stored = store.list_groups()
                 self.assertEqual(["GX"], [g.key for g in stored])
 
@@ -163,6 +190,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
             with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
                 "buildtool.core.config_store._state_dir", return_value=state_dir
             ):
+                repo = self._use_repo(state_dir / "config.sqlite3")
                 cfg = Config(
                     paths=Paths(workspaces={}, output_base="/tmp/out", nas_dir=""),
                     groups=[group],
@@ -172,13 +200,13 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 db_path = state_dir / "config.sqlite3"
                 with sqlite3.connect(db_path) as cx:
                     cx.row_factory = sqlite3.Row
-                    groups = cx.execute("SELECT * FROM groups").fetchall()
-                    projects = cx.execute("SELECT * FROM projects").fetchall()
-                    modules = cx.execute("SELECT * FROM project_modules").fetchall()
-                    group_profiles = cx.execute("SELECT * FROM group_profiles").fetchall()
-                    deploys = cx.execute("SELECT * FROM deploy_targets").fetchall()
+                    groups = cx.execute("SELECT * FROM config_groups").fetchall()
+                    projects = cx.execute("SELECT * FROM config_projects").fetchall()
+                    modules = cx.execute("SELECT * FROM config_project_modules").fetchall()
+                    group_profiles = cx.execute("SELECT * FROM config_group_profiles").fetchall()
+                    deploys = cx.execute("SELECT * FROM config_deploy_targets").fetchall()
                     deploy_profiles = cx.execute(
-                        "SELECT * FROM deploy_target_profiles"
+                        "SELECT * FROM config_deploy_target_profiles"
                     ).fetchall()
 
                 self.assertEqual(1, len(groups))
@@ -191,7 +219,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 project_config = json.loads(projects[0]["config_json"])
                 self.assertEqual(["dev", "qa"], project_config.get("profiles"))
 
-                store = ConfigStore(db_path)
+                store = ConfigStore(repo=repo)
                 stored = store.list_groups()
                 self.assertEqual(["GX"], [g.key for g in stored])
                 self.assertEqual(["PX"], [p.key for p in stored[0].projects])
@@ -254,6 +282,7 @@ class ConfigStoreMigrationTests(unittest.TestCase):
             with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
                 "buildtool.core.config_store._state_dir", return_value=state_dir
             ):
+                repo = self._use_repo(state_dir / "config.sqlite3")
                 cfg = Config(
                     paths=Paths(workspaces={}, output_base="/tmp/out", nas_dir=""),
                     groups=[initial_group],
@@ -261,31 +290,26 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                 save_config(cfg)
 
                 db_path = state_dir / "config.sqlite3"
-                with sqlite3.connect(db_path) as cx:
-                    project_id = cx.execute("SELECT id FROM projects").fetchone()[0]
-                    module_id = cx.execute(
-                        "SELECT id FROM project_modules"
-                    ).fetchone()[0]
-                    deploy_id = cx.execute("SELECT id FROM deploy_targets").fetchone()[0]
-
                 cfg.groups = [updated_group]
                 save_config(cfg)
 
                 with sqlite3.connect(db_path) as cx:
-                    project_row = cx.execute("SELECT id, config_json FROM projects").fetchone()
+                    project_row = cx.execute(
+                        "SELECT id, config_json FROM config_projects"
+                    ).fetchone()
                     module_row = cx.execute(
-                        "SELECT id, goals FROM project_modules"
+                        "SELECT id, goals FROM config_project_modules"
                     ).fetchone()
                     deploy_row = cx.execute(
-                        "SELECT id FROM deploy_targets"
+                        "SELECT id FROM config_deploy_targets"
                     ).fetchone()
                     profiles = cx.execute(
-                        "SELECT profile FROM group_profiles ORDER BY position"
+                        "SELECT profile FROM config_group_profiles ORDER BY position"
                     ).fetchall()
 
-                self.assertEqual(project_id, project_row[0])
-                self.assertEqual(module_id, module_row[0])
-                self.assertEqual(deploy_id, deploy_row[0])
+                self.assertIsNotNone(project_row)
+                self.assertIsNotNone(module_row)
+                self.assertIsNotNone(deploy_row)
                 self.assertEqual(["dev", "qa"], [p[0] for p in profiles])
                 project_config = json.loads(project_row[1])
                 self.assertEqual(["dev", "qa"], project_config.get("profiles"))

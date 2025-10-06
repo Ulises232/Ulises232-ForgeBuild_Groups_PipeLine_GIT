@@ -1,10 +1,11 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Literal
+from typing import List, Optional, Dict, Literal, Callable
 import yaml, pathlib, os, sys
 from datetime import datetime
 
+from .branch_history_db import BranchHistoryDB
 from .config_store import ConfigStore
 class PipelinePreset(BaseModel):
     name: str
@@ -105,6 +106,30 @@ def _model_to_dict(model) -> Dict:
         return model.dict()
     return model.model_dump()
 
+
+_CONFIG_REPO_FACTORY: Optional[Callable[[], BranchHistoryDB]] = None
+
+
+def set_config_repo_factory(factory: Optional[Callable[[], BranchHistoryDB]]) -> None:
+    """Permite inyectar un factory de repositorio para pruebas."""
+
+    global _CONFIG_REPO_FACTORY
+    _CONFIG_REPO_FACTORY = factory
+
+
+def _create_config_store() -> ConfigStore:
+    repo: Optional[BranchHistoryDB] = None
+    if _CONFIG_REPO_FACTORY is not None:
+        repo = _CONFIG_REPO_FACTORY()
+    else:
+        try:
+            repo = BranchHistoryDB()
+        except Exception:
+            repo = None
+    if repo is not None:
+        return ConfigStore(repo=repo)
+    return ConfigStore()
+
 def apply_environment(cfg: Config) -> None:
     """Apply configured environment variables to the current process."""
     global _APPLIED_ENV_KEYS
@@ -126,7 +151,7 @@ def apply_environment(cfg: Config) -> None:
 
 def load_config() -> Config:
     cfg_path = _cfg_file()
-    store = ConfigStore()
+    store = _create_config_store()
     legacy_groups_data = []
     if cfg_path.exists():
         with open(cfg_path, "r", encoding="utf-8") as f:
@@ -186,7 +211,7 @@ def load_config() -> Config:
 
 def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()
-    store = ConfigStore()
+    store = _create_config_store()
     store.replace_groups(cfg.groups or [])
     data = _model_to_dict(cfg)
     data.pop("groups", None)

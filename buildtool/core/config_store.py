@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, List, Optional, Any, Dict
+from typing import Iterable, List, Optional, Any, Dict, Sequence
+
+from .branch_history_db import BranchHistoryDB
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -154,10 +157,1003 @@ def _json_loads(value: Optional[str], default: Any) -> Any:
         return default
 
 
-class ConfigStore:
-    """Persistencia seccionada de grupos, proyectos y despliegues en SQLite."""
+def _sqlserver_schema_statements(prefix: str) -> List[str]:
+    tbl = lambda name: f"{prefix}{name}"
+    return [
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('metadata')}')
+        BEGIN
+            CREATE TABLE {tbl('metadata')} (
+                [key] NVARCHAR(255) NOT NULL PRIMARY KEY,
+                value NVARCHAR(MAX) NOT NULL,
+                created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('groups')}')
+        BEGIN
+            CREATE TABLE {tbl('groups')} (
+                [key] NVARCHAR(255) NOT NULL PRIMARY KEY,
+                position INT NOT NULL,
+                output_base NVARCHAR(MAX) NOT NULL DEFAULT '',
+                config_json NVARCHAR(MAX) NOT NULL DEFAULT '{{}}',
+                created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                updated_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.triggers WHERE name = 'trg_{tbl('groups')}_updated')
+        BEGIN
+            EXEC('CREATE TRIGGER trg_{tbl('groups')}_updated ON {tbl('groups')}
+            AFTER UPDATE AS BEGIN
+                UPDATE {tbl('groups')} SET updated_at = SYSUTCDATETIME()
+                WHERE [key] IN (SELECT DISTINCT [key] FROM Inserted);
+            END');
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('group_repos')}')
+        BEGIN
+            CREATE TABLE {tbl('group_repos')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                repo_key NVARCHAR(255) NOT NULL,
+                path NVARCHAR(MAX) NOT NULL,
+                CONSTRAINT fk_{tbl('group_repos')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('group_profiles')}')
+        BEGIN
+            CREATE TABLE {tbl('group_profiles')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                position INT NOT NULL,
+                profile NVARCHAR(255) NOT NULL,
+                CONSTRAINT fk_{tbl('group_profiles')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('projects')}')
+        BEGIN
+            CREATE TABLE {tbl('projects')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                project_key NVARCHAR(255) NOT NULL,
+                position INT NOT NULL,
+                execution_mode NVARCHAR(64) NULL,
+                workspace NVARCHAR(255) NULL,
+                repo NVARCHAR(255) NULL,
+                config_json NVARCHAR(MAX) NOT NULL DEFAULT '{{}}',
+                CONSTRAINT fk_{tbl('projects')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
+            );
+            CREATE UNIQUE INDEX idx_{tbl('projects')}_group_key
+                ON {tbl('projects')}(group_key, project_key);
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('project_modules')}')
+        BEGIN
+            CREATE TABLE {tbl('project_modules')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                project_id INT NOT NULL,
+                position INT NOT NULL,
+                name NVARCHAR(255) NOT NULL,
+                path NVARCHAR(MAX) NOT NULL,
+                version_files NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+                goals NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+                optional BIT NOT NULL DEFAULT 0,
+                profile_override NVARCHAR(255) NULL,
+                only_if_profile_equals NVARCHAR(255) NULL,
+                copy_to_profile_war BIT NOT NULL DEFAULT 0,
+                copy_to_profile_ui BIT NOT NULL DEFAULT 0,
+                copy_to_subfolder NVARCHAR(255) NULL,
+                rename_jar_to NVARCHAR(255) NULL,
+                no_profile BIT NOT NULL DEFAULT 0,
+                run_once BIT NOT NULL DEFAULT 0,
+                select_pattern NVARCHAR(255) NULL,
+                serial_across_profiles BIT NOT NULL DEFAULT 0,
+                copy_to_root BIT NOT NULL DEFAULT 0,
+                config_json NVARCHAR(MAX) NOT NULL DEFAULT '{{}}',
+                CONSTRAINT fk_{tbl('project_modules')}_project FOREIGN KEY(project_id)
+                    REFERENCES {tbl('projects')}(id) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('deploy_targets')}')
+        BEGIN
+            CREATE TABLE {tbl('deploy_targets')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                position INT NOT NULL,
+                name NVARCHAR(255) NOT NULL,
+                project_key NVARCHAR(255) NOT NULL,
+                path_template NVARCHAR(MAX) NOT NULL,
+                hotfix_path_template NVARCHAR(MAX) NULL,
+                config_json NVARCHAR(MAX) NOT NULL DEFAULT '{{}}',
+                CONSTRAINT fk_{tbl('deploy_targets')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('deploy_target_profiles')}')
+        BEGIN
+            CREATE TABLE {tbl('deploy_target_profiles')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                target_id INT NOT NULL,
+                position INT NOT NULL,
+                profile NVARCHAR(255) NOT NULL,
+                CONSTRAINT fk_{tbl('deploy_target_profiles')}_target FOREIGN KEY(target_id)
+                    REFERENCES {tbl('deploy_targets')}(id) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('sprints')}')
+        BEGIN
+            CREATE TABLE {tbl('sprints')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                branch_key NVARCHAR(512) NOT NULL DEFAULT '',
+                name NVARCHAR(255) NOT NULL,
+                version NVARCHAR(128) NOT NULL,
+                metadata NVARCHAR(MAX) NOT NULL DEFAULT '{{}}'
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('cards')}')
+        BEGIN
+            CREATE TABLE {tbl('cards')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                sprint_id INT NULL,
+                title NVARCHAR(255) NOT NULL,
+                branch NVARCHAR(255) NOT NULL,
+                status NVARCHAR(64) NOT NULL DEFAULT 'pending',
+                metadata NVARCHAR(MAX) NOT NULL DEFAULT '{{}}',
+                CONSTRAINT fk_{tbl('cards')}_sprint FOREIGN KEY(sprint_id)
+                    REFERENCES {tbl('sprints')}(id) ON DELETE SET NULL
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('card_assignments')}')
+        BEGIN
+            CREATE TABLE {tbl('card_assignments')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                card_id INT NOT NULL,
+                username NVARCHAR(255) NOT NULL,
+                role NVARCHAR(128) NOT NULL,
+                CONSTRAINT uq_{tbl('card_assignments')} UNIQUE(card_id, username, role),
+                CONSTRAINT fk_{tbl('card_assignments')}_card FOREIGN KEY(card_id)
+                    REFERENCES {tbl('cards')}(id) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+    ]
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
+
+def _sqlite_schema_script(prefix: str) -> str:
+    tbl = lambda name: f"{prefix}{name}"
+    return f"""
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS {tbl('metadata')} (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER IF NOT EXISTS trg_{tbl('metadata')}_updated
+AFTER UPDATE ON {tbl('metadata')}
+FOR EACH ROW
+BEGIN
+    UPDATE {tbl('metadata')} SET updated_at = CURRENT_TIMESTAMP WHERE key = OLD.key;
+END;
+CREATE TABLE IF NOT EXISTS {tbl('groups')} (
+    key TEXT PRIMARY KEY,
+    position INTEGER NOT NULL,
+    output_base TEXT NOT NULL,
+    config_json TEXT DEFAULT '{{}}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TRIGGER IF NOT EXISTS trg_{tbl('groups')}_updated
+AFTER UPDATE ON {tbl('groups')}
+FOR EACH ROW
+BEGIN
+    UPDATE {tbl('groups')} SET updated_at = CURRENT_TIMESTAMP WHERE key = OLD.key;
+END;
+CREATE TABLE IF NOT EXISTS {tbl('group_repos')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    repo_key TEXT NOT NULL,
+    path TEXT NOT NULL,
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS {tbl('group_profiles')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    profile TEXT NOT NULL,
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS {tbl('projects')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    execution_mode TEXT,
+    workspace TEXT,
+    repo TEXT,
+    config_json TEXT DEFAULT '{{}}',
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_{tbl('projects')}_group_key ON {tbl('projects')}(group_key, project_key);
+CREATE TABLE IF NOT EXISTS {tbl('project_modules')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL,
+    version_files TEXT DEFAULT '[]',
+    goals TEXT DEFAULT '[]',
+    optional INTEGER NOT NULL DEFAULT 0,
+    profile_override TEXT,
+    only_if_profile_equals TEXT,
+    copy_to_profile_war INTEGER NOT NULL DEFAULT 0,
+    copy_to_profile_ui INTEGER NOT NULL DEFAULT 0,
+    copy_to_subfolder TEXT,
+    rename_jar_to TEXT,
+    no_profile INTEGER NOT NULL DEFAULT 0,
+    run_once INTEGER NOT NULL DEFAULT 0,
+    select_pattern TEXT,
+    serial_across_profiles INTEGER NOT NULL DEFAULT 0,
+    copy_to_root INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT DEFAULT '{{}}',
+    FOREIGN KEY(project_id) REFERENCES {tbl('projects')}(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS {tbl('deploy_targets')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    path_template TEXT NOT NULL,
+    hotfix_path_template TEXT,
+    config_json TEXT DEFAULT '{{}}',
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS {tbl('deploy_target_profiles')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    profile TEXT NOT NULL,
+    FOREIGN KEY(target_id) REFERENCES {tbl('deploy_targets')}(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS {tbl('sprints')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    branch_key TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    metadata TEXT DEFAULT '{{}}'
+);
+CREATE TABLE IF NOT EXISTS {tbl('cards')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sprint_id INTEGER,
+    title TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    metadata TEXT DEFAULT '{{}}',
+    FOREIGN KEY(sprint_id) REFERENCES {tbl('sprints')}(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS {tbl('card_assignments')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    role TEXT NOT NULL,
+    UNIQUE(card_id, username, role),
+    FOREIGN KEY(card_id) REFERENCES {tbl('cards')}(id) ON DELETE CASCADE
+);
+"""
+
+
+class SqlConfigStore:
+    """Persistencia compartida usando BranchHistoryDB."""
+
+    def __init__(self, repo: BranchHistoryDB, *, table_prefix: str = "config_") -> None:
+        self._repo = repo
+        self._prefix = table_prefix
+        backend = getattr(repo, "backend_name", "sqlserver").lower()
+        self._dialect = backend
+        self._paramstyle = "pyformat" if backend == "sqlserver" else "qmark"
+        self._ensure_schema()
+
+    def _table(self, name: str) -> str:
+        return f"{self._prefix}{name}"
+
+    @contextmanager
+    def _connect(self):
+        with self._repo.connection() as conn:
+            yield conn
+
+    def _ensure_schema(self) -> None:
+        if self._dialect == "sqlite":
+            script = _sqlite_schema_script(self._prefix)
+            with self._connect() as conn:
+                if hasattr(conn, "execute"):
+                    conn.execute("PRAGMA foreign_keys = ON")
+                conn.executescript(script)
+        else:
+            statements = _sqlserver_schema_statements(self._prefix)
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                for stmt in statements:
+                    try:
+                        cursor.execute(stmt)
+                    except Exception:
+                        continue
+
+    def _adapt_sql(self, sql: str) -> str:
+        if self._paramstyle == "pyformat":
+            return sql.replace("?", "%s")
+        return sql
+
+    def _execute(self, cursor, sql: str, params: Optional[Sequence[Any]] = None):
+        adapted = self._adapt_sql(sql)
+        if params is None:
+            cursor.execute(adapted)
+        else:
+            cursor.execute(adapted, list(params))
+
+    def _executemany(self, cursor, sql: str, params_seq: Sequence[Sequence[Any]]):
+        adapted = self._adapt_sql(sql)
+        cursor.executemany(adapted, [list(params) for params in params_seq])
+
+    def _last_insert_id(self, cursor) -> int:
+        last_id = getattr(cursor, "lastrowid", None)
+        if last_id not in (None, 0):
+            try:
+                return int(last_id)
+            except (TypeError, ValueError):
+                pass
+        if self._dialect == "sqlserver":
+            self._execute(cursor, "SELECT SCOPE_IDENTITY()")
+            row = cursor.fetchone()
+            if row and row[0] not in (None, ""):
+                return int(row[0])
+        return 0
+
+    # ------------------------------------------------------------------
+    def save_metadata(self, key: str, value: str) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"UPDATE {self._table('metadata')} SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+                (value, key),
+            )
+            if getattr(cursor, "rowcount", 0) == 0:
+                self._execute(
+                    cursor,
+                    f"INSERT INTO {self._table('metadata')}(key, value) VALUES(?, ?)",
+                    (key, value),
+                )
+
+    def get_metadata(self, key: str) -> Optional[str]:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"SELECT value FROM {self._table('metadata')} WHERE key = ?",
+                (key,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return row[0]
+
+    # ------------------------------------------------------------------
+    def is_empty(self) -> bool:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"SELECT COUNT(*) FROM {self._table('groups')}",
+            )
+            (count,) = cursor.fetchone()
+        return int(count or 0) == 0
+
+    # ------------------------------------------------------------------
+    def replace_groups(self, groups: Iterable[Any]) -> None:
+        from .config import Group
+
+        normalized: List[Group] = []
+        for group in groups:
+            if group is None:
+                continue
+            if isinstance(group, Group):
+                normalized.append(group)
+            else:
+                try:
+                    normalized.append(Group(**_serialize_model(group)))
+                except Exception:
+                    continue
+
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            for table in (
+                "card_assignments",
+                "cards",
+                "sprints",
+                "deploy_target_profiles",
+                "deploy_targets",
+                "project_modules",
+                "projects",
+                "group_profiles",
+                "group_repos",
+                "groups",
+            ):
+                self._execute(cursor, f"DELETE FROM {self._table(table)}")
+
+            for position, group in enumerate(normalized):
+                self._insert_group(cursor, group, position)
+
+    # ------------------------------------------------------------------
+    def _insert_group(self, cursor, group: Any, position: int) -> None:
+        data = _serialize_model(group)
+        key = data.get("key")
+        if not key:
+            return
+        repos = data.get("repos") or {}
+        profiles = list(data.get("profiles") or [])
+        projects = list(data.get("projects") or [])
+        deploy_targets = list(data.get("deploy_targets") or [])
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {"key", "repos", "output_base", "profiles", "projects", "deploy_targets"}
+        }
+
+        self._execute(
+            cursor,
+            f"INSERT INTO {self._table('groups')}(key, position, output_base, config_json) VALUES(?, ?, ?, ?)",
+            (
+                str(key),
+                int(position),
+                str(data.get("output_base", "")),
+                _json_dumps(extras) if extras else "{}",
+            ),
+        )
+
+        if repos:
+            self._executemany(
+                cursor,
+                f"INSERT INTO {self._table('group_repos')}(group_key, repo_key, path) VALUES(?, ?, ?)",
+                [(str(key), str(repo_key), str(path)) for repo_key, path in repos.items()],
+            )
+
+        for idx, profile in enumerate(profiles):
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('group_profiles')}(group_key, position, profile) VALUES(?, ?, ?)",
+                (str(key), int(idx), str(profile)),
+            )
+
+        for proj_idx, project in enumerate(projects):
+            self._insert_project(cursor, str(key), project, proj_idx)
+
+        for dep_idx, deploy in enumerate(deploy_targets):
+            self._insert_deploy_target(cursor, str(key), deploy, dep_idx)
+
+    # ------------------------------------------------------------------
+    def _insert_project(self, cursor, group_key: str, project: Any, position: int) -> Optional[int]:
+        data = _serialize_model(project)
+        key = data.get("key")
+        if not key:
+            return None
+        modules = list(data.get("modules") or [])
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k not in {"key", "modules", "execution_mode", "workspace", "repo"}
+        }
+
+        self._execute(
+            cursor,
+            f"INSERT INTO {self._table('projects')}(group_key, project_key, position, execution_mode, workspace, repo, config_json) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (
+                group_key,
+                str(key),
+                int(position),
+                data.get("execution_mode"),
+                data.get("workspace"),
+                data.get("repo"),
+                _json_dumps(extras) if extras else "{}",
+            ),
+        )
+        project_id = self._last_insert_id(cursor)
+
+        for mod_idx, module in enumerate(modules):
+            self._insert_module(cursor, project_id, module, mod_idx)
+
+        return project_id
+
+    # ------------------------------------------------------------------
+    def _insert_module(self, cursor, project_id: int, module: Any, position: int) -> Optional[int]:
+        data = _serialize_model(module)
+        name = data.get("name")
+        path = data.get("path")
+        if not name or not path:
+            return None
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {
+                "name",
+                "path",
+                "version_files",
+                "goals",
+                "optional",
+                "profile_override",
+                "only_if_profile_equals",
+                "copy_to_profile_war",
+                "copy_to_profile_ui",
+                "copy_to_subfolder",
+                "rename_jar_to",
+                "no_profile",
+                "run_once",
+                "select_pattern",
+                "serial_across_profiles",
+                "copy_to_root",
+            }
+        }
+
+        self._execute(
+            cursor,
+            f"INSERT INTO {self._table('project_modules')}(project_id, position, name, path, version_files, goals, optional, profile_override, only_if_profile_equals, copy_to_profile_war, copy_to_profile_ui, copy_to_subfolder, rename_jar_to, no_profile, run_once, select_pattern, serial_across_profiles, copy_to_root, config_json) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                int(project_id),
+                int(position),
+                str(name),
+                str(path),
+                _json_dumps(data.get("version_files") or []),
+                _json_dumps(data.get("goals") or []),
+                1 if data.get("optional") else 0,
+                data.get("profile_override"),
+                data.get("only_if_profile_equals"),
+                1 if data.get("copy_to_profile_war") else 0,
+                1 if data.get("copy_to_profile_ui") else 0,
+                data.get("copy_to_subfolder"),
+                data.get("rename_jar_to"),
+                1 if data.get("no_profile") else 0,
+                1 if data.get("run_once") else 0,
+                data.get("select_pattern"),
+                1 if data.get("serial_across_profiles") else 0,
+                1 if data.get("copy_to_root") else 0,
+                _json_dumps(extras) if extras else "{}",
+            ),
+        )
+        return self._last_insert_id(cursor)
+
+    # ------------------------------------------------------------------
+    def _insert_deploy_target(self, cursor, group_key: str, deploy: Any, position: int) -> Optional[int]:
+        data = _serialize_model(deploy)
+        name = data.get("name")
+        project_key = data.get("project_key")
+        path_template = data.get("path_template")
+        if not name or not project_key or not path_template:
+            return None
+        profiles = list(data.get("profiles") or [])
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k not in {"name", "project_key", "profiles", "path_template", "hotfix_path_template"}
+        }
+
+        self._execute(
+            cursor,
+            f"INSERT INTO {self._table('deploy_targets')}(group_key, position, name, project_key, path_template, hotfix_path_template, config_json) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            (
+                group_key,
+                int(position),
+                str(name),
+                str(project_key),
+                str(path_template),
+                data.get("hotfix_path_template"),
+                _json_dumps(extras) if extras else "{}",
+            ),
+        )
+        target_id = self._last_insert_id(cursor)
+
+        for idx, profile in enumerate(profiles):
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('deploy_target_profiles')}(target_id, position, profile) VALUES(?, ?, ?)",
+                (int(target_id), int(idx), str(profile)),
+            )
+
+        return target_id
+
+    # ------------------------------------------------------------------
+    def list_groups(self) -> List[Any]:
+        from .config import Group, Project, Module, DeployTarget
+
+        groups: List[Group] = []
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"SELECT key, position, output_base, config_json FROM {self._table('groups')} ORDER BY position, key",
+            )
+            group_rows = cursor.fetchall()
+
+            repo_map: Dict[str, Dict[str, str]] = {}
+            self._execute(
+                cursor,
+                f"SELECT group_key, repo_key, path FROM {self._table('group_repos')} ORDER BY id",
+            )
+            for group_key, repo_key, path in cursor.fetchall():
+                repo_map.setdefault(str(group_key), {})[str(repo_key)] = str(path)
+
+            profile_map: Dict[str, List[str]] = {}
+            self._execute(
+                cursor,
+                f"SELECT group_key, position, profile FROM {self._table('group_profiles')} ORDER BY group_key, position",
+            )
+            for group_key, _, profile in cursor.fetchall():
+                profile_map.setdefault(str(group_key), []).append(str(profile))
+
+            self._execute(
+                cursor,
+                f"SELECT id, group_key, project_key, position, execution_mode, workspace, repo, config_json FROM {self._table('projects')} ORDER BY position",
+            )
+            project_rows = cursor.fetchall()
+
+            self._execute(
+                cursor,
+                f"SELECT project_id, position, name, path, version_files, goals, optional, profile_override, only_if_profile_equals, copy_to_profile_war, copy_to_profile_ui, copy_to_subfolder, rename_jar_to, no_profile, run_once, select_pattern, serial_across_profiles, copy_to_root, config_json FROM {self._table('project_modules')} ORDER BY position",
+            )
+            module_rows = cursor.fetchall()
+
+            self._execute(
+                cursor,
+                f"SELECT id, group_key, position, name, project_key, path_template, hotfix_path_template, config_json FROM {self._table('deploy_targets')} ORDER BY position",
+            )
+            deploy_rows = cursor.fetchall()
+
+            self._execute(
+                cursor,
+                f"SELECT target_id, position, profile FROM {self._table('deploy_target_profiles')} ORDER BY target_id, position",
+            )
+            deploy_profiles = cursor.fetchall()
+
+        modules_by_project: Dict[int, List[Module]] = {}
+        for row in module_rows:
+            project_id = int(row[0])
+            module_payload = {
+                "name": row[2],
+                "path": row[3],
+                "version_files": _json_loads(row[4], []),
+                "goals": _json_loads(row[5], []),
+                "optional": bool(row[6]),
+                "profile_override": row[7],
+                "only_if_profile_equals": row[8],
+                "copy_to_profile_war": bool(row[9]),
+                "copy_to_profile_ui": bool(row[10]),
+                "copy_to_subfolder": row[11],
+                "rename_jar_to": row[12],
+                "no_profile": bool(row[13]),
+                "run_once": bool(row[14]),
+                "select_pattern": row[15],
+                "serial_across_profiles": bool(row[16]),
+                "copy_to_root": bool(row[17]),
+            }
+            module_payload.update(_json_loads(row[18], {}))
+            modules_by_project.setdefault(project_id, []).append(Module(**module_payload))
+
+        deploy_profiles_map: Dict[int, List[str]] = {}
+        for target_id, _, profile in deploy_profiles:
+            deploy_profiles_map.setdefault(int(target_id), []).append(str(profile))
+
+        projects_by_group: Dict[str, List[Project]] = {}
+        for row in project_rows:
+            project_id = int(row[0])
+            group_key = str(row[1])
+            payload = {
+                "key": row[2],
+                "modules": modules_by_project.get(project_id, []),
+                "execution_mode": row[4],
+                "workspace": row[5],
+                "repo": row[6],
+            }
+            payload.update(_json_loads(row[7], {}))
+            projects_by_group.setdefault(group_key, []).append(Project(**payload))
+
+        deploys_by_group: Dict[str, List[DeployTarget]] = {}
+        for row in deploy_rows:
+            target_id = int(row[0])
+            group_key = str(row[1])
+            payload = {
+                "name": row[3],
+                "project_key": row[4],
+                "path_template": row[5],
+                "hotfix_path_template": row[6],
+                "profiles": deploy_profiles_map.get(target_id, []),
+            }
+            payload.update(_json_loads(row[7], {}))
+            deploys_by_group.setdefault(group_key, []).append(DeployTarget(**payload))
+
+        for key, _, output_base, config_json in group_rows:
+            group_key = str(key)
+            payload = {
+                "key": group_key,
+                "repos": repo_map.get(group_key, {}),
+                "output_base": output_base,
+                "profiles": profile_map.get(group_key, []),
+                "projects": projects_by_group.get(group_key, []),
+                "deploy_targets": deploys_by_group.get(group_key, []),
+            }
+            payload.update(_json_loads(config_json, {}))
+            groups.append(Group(**payload))
+
+        return groups
+
+    # ------------------------------------------------------------------
+    def list_sprints(self, branch_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        sql = f"SELECT id, branch_key, name, version, metadata FROM {self._table('sprints')}"
+        params: List[Any] = []
+        if branch_key:
+            sql += " WHERE branch_key = ?"
+            params.append(branch_key)
+        sql += " ORDER BY id DESC"
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(cursor, sql, params)
+            rows = cursor.fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            items.append(
+                {
+                    "id": int(row[0]),
+                    "branch_key": row[1],
+                    "name": row[2],
+                    "version": row[3],
+                    "metadata": _json_loads(row[4], {}),
+                }
+            )
+        return items
+
+    # ------------------------------------------------------------------
+    def save_sprint(self, payload: Dict[str, Any]) -> int:
+        metadata = _json_dumps(_serialize_model(payload.get("metadata")))
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            sprint_id = payload.get("id")
+            if sprint_id:
+                self._execute(
+                    cursor,
+                    f"UPDATE {self._table('sprints')} SET branch_key = ?, name = ?, version = ?, metadata = ? WHERE id = ?",
+                    (
+                        payload.get("branch_key"),
+                        payload.get("name"),
+                        payload.get("version"),
+                        metadata,
+                        int(sprint_id),
+                    ),
+                )
+                if getattr(cursor, "rowcount", 0):
+                    return int(sprint_id)
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('sprints')}(branch_key, name, version, metadata) VALUES(?, ?, ?, ?)",
+                (
+                    payload.get("branch_key"),
+                    payload.get("name"),
+                    payload.get("version"),
+                    metadata,
+                ),
+            )
+            return self._last_insert_id(cursor)
+
+    def upsert_sprint(self, payload: Dict[str, Any]) -> int:
+        return self.save_sprint(payload)
+
+    # ------------------------------------------------------------------
+    def delete_sprint(self, sprint_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"UPDATE {self._table('cards')} SET sprint_id = NULL WHERE sprint_id = ?",
+                (int(sprint_id),),
+            )
+            self._execute(
+                cursor,
+                f"DELETE FROM {self._table('sprints')} WHERE id = ?",
+                (int(sprint_id),),
+            )
+
+    # ------------------------------------------------------------------
+    def list_cards(
+        self,
+        *,
+        sprint_id: Optional[int] = None,
+        branch: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        sql = f"SELECT id, sprint_id, title, branch, status, metadata FROM {self._table('cards')}"
+        params: List[Any] = []
+        clauses: List[str] = []
+        if sprint_id is not None:
+            clauses.append("sprint_id = ?")
+            params.append(int(sprint_id))
+        if branch:
+            clauses.append("branch = ?")
+            params.append(branch)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id DESC"
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(cursor, sql, params)
+            rows = cursor.fetchall()
+        items: List[Dict[str, Any]] = []
+        for row in rows:
+            items.append(
+                {
+                    "id": int(row[0]),
+                    "sprint_id": row[1],
+                    "title": row[2],
+                    "branch": row[3],
+                    "status": row[4],
+                    "metadata": _json_loads(row[5], {}),
+                }
+            )
+        return items
+
+    # ------------------------------------------------------------------
+    def upsert_card(self, payload: Dict[str, Any]) -> int:
+        metadata = _json_dumps(_serialize_model(payload.get("metadata")))
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            card_id = payload.get("id")
+            if card_id:
+                self._execute(
+                    cursor,
+                    f"UPDATE {self._table('cards')} SET sprint_id = ?, title = ?, branch = ?, status = ?, metadata = ? WHERE id = ?",
+                    (
+                        payload.get("sprint_id"),
+                        payload.get("title"),
+                        payload.get("branch"),
+                        payload.get("status", "pending"),
+                        metadata,
+                        int(card_id),
+                    ),
+                )
+                if getattr(cursor, "rowcount", 0):
+                    return int(card_id)
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('cards')}(sprint_id, title, branch, status, metadata) VALUES(?, ?, ?, ?, ?)",
+                (
+                    payload.get("sprint_id"),
+                    payload.get("title"),
+                    payload.get("branch"),
+                    payload.get("status", "pending"),
+                    metadata,
+                ),
+            )
+            return self._last_insert_id(cursor)
+
+    # ------------------------------------------------------------------
+    def delete_card(self, card_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"DELETE FROM {self._table('cards')} WHERE id = ?",
+                (int(card_id),),
+            )
+
+    # ------------------------------------------------------------------
+    def list_card_assignments(self, card_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        sql = f"SELECT id, card_id, username, role FROM {self._table('card_assignments')}"
+        params: List[Any] = []
+        if card_id is not None:
+            sql += " WHERE card_id = ?"
+            params.append(int(card_id))
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(cursor, sql, params)
+            rows = cursor.fetchall()
+        return [
+            {
+                "id": int(row[0]),
+                "card_id": int(row[1]),
+                "username": row[2],
+                "role": row[3],
+            }
+            for row in rows
+        ]
+
+    # ------------------------------------------------------------------
+    def upsert_card_assignment(self, payload: Dict[str, Any]) -> int:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            assignment_id = payload.get("id")
+            if assignment_id:
+                self._execute(
+                    cursor,
+                    f"UPDATE {self._table('card_assignments')} SET card_id = ?, username = ?, role = ? WHERE id = ?",
+                    (
+                        payload.get("card_id"),
+                        payload.get("username"),
+                        payload.get("role"),
+                        int(assignment_id),
+                    ),
+                )
+                if getattr(cursor, "rowcount", 0):
+                    return int(assignment_id)
+
+            self._execute(
+                cursor,
+                f"SELECT id FROM {self._table('card_assignments')} WHERE card_id = ? AND username = ? AND role = ?",
+                (
+                    payload.get("card_id"),
+                    payload.get("username"),
+                    payload.get("role"),
+                ),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                return int(existing[0])
+
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('card_assignments')}(card_id, username, role) VALUES(?, ?, ?)",
+                (
+                    payload.get("card_id"),
+                    payload.get("username"),
+                    payload.get("role"),
+                ),
+            )
+            return self._last_insert_id(cursor)
+
+    # ------------------------------------------------------------------
+    def delete_card_assignment(self, assignment_id: int) -> None:
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"DELETE FROM {self._table('card_assignments')} WHERE id = ?",
+                (int(assignment_id),),
+            )
+
+class ConfigStore:
+    """Persistencia de configuración, compatible con SQLite legacy y SQL Server."""
+
+    def __init__(
+        self,
+        db_path: Optional[Path] = None,
+        *,
+        repo: Optional[BranchHistoryDB] = None,
+    ) -> None:
+        self._sql_store: Optional[SqlConfigStore] = None
+        if repo is not None:
+            self._sql_store = SqlConfigStore(repo)
+            self.db_path = Path(db_path or (_state_dir() / "config.sqlite3"))
+            return
+
         self.db_path = Path(db_path or (_state_dir() / "config.sqlite3"))
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as cx:
@@ -841,6 +1837,8 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def is_empty(self) -> bool:
+        if self._sql_store is not None:
+            return self._sql_store.is_empty()
         with sqlite3.connect(self.db_path) as cx:
             cur = cx.execute("SELECT COUNT(*) FROM groups")
             (count,) = cur.fetchone()
@@ -848,6 +1846,9 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def replace_groups(self, groups: Iterable[Any]) -> None:
+        if self._sql_store is not None:
+            self._sql_store.replace_groups(groups)
+            return
         from .config import Group  # import diferido para evitar ciclos
 
         normalized: List[Group] = []
@@ -883,6 +1884,8 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def list_groups(self) -> List[Any]:
+        if self._sql_store is not None:
+            return self._sql_store.list_groups()
         from .config import Group
 
         with sqlite3.connect(self.db_path) as cx:
@@ -1029,6 +2032,19 @@ DROP TABLE IF EXISTS groups;
         except Exception as exc:  # pragma: no cover - validaciones
             raise ValueError("Datos de grupo inválidos") from exc
 
+        if self._sql_store is not None:
+            existing = self._sql_store.list_groups()
+            replaced = False
+            for idx, current in enumerate(existing):
+                if current.key == normalized.key:
+                    existing[idx] = normalized
+                    replaced = True
+                    break
+            if not replaced:
+                existing.append(normalized)
+            self._sql_store.replace_groups(existing)
+            return
+
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             current = cx.execute(
@@ -1041,6 +2057,10 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def delete_group(self, key: str) -> None:
+        if self._sql_store is not None:
+            remaining = [g for g in self._sql_store.list_groups() if g.key != key]
+            self._sql_store.replace_groups(remaining)
+            return
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("PRAGMA foreign_keys = ON")
             self._delete_group_rows(cx, key)
@@ -1048,6 +2068,8 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def list_sprints(self, branch_key: Optional[str] = None) -> List[Dict[str, Any]]:
+        if self._sql_store is not None:
+            return self._sql_store.list_sprints(branch_key)
         with sqlite3.connect(self.db_path) as cx:
             cx.row_factory = sqlite3.Row
             sql = "SELECT id, branch_key, name, version, metadata FROM sprints"
@@ -1066,6 +2088,8 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def upsert_sprint(self, payload: Dict[str, Any]) -> int:
+        if self._sql_store is not None:
+            return self._sql_store.upsert_sprint(payload)
         metadata = _json_dumps(_serialize_model(payload.get("metadata")))
         with sqlite3.connect(self.db_path) as cx:
             cx.row_factory = sqlite3.Row
@@ -1094,6 +2118,9 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def delete_sprint(self, sprint_id: int) -> None:
+        if self._sql_store is not None:
+            self._sql_store.delete_sprint(sprint_id)
+            return
         with sqlite3.connect(self.db_path) as cx:
             cx.execute(
                 "UPDATE cards SET sprint_id = NULL WHERE sprint_id = ?",
@@ -1109,6 +2136,8 @@ DROP TABLE IF EXISTS groups;
         sprint_id: Optional[int] = None,
         branch: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        if self._sql_store is not None:
+            return self._sql_store.list_cards(sprint_id=sprint_id, branch=branch)
         with sqlite3.connect(self.db_path) as cx:
             cx.row_factory = sqlite3.Row
             sql = "SELECT id, sprint_id, title, branch, status, metadata FROM cards"
@@ -1133,6 +2162,8 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def upsert_card(self, payload: Dict[str, Any]) -> int:
+        if self._sql_store is not None:
+            return self._sql_store.upsert_card(payload)
         metadata = _json_dumps(_serialize_model(payload.get("metadata")))
         with sqlite3.connect(self.db_path) as cx:
             cursor = cx.execute(
@@ -1162,12 +2193,17 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def delete_card(self, card_id: int) -> None:
+        if self._sql_store is not None:
+            self._sql_store.delete_card(card_id)
+            return
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("DELETE FROM cards WHERE id = ?", (int(card_id),))
             cx.commit()
 
     # ------------------------------------------------------------------
     def list_card_assignments(self, card_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        if self._sql_store is not None:
+            return self._sql_store.list_card_assignments(card_id)
         with sqlite3.connect(self.db_path) as cx:
             cx.row_factory = sqlite3.Row
             sql = "SELECT id, card_id, username, role FROM card_assignments"
@@ -1180,6 +2216,8 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def upsert_card_assignment(self, payload: Dict[str, Any]) -> int:
+        if self._sql_store is not None:
+            return self._sql_store.upsert_card_assignment(payload)
         with sqlite3.connect(self.db_path) as cx:
             cursor = cx.execute(
                 """
@@ -1202,12 +2240,17 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def delete_card_assignment(self, assignment_id: int) -> None:
+        if self._sql_store is not None:
+            self._sql_store.delete_card_assignment(assignment_id)
+            return
         with sqlite3.connect(self.db_path) as cx:
             cx.execute("DELETE FROM card_assignments WHERE id = ?", (int(assignment_id),))
             cx.commit()
 
     # ------------------------------------------------------------------
     def load_metadata(self, key: str) -> Optional[str]:
+        if self._sql_store is not None:
+            return self._sql_store.get_metadata(key)
         with sqlite3.connect(self.db_path) as cx:
             cur = cx.execute("SELECT value FROM metadata WHERE key = ?", (key,))
             row = cur.fetchone()
@@ -1215,6 +2258,9 @@ DROP TABLE IF EXISTS groups;
 
     # ------------------------------------------------------------------
     def save_metadata(self, key: str, value: str) -> None:
+        if self._sql_store is not None:
+            self._sql_store.save_metadata(key, value)
+            return
         with sqlite3.connect(self.db_path) as cx:
             cx.execute(
                 "INSERT INTO metadata(key, value) VALUES(?, ?) "
@@ -1224,4 +2270,4 @@ DROP TABLE IF EXISTS groups;
             cx.commit()
 
 
-__all__ = ["ConfigStore"]
+__all__ = ["ConfigStore", "SqlConfigStore"]
