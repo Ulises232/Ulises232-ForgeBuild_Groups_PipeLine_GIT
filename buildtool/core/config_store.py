@@ -5,7 +5,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterable, List, Optional, Any, Dict, Sequence
+from typing import Iterable, List, Optional, Any, Dict, Sequence, Tuple
 
 from .branch_history_db import BranchHistoryDB
 
@@ -1266,6 +1266,71 @@ class SqlConfigStore:
                     hotfix_path_template,
                 ),
             )
+
+    # ------------------------------------------------------------------
+    def get_group_user_paths(
+        self, group_key: str, username: str
+    ) -> Tuple[Dict[str, str], Optional[str]]:
+        if not group_key or not username:
+            return {}, None
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"SELECT kind, item_key, value FROM {self._table('group_user_paths')} WHERE group_key = ? AND username = ?",
+                (str(group_key), str(username)),
+            )
+            rows = cursor.fetchall() or []
+        repos: Dict[str, str] = {}
+        output: Optional[str] = None
+        for kind, item_key, value in rows:
+            if kind == "repo":
+                repos[str(item_key)] = str(value)
+            elif kind == "output_base":
+                output = str(value)
+        return repos, output
+
+    # ------------------------------------------------------------------
+    def get_module_user_paths(
+        self, group_key: str, username: str
+    ) -> Dict[str, Dict[str, str]]:
+        mapping: Dict[str, Dict[str, str]] = {}
+        if not group_key or not username:
+            return mapping
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"SELECT project_key, module_name, path FROM {self._table('module_user_paths')} WHERE group_key = ? AND username = ?",
+                (str(group_key), str(username)),
+            )
+            rows = cursor.fetchall() or []
+        for project_key, module_name, path in rows:
+            project_map = mapping.setdefault(str(project_key), {})
+            project_map[str(module_name)] = str(path)
+        return mapping
+
+    # ------------------------------------------------------------------
+    def get_deploy_user_paths(
+        self, group_key: str, username: str
+    ) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+        mapping: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        if not group_key or not username:
+            return mapping
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"SELECT target_name, path_template, hotfix_path_template FROM {self._table('deploy_user_paths')} WHERE group_key = ? AND username = ?",
+                (str(group_key), str(username)),
+            )
+            rows = cursor.fetchall() or []
+        for target_name, path_template, hotfix_template in rows:
+            mapping[str(target_name)] = (
+                path_template if path_template is not None else None,
+                hotfix_template if hotfix_template is not None else None,
+            )
+        return mapping
 
     # ------------------------------------------------------------------
     def list_sprints(self, branch_key: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -2562,6 +2627,71 @@ DROP TABLE IF EXISTS groups;
                     (group_key, target_name, username, path_template, hotfix_path_template),
                 )
             cx.commit()
+
+    # ------------------------------------------------------------------
+    def get_group_user_paths(
+        self, group_key: str, username: str
+    ) -> Tuple[Dict[str, str], Optional[str]]:
+        if self._sql_store is not None:
+            return self._sql_store.get_group_user_paths(group_key, username)
+        if not group_key or not username:
+            return {}, None
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            rows = cx.execute(
+                "SELECT kind, item_key, value FROM group_user_paths WHERE group_key = ? AND username = ?",
+                (group_key, username),
+            ).fetchall()
+        repos: Dict[str, str] = {}
+        output: Optional[str] = None
+        for kind, item_key, value in rows:
+            if kind == "repo":
+                repos[str(item_key)] = str(value)
+            elif kind == "output_base":
+                output = str(value)
+        return repos, output
+
+    # ------------------------------------------------------------------
+    def get_module_user_paths(
+        self, group_key: str, username: str
+    ) -> Dict[str, Dict[str, str]]:
+        if self._sql_store is not None:
+            return self._sql_store.get_module_user_paths(group_key, username)
+        mapping: Dict[str, Dict[str, str]] = {}
+        if not group_key or not username:
+            return mapping
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            rows = cx.execute(
+                "SELECT project_key, module_name, path FROM module_user_paths WHERE group_key = ? AND username = ?",
+                (group_key, username),
+            ).fetchall()
+        for project_key, module_name, path in rows:
+            project_map = mapping.setdefault(str(project_key), {})
+            project_map[str(module_name)] = str(path)
+        return mapping
+
+    # ------------------------------------------------------------------
+    def get_deploy_user_paths(
+        self, group_key: str, username: str
+    ) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+        if self._sql_store is not None:
+            return self._sql_store.get_deploy_user_paths(group_key, username)
+        mapping: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        if not group_key or not username:
+            return mapping
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            rows = cx.execute(
+                "SELECT target_name, path_template, hotfix_path_template FROM deploy_user_paths WHERE group_key = ? AND username = ?",
+                (group_key, username),
+            ).fetchall()
+        for target_name, path_template, hotfix_template in rows:
+            mapping[str(target_name)] = (
+                path_template if path_template is not None else None,
+                hotfix_template if hotfix_template is not None else None,
+            )
+        return mapping
 
     # ------------------------------------------------------------------
     def update_group(self, group: Any) -> None:

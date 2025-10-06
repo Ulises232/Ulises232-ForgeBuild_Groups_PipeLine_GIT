@@ -1,4 +1,5 @@
 import threading
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt, QThread, QSignalBlocker, Slot
@@ -17,10 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.bg import run_in_thread
-from ..core.config import Config, PipelinePreset, save_config
+from ..core.config import Config, PipelinePreset, save_config, load_config
 from ..core.config_queries import (
     default_project_key,
     first_group_key,
+    get_group,
     iter_group_projects,
     iter_groups,
     profile_target_map,
@@ -31,7 +33,7 @@ from ..core.thread_tracker import TRACKER
 from ..core.workers import PipelineWorker
 
 from ..ui.multi_select import MultiSelectComboBox
-from ..ui.widgets import combo_with_arrow, setup_quick_filter
+from ..ui.widgets import combo_with_arrow, setup_quick_filter, set_combo_enabled
 from .preset_manager import PresetManagerDialog
 
 
@@ -54,9 +56,10 @@ class DeployView(QWidget):
         if group_keys:
             for key in group_keys:
                 self.cboGroup.addItem(key, key)
+            set_combo_enabled(self.cboGroup, True)
         else:
             self.cboGroup.addItem("Sin grupos", None)
-            self.cboGroup.setEnabled(False)
+            set_combo_enabled(self.cboGroup, False)
         self.cboGroupContainer = combo_with_arrow(self.cboGroup)
         row.addWidget(self.cboGroupContainer)
 
@@ -170,6 +173,76 @@ class DeployView(QWidget):
                 label += f" ({' / '.join(extra)})"
             self.cboPresets.addItem(label, preset)
 
+    def _reload_cfg_from_store(self) -> None:
+        current_group = self._current_group()
+        current_project = self.cboProject.currentData()
+        selected_profiles = self.cboProfiles.checked_items()
+        version_text = self.txtVersion.text()
+        hotfix_checked = self.chkHotfix.isChecked()
+        current_preset = self.cboPresets.currentData()
+        selected_preset_name = getattr(current_preset, "name", None)
+
+        try:
+            refreshed = load_config()
+        except Exception as exc:  # pragma: no cover - defensive UI logging
+            self.log.append(f"<< No se pudo recargar la configuración: {exc}")
+            return
+
+        self.cfg = refreshed
+        group_keys = [grp.key for grp in iter_groups(self.cfg)]
+
+        blocker = QSignalBlocker(self.cboGroup)
+        _ = blocker
+        self.cboGroup.clear()
+        if group_keys:
+            for key in group_keys:
+                self.cboGroup.addItem(key, key)
+            set_combo_enabled(self.cboGroup, True)
+        else:
+            self.cboGroup.addItem("Sin grupos", None)
+            set_combo_enabled(self.cboGroup, False)
+        target_index = self.cboGroup.findData(current_group)
+        if target_index != -1:
+            self.cboGroup.setCurrentIndex(target_index)
+        elif group_keys:
+            self.cboGroup.setCurrentIndex(0)
+        else:
+            self.cboGroup.setCurrentIndex(-1)
+
+        self.refresh_group()
+
+        if current_project:
+            project_blocker = QSignalBlocker(self.cboProject)
+            _ = project_blocker
+            proj_idx = self.cboProject.findData(current_project)
+            if proj_idx != -1:
+                self.cboProject.setCurrentIndex(proj_idx)
+            self.refresh_project()
+
+        self.cboProfiles.set_checked_items(selected_profiles)
+        self.txtVersion.setText(version_text)
+        self.chkHotfix.setChecked(hotfix_checked)
+
+        has_groups = bool(group_keys)
+        self.btnDeploySel.setEnabled(has_groups)
+        self.btnDeployAll.setEnabled(has_groups)
+        self.cboProfiles.setEnabled(has_groups)
+        self.chkHotfix.setEnabled(has_groups)
+        self.txtVersion.setEnabled(has_groups)
+
+        previous_index = self.cboPresets.currentIndex()
+        self._refresh_presets()
+        if selected_preset_name:
+            for idx in range(self.cboPresets.count()):
+                preset = self.cboPresets.itemData(idx)
+                if preset and getattr(preset, "name", None) == selected_preset_name:
+                    self.cboPresets.setCurrentIndex(idx)
+                    break
+            else:
+                self.cboPresets.setCurrentIndex(0)
+        else:
+            self.cboPresets.setCurrentIndex(previous_index if previous_index >= 0 else 0)
+
     @Slot(int)
     def _on_preset_selected(self, _index: int = -1) -> None:
         preset: Optional[PipelinePreset] = self.cboPresets.currentData()
@@ -275,7 +348,7 @@ class DeployView(QWidget):
         self.lblProject.setVisible(show_proj)
         self.cboProjectContainer.setVisible(show_proj)
         self.cboProject.setVisible(show_proj)
-        self.cboProject.setEnabled(bool(projects))
+        set_combo_enabled(self.cboProject, bool(projects))
 
         self.refresh_project()
 
@@ -295,6 +368,7 @@ class DeployView(QWidget):
     # ---- despliegue ----
     @Slot(bool)
     def start_deploy_selected(self, _checked: bool = False) -> None:
+        self._reload_cfg_from_store()
         profiles = self.cboProfiles.checked_items()
         if not profiles:
             self.log.append("<< Elige al menos un perfil.")
@@ -303,6 +377,7 @@ class DeployView(QWidget):
 
     @Slot(bool)
     def start_deploy_all(self, _checked: bool = False) -> None:
+        self._reload_cfg_from_store()
         profiles = self.cboProfiles.all_items()
         if not profiles:
             self.log.append("<< No hay perfiles configurados.")
@@ -339,6 +414,41 @@ class DeployView(QWidget):
             self.btnDeploySel.setEnabled(True)
             self.btnDeployAll.setEnabled(True)
             return
+
+        group = get_group(self.cfg, gkey) if gkey else None
+        target_lookup = {t.name: t for t in (getattr(group, "deploy_targets", None) or [])}
+        preview_lines: list[str] = []
+        hotfix_mode = self.chkHotfix.isChecked()
+        for prof in selected:
+            target_name = targets.get(prof)
+            tgt = target_lookup.get(target_name) if target_lookup else None
+            if not tgt:
+                preview_lines.append(
+                    f"   [{prof}] {target_name}: target no encontrado en el grupo."
+                )
+                continue
+            template = (
+                tgt.hotfix_path_template if (hotfix_mode and tgt.hotfix_path_template) else tgt.path_template
+            ) or ""
+            if not template:
+                preview_lines.append(f"   [{prof}] {target_name}: plantilla vacía.")
+                continue
+            try:
+                if "{version}" in template:
+                    resolved = template.format(version=version)
+                else:
+                    resolved = str(Path(template) / version)
+            except Exception as exc:  # pragma: no cover - defensivo
+                preview_lines.append(
+                    f"   [{prof}] {target_name}: error al formatear destino ({exc})"
+                )
+            else:
+                preview_lines.append(f"   [{prof}] {target_name} → {resolved}")
+
+        if preview_lines:
+            self.log.append("<< Destinos de despliegue (usuario actual):")
+            for line in preview_lines:
+                self.log.append(line)
 
         self.btnDeploySel.setEnabled(False)
         self.btnDeployAll.setEnabled(False)

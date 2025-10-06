@@ -270,6 +270,19 @@ class ConfigStoreMigrationTests(unittest.TestCase):
                     hotfix_path_template="/hotfix/alice/{profile}",
                 )
 
+                repos_map, output_override = store.get_group_user_paths("GX", "alice")
+                self.assertEqual({"PX": "/repos/alice"}, repos_map)
+                self.assertEqual("/output/alice", output_override)
+
+                modules_map = store.get_module_user_paths("GX", "alice")
+                self.assertEqual({"PX": {"mod": "/src/alice"}}, modules_map)
+
+                deploy_map = store.get_deploy_user_paths("GX", "alice")
+                self.assertEqual(
+                    {"app": ("/deploy/alice/{profile}", "/hotfix/alice/{profile}")},
+                    deploy_map,
+                )
+
                 resolved = store.list_groups(username="alice")
                 self.assertEqual(1, len(resolved))
                 grp = resolved[0]
