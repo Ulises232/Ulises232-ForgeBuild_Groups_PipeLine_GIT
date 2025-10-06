@@ -9,12 +9,15 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 
 ### Añadido
 - Persistencia de configuración sobre SQL Server a través de `SqlConfigStore`, incluyendo tablas `config_*` para grupos, proyectos, módulos, despliegues, sprints y tarjetas.
+- Tablas de overrides por usuario para rutas de repositorios, módulos y despliegues junto con métodos `set_*_user_paths` en el almacén compartido.
 
 ### Cambiado
 - `load_config` y `save_config` ahora construyen el almacén desde el repositorio compartido y permiten inyectar un repositorio alterno para pruebas.
+- `ConfigStore.list_groups` admite usuario activo para combinar definiciones globales con overrides y las tareas de build/deploy resuelven rutas usando valores personalizados.
 
 ### Interno
 - Pruebas de configuración actualizadas con un `FakeBranchHistoryRepo` basado en SQLite para validar la nueva capa SQL.
+- Casos adicionales que verifican la composición global+usuario y la API de overrides dentro de `test_config_store`.
 
 ## [1.12.0] - 2025-10-22
 

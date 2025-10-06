@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Literal, Callable
+from typing import List, Optional, Dict, Literal, Callable, Tuple
 import yaml, pathlib, os, sys
 from datetime import datetime
 
@@ -75,6 +75,7 @@ class Config(BaseModel):
     max_build_workers: Optional[int] = None
 
 _APPLIED_ENV_KEYS: set[str] = set()
+_GROUPS_CACHE: Dict[Tuple[int, Optional[str]], List[Group]] = {}
 
 
 def _package_data_dir() -> pathlib.Path:
@@ -115,6 +116,7 @@ def set_config_repo_factory(factory: Optional[Callable[[], BranchHistoryDB]]) ->
 
     global _CONFIG_REPO_FACTORY
     _CONFIG_REPO_FACTORY = factory
+    _GROUPS_CACHE.clear()
 
 
 def _create_config_store() -> ConfigStore:
@@ -129,6 +131,36 @@ def _create_config_store() -> ConfigStore:
     if repo is not None:
         return ConfigStore(repo=repo)
     return ConfigStore()
+
+
+def groups_for_user(cfg: Config, username: Optional[str] = None) -> List[Group]:
+    """Return groups with overrides applied for the requested username."""
+
+    if username:
+        user = username
+    else:
+        try:
+            from .session import current_username as _current_username
+
+            user = _current_username("")
+        except Exception:
+            user = ""
+    key = (id(cfg), user or None)
+    cached = _GROUPS_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    if not user:
+        groups = list(cfg.groups or [])
+    else:
+        store = _create_config_store()
+        try:
+            groups = store.list_groups(username=user)
+        except Exception:
+            groups = list(cfg.groups or [])
+
+    _GROUPS_CACHE[key] = groups
+    return groups
 
 def apply_environment(cfg: Config) -> None:
     """Apply configured environment variables to the current process."""
@@ -150,6 +182,7 @@ def apply_environment(cfg: Config) -> None:
 
 
 def load_config() -> Config:
+    _GROUPS_CACHE.clear()
     cfg_path = _cfg_file()
     store = _create_config_store()
     legacy_groups_data = []
@@ -213,6 +246,7 @@ def save_config(cfg: Config) -> str:
     # v1 usa .dict(), v2 usa .model_dump()
     store = _create_config_store()
     store.replace_groups(cfg.groups or [])
+    _GROUPS_CACHE.clear()
     data = _model_to_dict(cfg)
     data.pop("groups", None)
     cfg_path = _cfg_file()

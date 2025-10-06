@@ -18,6 +18,7 @@ from buildtool.core.config import (
     load_config,
     save_config,
     set_config_repo_factory,
+    groups_for_user,
 )
 from buildtool.core.config_store import ConfigStore
 
@@ -218,6 +219,75 @@ class ConfigStoreMigrationTests(unittest.TestCase):
 
                 project_config = json.loads(projects[0]["config_json"])
                 self.assertEqual(["dev", "qa"], project_config.get("profiles"))
+
+    def test_user_overrides_are_combined_with_global_configuration(self):
+        with TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "state"
+            with patch("buildtool.core.config._state_dir", return_value=state_dir), patch(
+                "buildtool.core.config_store._state_dir", return_value=state_dir
+            ):
+                repo = self._use_repo(state_dir / "config.sqlite3")
+                module = Module(name="mod", path="src/module")
+                project = Project(key="PX", modules=[module], profiles=["dev", "qa"])
+                deploy = DeployTarget(
+                    name="app",
+                    project_key="PX",
+                    profiles=["dev"],
+                    path_template="/deploy/{profile}",
+                )
+                group = Group(
+                    key="GX",
+                    repos={"PX": "/repos/global"},
+                    output_base="/output/global",
+                    profiles=["dev"],
+                    projects=[project],
+                    deploy_targets=[deploy],
+                )
+
+                cfg = Config(
+                    paths=Paths(
+                        workspaces={"PX": "/ws/global"},
+                        output_base="/output/default",
+                        nas_dir="",
+                    ),
+                    groups=[group],
+                )
+                save_config(cfg)
+
+                store = ConfigStore(repo=repo)
+                store.set_group_user_paths(
+                    "GX",
+                    "alice",
+                    repos={"PX": "/repos/alice"},
+                    output_base="/output/alice",
+                )
+                store.set_module_user_path("GX", "PX", "mod", "alice", "/src/alice")
+                store.set_deploy_user_paths(
+                    "GX",
+                    "app",
+                    "alice",
+                    path_template="/deploy/alice/{profile}",
+                    hotfix_path_template="/hotfix/alice/{profile}",
+                )
+
+                resolved = store.list_groups(username="alice")
+                self.assertEqual(1, len(resolved))
+                grp = resolved[0]
+                self.assertEqual("/repos/alice", grp.repos["PX"])
+                self.assertEqual("/output/alice", grp.output_base)
+                self.assertEqual("/src/alice", grp.projects[0].modules[0].path)
+                self.assertEqual("/deploy/alice/{profile}", grp.deploy_targets[0].path_template)
+                self.assertEqual(
+                    "/hotfix/alice/{profile}", grp.deploy_targets[0].hotfix_path_template
+                )
+
+                global_groups = store.list_groups()
+                self.assertEqual("/repos/global", global_groups[0].repos["PX"])
+                self.assertEqual("/output/global", global_groups[0].output_base)
+
+                cfg_loaded = load_config()
+                resolved_for_user = groups_for_user(cfg_loaded, username="alice")
+                self.assertEqual("/repos/alice", resolved_for_user[0].repos["PX"])
 
                 store = ConfigStore(repo=repo)
                 stored = store.list_groups()

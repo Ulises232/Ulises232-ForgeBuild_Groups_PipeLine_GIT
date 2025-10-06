@@ -43,6 +43,16 @@ CREATE TABLE IF NOT EXISTS group_profiles (
     profile TEXT NOT NULL,
     FOREIGN KEY(group_key) REFERENCES groups(key) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS group_user_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    item_key TEXT NOT NULL DEFAULT '',
+    value TEXT NOT NULL,
+    UNIQUE(group_key, username, kind, item_key),
+    FOREIGN KEY(group_key) REFERENCES groups(key) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS projects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_key TEXT NOT NULL,
@@ -78,6 +88,16 @@ CREATE TABLE IF NOT EXISTS project_modules (
     config_json TEXT DEFAULT '{}',
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS module_user_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    module_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    path TEXT NOT NULL,
+    UNIQUE(group_key, project_key, module_name, username),
+    FOREIGN KEY(group_key) REFERENCES groups(key) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS deploy_targets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_key TEXT NOT NULL,
@@ -95,6 +115,16 @@ CREATE TABLE IF NOT EXISTS deploy_target_profiles (
     position INTEGER NOT NULL,
     profile TEXT NOT NULL,
     FOREIGN KEY(target_id) REFERENCES deploy_targets(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS deploy_user_paths (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    path_template TEXT,
+    hotfix_path_template TEXT,
+    UNIQUE(group_key, target_name, username),
+    FOREIGN KEY(group_key) REFERENCES groups(key) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS sprints (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,6 +251,22 @@ def _sqlserver_schema_statements(prefix: str) -> List[str]:
         END
         """.strip(),
         f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('group_user_paths')}')
+        BEGIN
+            CREATE TABLE {tbl('group_user_paths')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                username NVARCHAR(255) NOT NULL,
+                kind NVARCHAR(64) NOT NULL,
+                item_key NVARCHAR(255) NOT NULL DEFAULT '',
+                value NVARCHAR(MAX) NOT NULL,
+                CONSTRAINT uq_{tbl('group_user_paths')} UNIQUE (group_key, username, kind, item_key),
+                CONSTRAINT fk_{tbl('group_user_paths')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
         IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('projects')}')
         BEGIN
             CREATE TABLE {tbl('projects')} (
@@ -269,6 +315,22 @@ def _sqlserver_schema_statements(prefix: str) -> List[str]:
         END
         """.strip(),
         f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('module_user_paths')}')
+        BEGIN
+            CREATE TABLE {tbl('module_user_paths')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                project_key NVARCHAR(255) NOT NULL,
+                module_name NVARCHAR(255) NOT NULL,
+                username NVARCHAR(255) NOT NULL,
+                path NVARCHAR(MAX) NOT NULL,
+                CONSTRAINT uq_{tbl('module_user_paths')} UNIQUE (group_key, project_key, module_name, username),
+                CONSTRAINT fk_{tbl('module_user_paths')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
         IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('deploy_targets')}')
         BEGIN
             CREATE TABLE {tbl('deploy_targets')} (
@@ -295,6 +357,22 @@ def _sqlserver_schema_statements(prefix: str) -> List[str]:
                 profile NVARCHAR(255) NOT NULL,
                 CONSTRAINT fk_{tbl('deploy_target_profiles')}_target FOREIGN KEY(target_id)
                     REFERENCES {tbl('deploy_targets')}(id) ON DELETE CASCADE
+            );
+        END
+        """.strip(),
+        f"""
+        IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = '{tbl('deploy_user_paths')}')
+        BEGIN
+            CREATE TABLE {tbl('deploy_user_paths')} (
+                id INT IDENTITY(1,1) PRIMARY KEY,
+                group_key NVARCHAR(255) NOT NULL,
+                target_name NVARCHAR(255) NOT NULL,
+                username NVARCHAR(255) NOT NULL,
+                path_template NVARCHAR(MAX) NULL,
+                hotfix_path_template NVARCHAR(MAX) NULL,
+                CONSTRAINT uq_{tbl('deploy_user_paths')} UNIQUE (group_key, target_name, username),
+                CONSTRAINT fk_{tbl('deploy_user_paths')}_group FOREIGN KEY(group_key)
+                    REFERENCES {tbl('groups')}([key]) ON DELETE CASCADE
             );
         END
         """.strip(),
@@ -386,6 +464,16 @@ CREATE TABLE IF NOT EXISTS {tbl('group_profiles')} (
     profile TEXT NOT NULL,
     FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS {tbl('group_user_paths')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    username TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    item_key TEXT NOT NULL DEFAULT '',
+    value TEXT NOT NULL,
+    UNIQUE(group_key, username, kind, item_key),
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS {tbl('projects')} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_key TEXT NOT NULL,
@@ -421,6 +509,16 @@ CREATE TABLE IF NOT EXISTS {tbl('project_modules')} (
     config_json TEXT DEFAULT '{{}}',
     FOREIGN KEY(project_id) REFERENCES {tbl('projects')}(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS {tbl('module_user_paths')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    module_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    path TEXT NOT NULL,
+    UNIQUE(group_key, project_key, module_name, username),
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS {tbl('deploy_targets')} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_key TEXT NOT NULL,
@@ -438,6 +536,16 @@ CREATE TABLE IF NOT EXISTS {tbl('deploy_target_profiles')} (
     position INTEGER NOT NULL,
     profile TEXT NOT NULL,
     FOREIGN KEY(target_id) REFERENCES {tbl('deploy_targets')}(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS {tbl('deploy_user_paths')} (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_key TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    path_template TEXT,
+    hotfix_path_template TEXT,
+    UNIQUE(group_key, target_name, username),
+    FOREIGN KEY(group_key) REFERENCES {tbl('groups')}(key) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS {tbl('sprints')} (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -590,22 +698,26 @@ class SqlConfigStore:
 
         with self._connect() as conn:
             cursor = conn.cursor()
-            for table in (
-                "card_assignments",
-                "cards",
-                "sprints",
-                "deploy_target_profiles",
-                "deploy_targets",
-                "project_modules",
-                "projects",
-                "group_profiles",
-                "group_repos",
-                "groups",
-            ):
-                self._execute(cursor, f"DELETE FROM {self._table(table)}")
+            self._execute(
+                cursor,
+                f"SELECT [key] FROM {self._table('groups')}",
+            )
+            existing_keys = {str(row[0]) for row in cursor.fetchall()}
+            incoming_keys = {str(group.key) for group in normalized if getattr(group, "key", None)}
+
+            removed = existing_keys - incoming_keys
+            for key in removed:
+                self._execute(
+                    cursor,
+                    f"DELETE FROM {self._table('groups')} WHERE [key] = ?",
+                    (key,),
+                )
 
             for position, group in enumerate(normalized):
-                self._insert_group(cursor, group, position)
+                if group.key in existing_keys:
+                    self._update_group(cursor, group, position)
+                else:
+                    self._insert_group(cursor, group, position)
 
     # ------------------------------------------------------------------
     def _insert_group(self, cursor, group: Any, position: int) -> None:
@@ -786,8 +898,82 @@ class SqlConfigStore:
         return target_id
 
     # ------------------------------------------------------------------
-    def list_groups(self) -> List[Any]:
+    def _update_group(self, cursor, group: Any, position: int) -> None:
+        data = _serialize_model(group)
+        key = data.get("key")
+        if not key:
+            return
+
+        repos = data.get("repos") or {}
+        profiles = list(data.get("profiles") or [])
+        projects = list(data.get("projects") or [])
+        deploy_targets = list(data.get("deploy_targets") or [])
+        extras = {
+            k: v
+            for k, v in data.items()
+            if k
+            not in {"key", "repos", "output_base", "profiles", "projects", "deploy_targets"}
+        }
+
+        self._execute(
+            cursor,
+            f"UPDATE {self._table('groups')} SET position = ?, output_base = ?, config_json = ? WHERE [key] = ?",
+            (
+                int(position),
+                str(data.get("output_base", "")),
+                _json_dumps(extras) if extras else "{}",
+                str(key),
+            ),
+        )
+
+        self._execute(
+            cursor,
+            f"DELETE FROM {self._table('group_repos')} WHERE group_key = ?",
+            (str(key),),
+        )
+        if repos:
+            self._executemany(
+                cursor,
+                f"INSERT INTO {self._table('group_repos')}(group_key, repo_key, path) VALUES(?, ?, ?)",
+                [(str(key), str(repo_key), str(path)) for repo_key, path in repos.items()],
+            )
+
+        self._execute(
+            cursor,
+            f"DELETE FROM {self._table('group_profiles')} WHERE group_key = ?",
+            (str(key),),
+        )
+        for idx, profile in enumerate(profiles):
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('group_profiles')}(group_key, position, profile) VALUES(?, ?, ?)",
+                (str(key), int(idx), str(profile)),
+            )
+
+        self._execute(
+            cursor,
+            f"DELETE FROM {self._table('projects')} WHERE group_key = ?",
+            (str(key),),
+        )
+        for proj_idx, project in enumerate(projects):
+            self._insert_project(cursor, str(key), project, proj_idx)
+
+        self._execute(
+            cursor,
+            f"DELETE FROM {self._table('deploy_targets')} WHERE group_key = ?",
+            (str(key),),
+        )
+        for dep_idx, deploy in enumerate(deploy_targets):
+            self._insert_deploy_target(cursor, str(key), deploy, dep_idx)
+
+    # ------------------------------------------------------------------
+    def list_groups(self, username: Optional[str] = None) -> List[Any]:
         from .config import Group, Project, Module, DeployTarget
+
+        if username:
+            username = str(username)
+        else:
+            username = None
 
         groups: List[Group] = []
         with self._connect() as conn:
@@ -820,6 +1006,10 @@ class SqlConfigStore:
             )
             project_rows = cursor.fetchall()
 
+            project_lookup: Dict[int, tuple[str, str]] = {}
+            for row in project_rows:
+                project_lookup[int(row[0])] = (str(row[1]), str(row[2]))
+
             self._execute(
                 cursor,
                 f"SELECT project_id, position, name, path, version_files, goals, optional, profile_override, only_if_profile_equals, copy_to_profile_war, copy_to_profile_ui, copy_to_subfolder, rename_jar_to, no_profile, run_once, select_pattern, serial_across_profiles, copy_to_root, config_json FROM {self._table('project_modules')} ORDER BY position",
@@ -838,9 +1028,49 @@ class SqlConfigStore:
             )
             deploy_profiles = cursor.fetchall()
 
+            repo_overrides: Dict[str, Dict[str, str]] = {}
+            output_overrides: Dict[str, str] = {}
+            module_overrides: Dict[tuple[str, str, str], str] = {}
+            deploy_overrides: Dict[tuple[str, str], tuple[Optional[str], Optional[str]]] = {}
+
+            if username:
+                self._execute(
+                    cursor,
+                    f"SELECT group_key, kind, item_key, value FROM {self._table('group_user_paths')} WHERE username = ?",
+                    (username,),
+                )
+                for group_key, kind, item_key, value in cursor.fetchall():
+                    group_key = str(group_key)
+                    kind = str(kind)
+                    item_key = str(item_key)
+                    if kind == "repo":
+                        repo_overrides.setdefault(group_key, {})[item_key] = str(value)
+                    elif kind == "output_base":
+                        output_overrides[group_key] = str(value)
+
+                self._execute(
+                    cursor,
+                    f"SELECT group_key, project_key, module_name, path FROM {self._table('module_user_paths')} WHERE username = ?",
+                    (username,),
+                )
+                for group_key, project_key, module_name, path in cursor.fetchall():
+                    module_overrides[(str(group_key), str(project_key), str(module_name))] = str(path)
+
+                self._execute(
+                    cursor,
+                    f"SELECT group_key, target_name, path_template, hotfix_path_template FROM {self._table('deploy_user_paths')} WHERE username = ?",
+                    (username,),
+                )
+                for group_key, target_name, path_template, hotfix_path_template in cursor.fetchall():
+                    deploy_overrides[(str(group_key), str(target_name))] = (
+                        None if path_template is None else str(path_template),
+                        None if hotfix_path_template is None else str(hotfix_path_template),
+                    )
+
         modules_by_project: Dict[int, List[Module]] = {}
         for row in module_rows:
             project_id = int(row[0])
+            group_key, project_key = project_lookup.get(project_id, ("", ""))
             module_payload = {
                 "name": row[2],
                 "path": row[3],
@@ -860,6 +1090,9 @@ class SqlConfigStore:
                 "copy_to_root": bool(row[17]),
             }
             module_payload.update(_json_loads(row[18], {}))
+            override_key = (group_key, project_key, str(row[2]))
+            if override_key in module_overrides:
+                module_payload["path"] = module_overrides[override_key]
             modules_by_project.setdefault(project_id, []).append(Module(**module_payload))
 
         deploy_profiles_map: Dict[int, List[str]] = {}
@@ -892,14 +1125,28 @@ class SqlConfigStore:
                 "profiles": deploy_profiles_map.get(target_id, []),
             }
             payload.update(_json_loads(row[7], {}))
+            override_key = (group_key, payload["name"])
+            override_values = deploy_overrides.get(override_key)
+            if override_values:
+                path_template, hotfix_template = override_values
+                if path_template is not None:
+                    payload["path_template"] = path_template
+                if hotfix_template is not None:
+                    payload["hotfix_path_template"] = hotfix_template
             deploys_by_group.setdefault(group_key, []).append(DeployTarget(**payload))
 
         for key, _, output_base, config_json in group_rows:
             group_key = str(key)
+            repos = dict(repo_map.get(group_key, {}))
+            if username and group_key in repo_overrides:
+                repos.update(repo_overrides[group_key])
+            resolved_output_base = output_base
+            if username and group_key in output_overrides:
+                resolved_output_base = output_overrides[group_key]
             payload = {
                 "key": group_key,
-                "repos": repo_map.get(group_key, {}),
-                "output_base": output_base,
+                "repos": repos,
+                "output_base": resolved_output_base,
                 "profiles": profile_map.get(group_key, []),
                 "projects": projects_by_group.get(group_key, []),
                 "deploy_targets": deploys_by_group.get(group_key, []),
@@ -908,6 +1155,117 @@ class SqlConfigStore:
             groups.append(Group(**payload))
 
         return groups
+
+    # ------------------------------------------------------------------
+    def set_group_user_paths(
+        self,
+        group_key: str,
+        username: str,
+        *,
+        repos: Optional[Dict[str, str]] = None,
+        output_base: Optional[str] = None,
+    ) -> None:
+        if not group_key or not username:
+            return
+        rows: List[Sequence[Any]] = []
+        if output_base is not None:
+            rows.append((str(group_key), str(username), "output_base", "", str(output_base)))
+        for repo_key, path in (repos or {}).items():
+            rows.append((str(group_key), str(username), "repo", str(repo_key), str(path)))
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                f"DELETE FROM {self._table('group_user_paths')} WHERE group_key = ? AND username = ?",
+                (str(group_key), str(username)),
+            )
+            if rows:
+                self._executemany(
+                    cursor,
+                    f"INSERT INTO {self._table('group_user_paths')}(group_key, username, kind, item_key, value) VALUES(?, ?, ?, ?, ?)",
+                    rows,
+                )
+
+    # ------------------------------------------------------------------
+    def set_module_user_path(
+        self,
+        group_key: str,
+        project_key: str,
+        module_name: str,
+        username: str,
+        path: Optional[str],
+    ) -> None:
+        if not group_key or not project_key or not module_name or not username:
+            return
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            if path is None or path == "":
+                self._execute(
+                    cursor,
+                    f"DELETE FROM {self._table('module_user_paths')} WHERE group_key = ? AND project_key = ? AND module_name = ? AND username = ?",
+                    (str(group_key), str(project_key), str(module_name), str(username)),
+                )
+                return
+
+            self._execute(
+                cursor,
+                f"UPDATE {self._table('module_user_paths')} SET path = ? WHERE group_key = ? AND project_key = ? AND module_name = ? AND username = ?",
+                (str(path), str(group_key), str(project_key), str(module_name), str(username)),
+            )
+            if getattr(cursor, "rowcount", 0):
+                return
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('module_user_paths')}(group_key, project_key, module_name, username, path) VALUES(?, ?, ?, ?, ?)",
+                (str(group_key), str(project_key), str(module_name), str(username), str(path)),
+            )
+
+    # ------------------------------------------------------------------
+    def set_deploy_user_paths(
+        self,
+        group_key: str,
+        target_name: str,
+        username: str,
+        *,
+        path_template: Optional[str] = None,
+        hotfix_path_template: Optional[str] = None,
+    ) -> None:
+        if not group_key or not target_name or not username:
+            return
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            if path_template is None and hotfix_path_template is None:
+                self._execute(
+                    cursor,
+                    f"DELETE FROM {self._table('deploy_user_paths')} WHERE group_key = ? AND target_name = ? AND username = ?",
+                    (str(group_key), str(target_name), str(username)),
+                )
+                return
+
+            self._execute(
+                cursor,
+                f"UPDATE {self._table('deploy_user_paths')} SET path_template = ?, hotfix_path_template = ? WHERE group_key = ? AND target_name = ? AND username = ?",
+                (
+                    path_template,
+                    hotfix_path_template,
+                    str(group_key),
+                    str(target_name),
+                    str(username),
+                ),
+            )
+            if getattr(cursor, "rowcount", 0):
+                return
+            self._execute(
+                cursor,
+                f"INSERT INTO {self._table('deploy_user_paths')}(group_key, target_name, username, path_template, hotfix_path_template) VALUES(?, ?, ?, ?, ?)",
+                (
+                    str(group_key),
+                    str(target_name),
+                    str(username),
+                    path_template,
+                    hotfix_path_template,
+                ),
+            )
 
     # ------------------------------------------------------------------
     def list_sprints(self, branch_key: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -1883,10 +2241,12 @@ DROP TABLE IF EXISTS groups;
             cx.commit()
 
     # ------------------------------------------------------------------
-    def list_groups(self) -> List[Any]:
+    def list_groups(self, username: Optional[str] = None) -> List[Any]:
         if self._sql_store is not None:
-            return self._sql_store.list_groups()
+            return self._sql_store.list_groups(username=username)
         from .config import Group
+
+        user_key: Optional[str] = str(username) if username else None
 
         with sqlite3.connect(self.db_path) as cx:
             cx.row_factory = sqlite3.Row
@@ -1919,6 +2279,23 @@ DROP TABLE IF EXISTS groups;
             deploy_profiles = cx.execute(
                 "SELECT target_id, position, profile FROM deploy_target_profiles ORDER BY position"
             ).fetchall()
+            if user_key:
+                user_group_overrides = cx.execute(
+                    "SELECT group_key, kind, item_key, value FROM group_user_paths WHERE username = ?",
+                    (user_key,),
+                ).fetchall()
+                user_module_overrides = cx.execute(
+                    "SELECT group_key, project_key, module_name, path FROM module_user_paths WHERE username = ?",
+                    (user_key,),
+                ).fetchall()
+                user_deploy_overrides = cx.execute(
+                    "SELECT group_key, target_name, path_template, hotfix_path_template FROM deploy_user_paths WHERE username = ?",
+                    (user_key,),
+                ).fetchall()
+            else:
+                user_group_overrides = []
+                user_module_overrides = []
+                user_deploy_overrides = []
 
         repos_by_group: Dict[str, Dict[str, str]] = {}
         for row in repo_rows:
@@ -1944,13 +2321,47 @@ DROP TABLE IF EXISTS groups;
         for row in deploy_profiles:
             deploy_profiles_map.setdefault(row[0], []).append(str(row[2]))
 
+        project_lookup: Dict[int, tuple[str, str]] = {}
+        for row in project_rows:
+            project_lookup[int(row[0])] = (str(row[1]), str(row[2]))
+
+        repo_overrides: Dict[str, Dict[str, str]] = {}
+        output_overrides: Dict[str, str] = {}
+        module_overrides: Dict[tuple[str, str, str], str] = {}
+        deploy_overrides: Dict[tuple[str, str], tuple[Optional[str], Optional[str]]] = {}
+
+        for row in user_group_overrides:
+            group_key = str(row[0])
+            kind = str(row[1])
+            item_key = str(row[2])
+            value = str(row[3])
+            if kind == "repo":
+                repo_overrides.setdefault(group_key, {})[item_key] = value
+            elif kind == "output_base":
+                output_overrides[group_key] = value
+
+        for row in user_module_overrides:
+            module_overrides[(str(row[0]), str(row[1]), str(row[2]))] = str(row[3])
+
+        for row in user_deploy_overrides:
+            deploy_overrides[(str(row[0]), str(row[1]))] = (
+                None if row[2] is None else str(row[2]),
+                None if row[3] is None else str(row[3]),
+            )
+
         groups: List[Any] = []
         for row in group_rows:
             key = str(row["key"])
+            repos = dict(repos_by_group.get(key, {}))
+            if user_key and key in repo_overrides:
+                repos.update(repo_overrides[key])
+            resolved_output = str(row["output_base"] or "")
+            if user_key and key in output_overrides:
+                resolved_output = output_overrides[key]
             group_payload: Dict[str, Any] = {
                 "key": key,
-                "repos": repos_by_group.get(key, {}),
-                "output_base": str(row["output_base"] or ""),
+                "repos": repos,
+                "output_base": resolved_output,
                 "profiles": profiles_by_group.get(key, []),
                 "projects": [],
                 "deploy_targets": [],
@@ -1995,6 +2406,13 @@ DROP TABLE IF EXISTS groups;
                     module_payload.update(
                         _json_loads(module_row["config_json"], {})
                     )
+                    override_key = (
+                        project_lookup.get(project_id, ("", ""))[0],
+                        str(project_row["project_key"]),
+                        module_payload["name"],
+                    )
+                    if override_key in module_overrides:
+                        module_payload["path"] = module_overrides[override_key]
                     project_payload["modules"].append(module_payload)
 
                 group_payload["projects"].append(project_payload)
@@ -2011,6 +2429,14 @@ DROP TABLE IF EXISTS groups;
                 deploy_payload.update(
                     _json_loads(deploy_row["config_json"], {})
                 )
+                override_key = (key, deploy_payload["name"])
+                override_values = deploy_overrides.get(override_key)
+                if override_values:
+                    path_value, hotfix_value = override_values
+                    if path_value is not None:
+                        deploy_payload["path_template"] = path_value
+                    if hotfix_value is not None:
+                        deploy_payload["hotfix_path_template"] = hotfix_value
                 group_payload["deploy_targets"].append(deploy_payload)
 
             try:
@@ -2018,6 +2444,124 @@ DROP TABLE IF EXISTS groups;
             except Exception:
                 continue
         return groups
+
+    # ------------------------------------------------------------------
+    def set_group_user_paths(
+        self,
+        group_key: str,
+        username: str,
+        *,
+        repos: Optional[Dict[str, str]] = None,
+        output_base: Optional[str] = None,
+    ) -> None:
+        if self._sql_store is not None:
+            self._sql_store.set_group_user_paths(
+                group_key,
+                username,
+                repos=repos,
+                output_base=output_base,
+            )
+            return
+        if not group_key or not username:
+            return
+        rows: List[tuple[str, str, str, str, str]] = []
+        if output_base is not None:
+            rows.append((group_key, username, "output_base", "", output_base))
+        for repo_key, path in (repos or {}).items():
+            rows.append((group_key, username, "repo", str(repo_key), str(path)))
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            cx.execute(
+                "DELETE FROM group_user_paths WHERE group_key = ? AND username = ?",
+                (group_key, username),
+            )
+            if rows:
+                cx.executemany(
+                    "INSERT INTO group_user_paths(group_key, username, kind, item_key, value) VALUES(?, ?, ?, ?, ?)",
+                    rows,
+                )
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def set_module_user_path(
+        self,
+        group_key: str,
+        project_key: str,
+        module_name: str,
+        username: str,
+        path: Optional[str],
+    ) -> None:
+        if self._sql_store is not None:
+            self._sql_store.set_module_user_path(
+                group_key,
+                project_key,
+                module_name,
+                username,
+                path,
+            )
+            return
+        if not group_key or not project_key or not module_name or not username:
+            return
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            if path is None or path == "":
+                cx.execute(
+                    "DELETE FROM module_user_paths WHERE group_key = ? AND project_key = ? AND module_name = ? AND username = ?",
+                    (group_key, project_key, module_name, username),
+                )
+                cx.commit()
+                return
+            cursor = cx.execute(
+                "UPDATE module_user_paths SET path = ? WHERE group_key = ? AND project_key = ? AND module_name = ? AND username = ?",
+                (path, group_key, project_key, module_name, username),
+            )
+            if cursor.rowcount == 0:
+                cx.execute(
+                    "INSERT INTO module_user_paths(group_key, project_key, module_name, username, path) VALUES(?, ?, ?, ?, ?)",
+                    (group_key, project_key, module_name, username, path),
+                )
+            cx.commit()
+
+    # ------------------------------------------------------------------
+    def set_deploy_user_paths(
+        self,
+        group_key: str,
+        target_name: str,
+        username: str,
+        *,
+        path_template: Optional[str] = None,
+        hotfix_path_template: Optional[str] = None,
+    ) -> None:
+        if self._sql_store is not None:
+            self._sql_store.set_deploy_user_paths(
+                group_key,
+                target_name,
+                username,
+                path_template=path_template,
+                hotfix_path_template=hotfix_path_template,
+            )
+            return
+        if not group_key or not target_name or not username:
+            return
+        with sqlite3.connect(self.db_path) as cx:
+            cx.execute("PRAGMA foreign_keys = ON")
+            if path_template is None and hotfix_path_template is None:
+                cx.execute(
+                    "DELETE FROM deploy_user_paths WHERE group_key = ? AND target_name = ? AND username = ?",
+                    (group_key, target_name, username),
+                )
+                cx.commit()
+                return
+            cursor = cx.execute(
+                "UPDATE deploy_user_paths SET path_template = ?, hotfix_path_template = ? WHERE group_key = ? AND target_name = ? AND username = ?",
+                (path_template, hotfix_path_template, group_key, target_name, username),
+            )
+            if cursor.rowcount == 0:
+                cx.execute(
+                    "INSERT INTO deploy_user_paths(group_key, target_name, username, path_template, hotfix_path_template) VALUES(?, ?, ?, ?, ?)",
+                    (group_key, target_name, username, path_template, hotfix_path_template),
+                )
+            cx.commit()
 
     # ------------------------------------------------------------------
     def update_group(self, group: Any) -> None:
