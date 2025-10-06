@@ -8,7 +8,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 ## [1.13.0] - 2025-10-23
 
 ### Añadido
-- Persistencia de configuración sobre SQL Server a través de `SqlConfigStore`, incluyendo tablas `config_*` para grupos, proyectos, módulos, despliegues, sprints y tarjetas.
+- Persistencia de configuración sobre SQL Server a través de `SqlConfigStore`, incluyendo tablas `config_*` para grupos, proyectos, módulos y despliegues.
 - Tablas de overrides por usuario para rutas de repositorios, módulos y despliegues junto con métodos `set_*_user_paths` en el almacén compartido.
 - Asistente de grupos con pestañas separadas para definición global y "Rutas por usuario", permitiendo capturar overrides por cuenta directamente desde la UI.
 
@@ -16,6 +16,7 @@ El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog
 - `load_config` y `save_config` ahora construyen el almacén desde el repositorio compartido y permiten inyectar un repositorio alterno para pruebas.
 - `ConfigStore.list_groups` admite usuario activo para combinar definiciones globales con overrides y las tareas de build/deploy resuelven rutas usando valores personalizados.
 - Las vistas de Build y Deploy recargan la configuración antes de ejecutar pipelines y registran en la bitácora las rutas resueltas para el usuario activo.
+- Se descartó la migración/creación de tablas `sprints`, `cards` y `card_assignments` dentro del almacén de configuración al no ser necesarias en la persistencia compartida.
 
 ### Interno
 - Pruebas de configuración actualizadas con un `FakeBranchHistoryRepo` basado en SQLite para validar la nueva capa SQL.
