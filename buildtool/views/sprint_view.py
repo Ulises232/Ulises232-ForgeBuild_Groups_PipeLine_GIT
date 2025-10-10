@@ -2154,7 +2154,7 @@ class SprintView(QWidget):
     def _qa_branch_base(self, sprint: Optional[Sprint]) -> str:
         if not sprint:
             return ""
-        key = (sprint.qa_branch_key or sprint.branch_key or "").strip()
+        key = (sprint.branch_key or sprint.qa_branch_key or "").strip()
         _, _, branch = self._split_branch_key(key)
         return branch or ""
 

@@ -896,7 +896,7 @@ def collect_sprint_scripts(
 def _qa_branch_base_from_row(row: Optional[dict]) -> str:
     if not row:
         return ""
-    key = (row.get("qa_branch_key") or row.get("branch_key") or "").strip()
+    key = (row.get("branch_key") or row.get("qa_branch_key") or "").strip()
     _, _, branch = _split_branch_key(key)
     return branch or ""
 
@@ -980,9 +980,9 @@ def _card_branch_key(card: Card, base: Path) -> Optional[str]:
     sprint = _get_db(base).fetch_sprint(int(card.sprint_id))
     if not sprint:
         return None
-    group, project, _ = _split_branch_key(sprint.get("qa_branch_key"))
+    group, project, _ = _split_branch_key(sprint.get("branch_key"))
     if not any((group, project)):
-        group, project, _ = _split_branch_key(sprint.get("branch_key"))
+        group, project, _ = _split_branch_key(sprint.get("qa_branch_key"))
     branch = (card.branch or "").strip()
     if not branch:
         return None
