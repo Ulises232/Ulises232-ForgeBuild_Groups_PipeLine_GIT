@@ -655,13 +655,13 @@ class BranchStoreSqlServerTest(unittest.TestCase):
             updated_by="alice",
         )
         branch_store.upsert_card(card, path=self.base_path)
-        expected_prefix = "v2.68_QA_ELASS-40"
+        expected_prefix = "v2.68_ELASS-40"
         self.assertTrue(card.branch.startswith(expected_prefix))
-        expected_key = "ellis/proyecto/v2.68_QA_ELASS-40_feature/login"
+        expected_key = "ellis/proyecto/v2.68_ELASS-40_feature/login"
         self.assertEqual(card.branch_key, expected_key)
         stored = branch_store.list_cards(path=self.base_path, sprint_ids=[sprint.id])
         self.assertEqual(len(stored), 1)
-        self.assertEqual(stored[0].branch, "v2.68_QA_ELASS-40_feature/login")
+        self.assertEqual(stored[0].branch, "v2.68_ELASS-40_feature/login")
         self.assertEqual(stored[0].branch_key, expected_key)
 
     def test_card_branch_key_uses_qa_branch_scope(self) -> None:

@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.2] - 2025-10-24
+
+### Cambiado
+- Las ramas generadas desde tarjetas se basan en la rama de versión del sprint en lugar de la rama `_QA`, evitando incluir cambios adelantados durante el desarrollo.
+
 ## [1.13.1] - 2025-10-24
 
 ### Documentación
