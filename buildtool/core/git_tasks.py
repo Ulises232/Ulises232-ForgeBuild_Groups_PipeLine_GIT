@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 from typing import Dict, List, Iterable, Optional, Tuple, Set
-from .config import Config
+from .config import Config, groups_for_user
 from .tasks import _resolve_repo_path
 from .gitwrap import (
     fetch, current_branch, checkout, create_branch, delete_branch,
@@ -13,7 +13,7 @@ from pathlib import Path
 import re
 
 def _iter_modules(cfg: Config, group_key: Optional[str], project_key: Optional[str], only: Optional[Set[str]] = None):
-    groups = [g for g in (cfg.groups or []) if (group_key is None or g.key == group_key)]
+    groups = [g for g in groups_for_user(cfg) if (group_key is None or g.key == group_key)]
     for g in groups:
         projs = [p for p in g.projects if (project_key is None or p.key == project_key)]
         for p in projs:

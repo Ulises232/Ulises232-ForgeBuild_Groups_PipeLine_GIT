@@ -19,6 +19,7 @@ from buildtool.core.branch_store import (
 )
 from buildtool.core.git_console_trace import clog
 from buildtool.core.git_tasks import _iter_modules as _iter_modules_cfg
+from .config import groups_for_user
 from .session import current_username
 
 # --------------------- helpers de salida y ejecución ---------------------
@@ -242,7 +243,7 @@ def _iter_cfg_modules(
         ) or "mod"
         yield name, _resolve_module_path(Path(module_path))
 
-    groups = getattr(cfg, "groups", None) or []
+    groups = groups_for_user(cfg)
     for g in groups:
         if gkey and getattr(g, "key", None) != gkey:
             continue
