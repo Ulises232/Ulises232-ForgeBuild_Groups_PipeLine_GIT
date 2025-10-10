@@ -994,7 +994,7 @@ class SprintView(QWidget):
     def _effective_sprint_branch_key(self, sprint: Optional[Sprint]) -> Optional[str]:
         if not sprint:
             return None
-        primary = (sprint.qa_branch_key or sprint.branch_key or "").strip()
+        primary = (sprint.branch_key or sprint.qa_branch_key or "").strip()
         return primary or None
 
     # ------------------------------------------------------------------
