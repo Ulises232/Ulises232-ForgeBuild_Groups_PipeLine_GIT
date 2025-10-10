@@ -320,18 +320,31 @@ def _create_or_switch(
     """Crea o activa una rama en el repo especificado."""
 
     if base:
-        rc_base, out_base = _run(["git", "rev-parse", "--verify", base], path, emit=emit)
-        if rc_base != 0:
-            reason = _last_nonempty(out_base) or f"rama base '{base}' no existe"
-            return False, reason
+        # Intentar activar la rama existente antes de validar la base.
+        for cmd, label in ((["git", "switch", branch], "switch"), (["git", "checkout", branch], "checkout")):
+            rc_switch, out_switch = _run(cmd, path, emit=emit)
+            if rc_switch == 0:
+                return True, label
 
-        rc_switch, out_switch = _run(["git", "switch", branch], path, emit=emit)
-        if rc_switch == 0:
-            return True, "switch"
+        base_ref = base
+        rc_base, out_base = _run(["git", "rev-parse", "--verify", base_ref], path, emit=emit)
+        if rc_base != 0:
+            # Si no existe localmente, intentar obtenerla desde origin/base.
+            _run(["git", "fetch", "origin", base], path, emit=emit)
+            remote_ref = f"origin/{base}"
+            rc_remote, out_remote = _run(["git", "rev-parse", "--verify", remote_ref], path, emit=emit)
+            if rc_remote != 0:
+                reason = (
+                    _last_nonempty(out_remote)
+                    or _last_nonempty(out_base)
+                    or f"rama base '{base}' no existe"
+                )
+                return False, reason
+            base_ref = remote_ref
 
         attempts = [
-            (["git", "switch", "-c", branch, base], "create_switch_base"),
-            (["git", "checkout", "-b", branch, base], "checkout_create_base"),
+            (["git", "switch", "-c", branch, base_ref], "create_switch_base"),
+            (["git", "checkout", "-b", branch, base_ref], "checkout_create_base"),
         ]
     else:
         attempts = [

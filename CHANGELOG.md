@@ -5,6 +5,12 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.4] - 2025-10-26
+
+### Corregido
+- La creación de ramas desde tarjetas ahora usa la rama base del sprint en lugar de mostrar la rama QA como origen.
+- Si la rama base no existe localmente, se sincroniza automáticamente desde `origin` antes de crear la rama de la tarjeta.
+
 ## [1.13.3] - 2025-10-25
 
 ### Corregido
