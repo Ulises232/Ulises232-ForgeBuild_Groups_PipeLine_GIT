@@ -311,6 +311,43 @@ def _discover_repos(cfg, gkey, pkey, only_modules, emit=None) -> List[Tuple[str,
     return filtered
 
 
+def _fetch_repo(mname: str, mpath: Path, emit=None) -> bool:
+    """Ejecuta un `git fetch --all --prune` para un repositorio."""
+
+    rc, out = _run(["git", "fetch", "--all", "--prune"], mpath, emit=emit)
+    if rc != 0:
+        reason = _last_nonempty(out) or "fetch falló"
+        _out(emit, f"[{mname}] ❌ Fetch falló: {reason}")
+        return False
+    _out(emit, f"[{mname}] ☁️ Fetch completado")
+    return True
+
+
+def fetch_all(
+    cfg,
+    gkey,
+    pkey,
+    emit=None,
+    only_modules: Optional[Iterable[str]] = None,
+) -> bool:
+    """Realiza fetch global para todos los módulos del proyecto o grupo."""
+
+    repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
+    ok_all = True
+    for mname, mpath in repos:
+        if not mpath.exists():
+            _out(emit, f"[{mname}] ⚠️ Ruta no existe: {mpath}")
+            ok_all = False
+            continue
+        if not _is_git_repo(mpath, emit=emit):
+            _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
+            ok_all = False
+            continue
+        if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+    return ok_all
+
+
 # --------------------- operaciones por cada repo ---------------------
 
 
@@ -452,6 +489,10 @@ def create_branches_local(
             ok_all = False
             continue
 
+        if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+            continue
+
         base_hint = f" (base {base_branch})" if base_branch else ""
         _out(emit, f"[{mname}] ▶ crear/switch rama: {bname}{base_hint}")
         ok, detail = _create_or_switch(bname, mpath, emit=emit, base=base_branch)
@@ -514,6 +555,12 @@ def create_version_branches(
             continue
         if not _is_git_repo(mpath, emit=emit):
             _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
+            ok_base = False
+            if create_qa:
+                ok_qa = False
+            continue
+
+        if not _fetch_repo(mname, mpath, emit=emit):
             ok_base = False
             if create_qa:
                 ok_qa = False
@@ -628,6 +675,12 @@ def switch_branch(
             failures.append((mname, "no es un repositorio Git"))
             continue
 
+        if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+            failures.append((mname, "fetch falló"))
+            abort_remaining = True
+            continue
+
         current = _current_branch_name(mpath)
         if not current:
             _out(emit, f"[{mname}] ❌ No se pudo determinar la rama actual.")
@@ -687,6 +740,10 @@ def delete_local_branch_by_name(
     for mname, mpath in repos:
         if not _is_git_repo(mpath, emit=emit):
             _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
+            ok_all = False
+            continue
+
+        if not _fetch_repo(mname, mpath, emit=emit):
             ok_all = False
             continue
 
@@ -750,6 +807,10 @@ def push_branch(
             ok_all = False
             continue
 
+        if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+            continue
+
         rc, _ = _run(["git", "push", "-u", "origin", bname], mpath, emit=emit)
         if rc != 0:
             _out(emit, f"[{mname}] ❌ push falló para '{bname}'")
@@ -802,6 +863,11 @@ def merge_into_current_branch(
             _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
             ok_all = False
             issues.append((mname, "no es un repositorio Git"))
+            continue
+
+        if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+            issues.append((mname, "fetch falló"))
             continue
 
         current = _current_branch_name(mpath) or "?"

@@ -32,7 +32,8 @@ from ..core.config_queries import find_project, get_group, iter_group_projects
 # Import our local-only shim
 from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
-    push_branch, delete_local_branch_by_name, merge_into_current_branch
+    push_branch, delete_local_branch_by_name, merge_into_current_branch,
+    fetch_all,
 )
 from ..core import sprint_queries
 from ..core.branch_store import upsert_card
@@ -122,6 +123,7 @@ class GitView(QWidget):
             self.btnSwitch,
             self.btnMerge,
             self.btnRefresh,
+            self.btnFetch,
             self.btnReconcile,
         ):
             try: w.setEnabled(not busy)
@@ -273,8 +275,10 @@ class GitView(QWidget):
 
         misc = QHBoxLayout()
         misc.setSpacing(10)
+        self.btnFetch = self._make_tool_button("Fetch (global)", "cloud-download")
         self.btnReconcile = self._make_tool_button("Reconciliar con Git (solo local)", "sync")
         misc.addStretch(1)
+        misc.addWidget(self.btnFetch)
         misc.addWidget(self.btnReconcile)
         opsl.addLayout(misc, 3, 0, 1, 2)
 
@@ -360,6 +364,7 @@ class GitView(QWidget):
         self.btnDeleteBranch.clicked.connect(self._do_delete_branch)
         self.btnRunCreateVersion.clicked.connect(self._do_create_version)
         self.btnMerge.clicked.connect(self._do_merge)
+        self.btnFetch.clicked.connect(self._do_fetch)
         self.btnClearLog.clicked.connect(self.log.clear)
 
 
@@ -848,5 +853,19 @@ class GitView(QWidget):
             "Reconciliar con Git (local)", reconcile_task, None, self.cfg, gkey, pkey,
             success="Reconciliación completa",
             error="Error al reconciliar"
+        )
+
+    @safe_slot
+    def _do_fetch(self):
+        gkey, pkey = self._current_keys()
+        self._start_task(
+            "Fetch global",
+            lambda cfg, gk, pk, emit=self.logger.line.emit: fetch_all(cfg, gk, pk, emit, only_modules=None),
+            None,
+            self.cfg,
+            gkey,
+            pkey,
+            success="Fetch completado",
+            error="Fetch con errores"
         )
 

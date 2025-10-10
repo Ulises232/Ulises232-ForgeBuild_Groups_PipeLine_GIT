@@ -5,6 +5,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.5] - 2025-10-27
+
+### Añadido
+- Botón "Fetch (global)" en la vista de Git para sincronizar todos los módulos del proyecto antes de operar.
+
+### Cambiado
+- Las acciones globales del módulo Git ejecutan un `git fetch --all --prune` en cada repositorio antes de crear, cambiar, eliminar, hacer merge o publicar ramas.
+
 ## [1.13.4] - 2025-10-26
 
 ### Corregido
