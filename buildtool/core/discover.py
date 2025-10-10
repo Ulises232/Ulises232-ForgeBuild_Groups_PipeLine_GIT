@@ -3,6 +3,7 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 import os
 
+from .config import groups_for_user
 from .git_fast import get_current_branch_fast
 
 
@@ -50,8 +51,9 @@ def _iter_cfg_entries(cfg, gkey: Optional[str], pkey: Optional[str]) -> List[Tup
     def _push(name: str, path: Path):
         entries.append((name or "mod", path))
 
-    if getattr(cfg, "groups", None):
-        for g in cfg.groups:
+    groups = groups_for_user(cfg)
+    if groups:
+        for g in groups:
             if gkey and getattr(g, "key", None) != gkey:
                 continue
             projects = getattr(g, "projects", None) or []

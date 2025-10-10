@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.3] - 2025-10-25
+
+### Corregido
+- Las rutas personalizadas por usuario para módulos ahora se respetan en el descubrimiento de repos, las operaciones Git y la visualización de proyectos, combinándolas automáticamente con la carpeta base del grupo correspondiente.
+
 ## [1.13.2] - 2025-10-24
 
 ### Cambiado

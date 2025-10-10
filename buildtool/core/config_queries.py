@@ -4,13 +4,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Optional, Tuple, Dict
 
-from .config import Config, Group, Project, Module, DeployTarget
+from .config import Config, Group, Project, Module, DeployTarget, groups_for_user
 
 
 def iter_groups(cfg: Config) -> Iterator[Group]:
     """Itera los grupos configurados, tolerando listas vacías o nulas."""
 
-    for group in getattr(cfg, "groups", None) or []:
+    for group in groups_for_user(cfg):
         if group is not None:
             yield group
 
