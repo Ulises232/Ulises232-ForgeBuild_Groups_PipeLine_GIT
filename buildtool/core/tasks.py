@@ -95,6 +95,9 @@ def build_project_for_profile(
         resolved = dest.resolve()
         if resolved in cleaned_destinations:
             return resolved
+        if modules_filter:
+            cleaned_destinations.add(resolved)
+            return resolved
         for child in list(resolved.iterdir()):
             try:
                 if child.is_dir() and not child.is_symlink():
@@ -128,6 +131,11 @@ def build_project_for_profile(
         return dests
 
     def _clean_if_skipped(dests: set[pathlib.Path]):
+        # Cuando se ejecuta un subconjunto de módulos (modules_filter definido),
+        # no debemos limpiar las salidas de los módulos omitidos, ya que pueden
+        # estar siendo procesados en paralelo o conservar artefactos válidos.
+        if modules_filter:
+            return
         for dest in dests:
             _prepare_destination(dest, create=False)
 

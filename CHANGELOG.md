@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.6] - 2025-10-28
+
+### Corregido
+- Evitamos borrar artefactos de otros módulos cuando se compilan perfiles en paralelo o por módulos filtrados, asegurando que todos los paquetes queden disponibles en la carpeta de salida.
+
 ## [1.13.5] - 2025-10-27
 
 ### Añadido
