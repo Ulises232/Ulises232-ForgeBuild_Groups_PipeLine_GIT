@@ -72,6 +72,7 @@ from .sprint_helpers import filter_users_by_role
 from ..ui.color_utils import status_brushes
 from ..ui.icons import get_icon
 from ..ui.multi_select import MultiSelectComboBox
+from ..ui.widgets import combo_with_arrow
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
 
@@ -89,9 +90,12 @@ class SprintView(QWidget):
     """Single window to manage sprints and cards."""
 
     _CHECK_FILTER_OPTIONS: Tuple[Tuple[str, str], ...] = (
-        ("Unit", "unit"),
-        ("QA", "qa"),
-        ("Merge", "merge"),
+        ("Unit ✔", "unit:done"),
+        ("Unit ✖", "unit:pending"),
+        ("QA ✔", "qa:done"),
+        ("QA ✖", "qa:pending"),
+        ("Merge ✔", "merge:ready"),
+        ("Merge ✖", "merge:pending"),
     )
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
@@ -285,14 +289,20 @@ class SprintView(QWidget):
         filter_row.addWidget(lbl_users)
         self.cboSprintFilterUsers = MultiSelectComboBox("Usuarios…", show_max=2)
         self.cboSprintFilterUsers.enable_filter("Filtra usuarios…")
-        filter_row.addWidget(self.cboSprintFilterUsers, 1)
+        self.cboSprintFilterUsersContainer = combo_with_arrow(
+            self.cboSprintFilterUsers, arrow_tooltip="Seleccionar usuarios"
+        )
+        filter_row.addWidget(self.cboSprintFilterUsersContainer, 1)
 
         lbl_checks = QLabel("Checks:")
         filter_row.addWidget(lbl_checks)
         self.cboSprintFilterChecks = MultiSelectComboBox("Checks…", show_max=3)
         check_labels = [label for label, _ in self._CHECK_FILTER_OPTIONS]
         self.cboSprintFilterChecks.set_items(check_labels)
-        filter_row.addWidget(self.cboSprintFilterChecks, 1)
+        self.cboSprintFilterChecksContainer = combo_with_arrow(
+            self.cboSprintFilterChecks, arrow_tooltip="Seleccionar checks"
+        )
+        filter_row.addWidget(self.cboSprintFilterChecksContainer, 1)
 
         filter_row.addStretch(1)
         layout.addLayout(filter_row)
@@ -830,6 +840,23 @@ class SprintView(QWidget):
         status_filter = (self._sprint_filter_status or "").lower() if self._sprint_filter_status else None
         user_filter = {user for user in self._sprint_filter_users if user}
         checks_filter = set(self._sprint_filter_checks)
+        selected_checks: Dict[str, Set[str]] = {}
+        legacy_checks: Set[str] = set()
+        for token in checks_filter:
+            check, sep, status = token.partition(":")
+            if not sep:
+                legacy_checks.add(check)
+                continue
+            if not check or not status:
+                continue
+            bucket = selected_checks.setdefault(check, set())
+            bucket.add(status)
+        for check in legacy_checks:
+            if check == "merge":
+                selected_checks.setdefault(check, set()).add("ready")
+            elif check in {"unit", "qa"}:
+                selected_checks.setdefault(check, set()).add("done")
+        check_filters_active = bool(selected_checks)
         for sprint in sorted(
             self._sprints.values(), key=lambda s: ((s.version or "").lower(), (s.name or "").lower())
         ):
@@ -843,18 +870,27 @@ class SprintView(QWidget):
             for card in cards:
                 if user_filter and (card.assignee not in user_filter and card.qa_assignee not in user_filter):
                     continue
-                if checks_filter:
-                    if "unit" in checks_filter and not card.unit_tests_done:
-                        continue
-                    if "qa" in checks_filter and not card.qa_done:
-                        continue
-                    if "merge" in checks_filter and not is_card_ready_for_merge(card):
-                        continue
+                if check_filters_active:
+                    unit_filters = selected_checks.get("unit")
+                    if unit_filters:
+                        unit_status = "done" if card.unit_tests_done else "pending"
+                        if unit_status not in unit_filters:
+                            continue
+                    qa_filters = selected_checks.get("qa")
+                    if qa_filters:
+                        qa_status = "done" if card.qa_done else "pending"
+                        if qa_status not in qa_filters:
+                            continue
+                    merge_filters = selected_checks.get("merge")
+                    if merge_filters:
+                        merge_status = "ready" if is_card_ready_for_merge(card) else "pending"
+                        if merge_status not in merge_filters:
+                            continue
                 filtered_cards.append(card)
 
             cards_to_show = filtered_cards
             include_sprint = True
-            if user_filter or checks_filter:
+            if user_filter or check_filters_active:
                 include_sprint = bool(cards_to_show)
                 if not include_sprint and user_filter:
                     sprint_users = {sprint.lead_user or "", sprint.qa_user or ""}

@@ -5,6 +5,14 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.8] - 2025-10-30
+
+### Corregido
+- Los filtros multi-selección de planeación muestran nuevamente el botón desplegable, evitando que queden inutilizables tras aplicar la hoja de estilos del combo.
+
+### Cambiado
+- El filtro de checks en la planeación de sprints permite combinar estados pendientes y completados para Unit, QA y Merge.
+
 ## [1.13.7] - 2025-10-29
 
 ### Añadido
