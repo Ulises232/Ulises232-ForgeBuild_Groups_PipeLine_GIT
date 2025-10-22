@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.7] - 2025-10-29
+
+### Añadido
+- Filtros avanzados en la planeación de sprints para buscar por múltiples usuarios y por el estado de checks (Unit, QA y Merge) directamente desde la vista principal.
+
 ## [1.13.6] - 2025-10-28
 
 ### Corregido
