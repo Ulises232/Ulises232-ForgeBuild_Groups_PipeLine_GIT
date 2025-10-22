@@ -72,6 +72,7 @@ from .sprint_helpers import filter_users_by_role
 from ..ui.color_utils import status_brushes
 from ..ui.icons import get_icon
 from ..ui.multi_select import MultiSelectComboBox
+from ..ui.widgets import combo_with_arrow
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
 
@@ -285,14 +286,20 @@ class SprintView(QWidget):
         filter_row.addWidget(lbl_users)
         self.cboSprintFilterUsers = MultiSelectComboBox("Usuarios…", show_max=2)
         self.cboSprintFilterUsers.enable_filter("Filtra usuarios…")
-        filter_row.addWidget(self.cboSprintFilterUsers, 1)
+        self.cboSprintFilterUsersContainer = combo_with_arrow(
+            self.cboSprintFilterUsers, arrow_tooltip="Seleccionar usuarios"
+        )
+        filter_row.addWidget(self.cboSprintFilterUsersContainer, 1)
 
         lbl_checks = QLabel("Checks:")
         filter_row.addWidget(lbl_checks)
         self.cboSprintFilterChecks = MultiSelectComboBox("Checks…", show_max=3)
         check_labels = [label for label, _ in self._CHECK_FILTER_OPTIONS]
         self.cboSprintFilterChecks.set_items(check_labels)
-        filter_row.addWidget(self.cboSprintFilterChecks, 1)
+        self.cboSprintFilterChecksContainer = combo_with_arrow(
+            self.cboSprintFilterChecks, arrow_tooltip="Seleccionar checks"
+        )
+        filter_row.addWidget(self.cboSprintFilterChecksContainer, 1)
 
         filter_row.addStretch(1)
         layout.addLayout(filter_row)
