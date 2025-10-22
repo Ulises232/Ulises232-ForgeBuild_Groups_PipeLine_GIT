@@ -5,7 +5,7 @@ import sqlite3
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QIcon, QPixmap
@@ -71,6 +71,7 @@ from ..core.sprint_queries import branches_by_group, is_card_ready_for_merge
 from .sprint_helpers import filter_users_by_role
 from ..ui.color_utils import status_brushes
 from ..ui.icons import get_icon
+from ..ui.multi_select import MultiSelectComboBox
 from .editor_forms import CardFormWidget, SprintFormWidget
 from .form_dialogs import FormDialog
 
@@ -86,6 +87,12 @@ def _card_has_assigned_sprint(card: Card) -> bool:
 
 class SprintView(QWidget):
     """Single window to manage sprints and cards."""
+
+    _CHECK_FILTER_OPTIONS: Tuple[Tuple[str, str], ...] = (
+        ("Unit", "unit"),
+        ("QA", "qa"),
+        ("Merge", "merge"),
+    )
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -109,6 +116,8 @@ class SprintView(QWidget):
         self._branch_override: bool = False
         self._sprint_filter_group: Optional[str] = None
         self._sprint_filter_status: Optional[str] = None
+        self._sprint_filter_users: List[str] = []
+        self._sprint_filter_checks: Set[str] = set()
         self._card_form_card: Optional[Card] = None
         self._card_form_sprint: Optional[Sprint] = None
         self._card_form_script: Optional[CardScript] = None
@@ -272,6 +281,19 @@ class SprintView(QWidget):
         self.cboSprintFilterStatus.addItem("Cerrados", "closed")
         filter_row.addWidget(self.cboSprintFilterStatus, 1)
 
+        lbl_users = QLabel("Usuarios:")
+        filter_row.addWidget(lbl_users)
+        self.cboSprintFilterUsers = MultiSelectComboBox("Usuarios…", show_max=2)
+        self.cboSprintFilterUsers.enable_filter("Filtra usuarios…")
+        filter_row.addWidget(self.cboSprintFilterUsers, 1)
+
+        lbl_checks = QLabel("Checks:")
+        filter_row.addWidget(lbl_checks)
+        self.cboSprintFilterChecks = MultiSelectComboBox("Checks…", show_max=3)
+        check_labels = [label for label, _ in self._CHECK_FILTER_OPTIONS]
+        self.cboSprintFilterChecks.set_items(check_labels)
+        filter_row.addWidget(self.cboSprintFilterChecks, 1)
+
         filter_row.addStretch(1)
         layout.addLayout(filter_row)
 
@@ -322,6 +344,8 @@ class SprintView(QWidget):
 
         self.cboSprintFilterGroup.currentIndexChanged.connect(self._apply_sprint_filters)
         self.cboSprintFilterStatus.currentIndexChanged.connect(self._apply_sprint_filters)
+        self.cboSprintFilterUsers.model().dataChanged.connect(self._apply_sprint_filters)
+        self.cboSprintFilterChecks.model().dataChanged.connect(self._apply_sprint_filters)
         self.btnNewSprint.clicked.connect(self._start_new_sprint)
         self.btnNewCard.clicked.connect(self._start_new_card)
         self.btnExportScripts.clicked.connect(self._on_export_sprint_scripts)
@@ -646,6 +670,8 @@ class SprintView(QWidget):
         self._users = sorted({user.username for user in users})
         self._user_roles = list_user_roles()
 
+        self._populate_sprint_filter_user_combo()
+
         if hasattr(self, "cboSprintLead"):
             self._populate_user_combo(self.cboSprintLead, None)
         if hasattr(self, "cboSprintQA"):
@@ -788,10 +814,22 @@ class SprintView(QWidget):
         return company.name if company else ""
 
     # ------------------------------------------------------------------
+    def _populate_sprint_filter_user_combo(self) -> None:
+        if not hasattr(self, "cboSprintFilterUsers"):
+            return
+        previous = {user for user in self._sprint_filter_users if user}
+        users = sorted(self._users)
+        self.cboSprintFilterUsers.set_items(users)
+        if previous:
+            self.cboSprintFilterUsers.set_checked_items([user for user in users if user in previous])
+
+    # ------------------------------------------------------------------
     def _populate_tree(self) -> None:
         self.tree.clear()
         group_filter = self._sprint_filter_group or None
         status_filter = (self._sprint_filter_status or "").lower() if self._sprint_filter_status else None
+        user_filter = {user for user in self._sprint_filter_users if user}
+        checks_filter = set(self._sprint_filter_checks)
         for sprint in sorted(
             self._sprints.values(), key=lambda s: ((s.version or "").lower(), (s.name or "").lower())
         ):
@@ -799,6 +837,31 @@ class SprintView(QWidget):
                 continue
             if status_filter and (sprint.status or "").lower() != status_filter:
                 continue
+
+            cards = [card for card in self._cards.values() if card.sprint_id == sprint.id]
+            filtered_cards: List[Card] = []
+            for card in cards:
+                if user_filter and (card.assignee not in user_filter and card.qa_assignee not in user_filter):
+                    continue
+                if checks_filter:
+                    if "unit" in checks_filter and not card.unit_tests_done:
+                        continue
+                    if "qa" in checks_filter and not card.qa_done:
+                        continue
+                    if "merge" in checks_filter and not is_card_ready_for_merge(card):
+                        continue
+                filtered_cards.append(card)
+
+            cards_to_show = filtered_cards
+            include_sprint = True
+            if user_filter or checks_filter:
+                include_sprint = bool(cards_to_show)
+                if not include_sprint and user_filter:
+                    sprint_users = {sprint.lead_user or "", sprint.qa_user or ""}
+                    include_sprint = bool(sprint_users & user_filter)
+            if not include_sprint and not cards_to_show:
+                continue
+
             sprint_item = QTreeWidgetItem()
             sprint_label = f"{sprint.version} — {sprint.name}"
             details: List[str] = []
@@ -825,14 +888,13 @@ class SprintView(QWidget):
             sprint_item.setData(0, Qt.UserRole, ("sprint", sprint.id))
             self.tree.addTopLevelItem(sprint_item)
 
-            cards = [card for card in self._cards.values() if card.sprint_id == sprint.id]
-            cards.sort(
+            cards_to_show.sort(
                 key=lambda c: (
                     (c.ticket_id or "").lower(),
                     (c.title or "").lower(),
                 )
             )
-            for card in cards:
+            for card in cards_to_show:
                 self._populate_card_item(sprint_item, sprint, card)
             sprint_item.setExpanded(True)
 
@@ -1228,6 +1290,18 @@ class SprintView(QWidget):
                 self._sprint_filter_status = None
         else:
             self._sprint_filter_status = None
+        if hasattr(self, "cboSprintFilterUsers"):
+            self._sprint_filter_users = [
+                user for user in self.cboSprintFilterUsers.checked_items() if user
+            ]
+        else:
+            self._sprint_filter_users = []
+        if hasattr(self, "cboSprintFilterChecks"):
+            labels = set(self.cboSprintFilterChecks.checked_items())
+            mapping = dict(self._CHECK_FILTER_OPTIONS)
+            self._sprint_filter_checks = {mapping[label] for label in labels if label in mapping}
+        else:
+            self._sprint_filter_checks = set()
         self._populate_tree()
 
     # ------------------------------------------------------------------
