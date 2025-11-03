@@ -172,8 +172,10 @@ def apply_card_entries(
             summary.register_error(entry.row, str(exc))
             continue
 
+        canonical_group = getattr(company, "group_name", None) or entry.group_name
+
         ticket_key = _normalize_token(entry.ticket_id)
-        group_key = _normalize_token(entry.group_name)
+        group_key = _normalize_token(canonical_group)
         card = card_lookup.get((group_key, ticket_key))
 
         old_key: Optional[Tuple[str, str]] = None
@@ -204,7 +206,7 @@ def apply_card_entries(
 
         base_card.ticket_id = entry.ticket_id
         base_card.title = entry.title
-        base_card.group_name = entry.group_name
+        base_card.group_name = canonical_group or None
         base_card.company_id = company.id
         base_card.assignee = entry.assignee or None
         base_card.qa_assignee = entry.qa_assignee or None
