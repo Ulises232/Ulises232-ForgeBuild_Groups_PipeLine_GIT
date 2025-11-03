@@ -205,6 +205,40 @@ class CardImporterTests(unittest.TestCase):
         self.assertEqual(row, 4)
         self.assertIn("empresa", message.lower())
 
+    def test_apply_card_entries_normalizes_group_from_company(self) -> None:
+        entries = [
+            CardImportEntry(
+                row=2,
+                group_name="ellis",
+                company_name="Profinancia",
+                ticket_id="EP-75",
+                title="Duplicidad base de traslado",
+            )
+        ]
+
+        saved: list[Card] = []
+
+        def upsert_stub(card: Card) -> Card:
+            saved.append(card)
+            card.id = card.id or 1
+            return card
+
+        companies = [Company(id=7, name="Profinancia", group_name="ELLIS")]
+
+        summary = apply_card_entries(
+            entries,
+            username="importer",
+            list_cards_fn=lambda: [],
+            upsert_card_fn=upsert_stub,
+            list_companies_fn=lambda: companies,
+            list_incidence_types_fn=lambda: [],
+        )
+
+        self.assertEqual(summary.created, 1)
+        self.assertFalse(summary.errors)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].group_name, "ELLIS")
+
 
 if __name__ == "__main__":  # pragma: no cover - permite ejecución directa
     unittest.main()
