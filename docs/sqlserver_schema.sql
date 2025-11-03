@@ -1,3 +1,10 @@
+# ForgeBuild Branch History Database Schema
+
+Este documento describe la estructura de la base de datos `Branch History` utilizada por ForgeBuild. Contiene el script SQL completo para recrear las tablas, claves e índices requeridos en SQL Server.
+
+> **Nota:** Cada vez que se realice un cambio en la base de datos (por ejemplo, agregar, modificar o eliminar tablas, columnas, índices o restricciones) se debe actualizar este documento con la versión más reciente del esquema.
+
+```sql
 -- Esquema SQL Server para la base de Branch History de ForgeBuild (sin datos)
 -- Este script crea todas las tablas, claves y índices requeridos.
 
@@ -31,6 +38,69 @@ CREATE TABLE dbo.activity_log (
     branch_key NVARCHAR(512) NULL,
     CONSTRAINT uq_activity UNIQUE (ts, [user], group_name, project, branch, action, result, message)
 );
+
+-- Historial reutilizable para la aplicación de escritorio y complementos
+-- Esta tabla se crea automáticamente desde HistoryDAO cuando aún no existe.
+CREATE TABLE dbo.history_entries (
+    entry_id INT IDENTITY(1,1) PRIMARY KEY,
+    category NVARCHAR(255) NOT NULL,
+    value NVARCHAR(1024) NOT NULL,
+    created_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT uq_history_entries UNIQUE (category, value)
+);
+
+CREATE INDEX ix_history_entries_category_created_at
+    ON dbo.history_entries (category, created_at DESC, entry_id DESC);
+
+CREATE TABLE dbo.recorder_sessions (
+    session_id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    name NVARCHAR(255) NOT NULL,
+    initial_url NVARCHAR(2048) NULL,
+    docx_url NVARCHAR(2048) NULL,
+    evidences_url NVARCHAR(2048) NULL,
+    duration_seconds INT NOT NULL DEFAULT 0,
+    started_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    ended_at DATETIME2(0) NULL,
+    username NVARCHAR(255) NOT NULL,
+    created_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME()
+);
+
+CREATE INDEX ix_recorder_sessions_started_at
+    ON dbo.recorder_sessions (started_at DESC, session_id DESC);
+
+CREATE TABLE dbo.recorder_session_evidences (
+    evidence_id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    session_id INT NOT NULL,
+    file_name NVARCHAR(512) NOT NULL,
+    file_path NVARCHAR(2048) NOT NULL,
+    description NVARCHAR(MAX) NULL,
+    considerations NVARCHAR(MAX) NULL,
+    observations NVARCHAR(MAX) NULL,
+    created_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    elapsed_since_session_start_seconds INT NOT NULL DEFAULT 0,
+    elapsed_since_previous_evidence_seconds INT NULL,
+    CONSTRAINT fk_recorder_evidences_session FOREIGN KEY (session_id)
+        REFERENCES dbo.recorder_sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_recorder_session_evidences_session_created
+    ON dbo.recorder_session_evidences (session_id, created_at ASC, evidence_id ASC);
+
+CREATE TABLE dbo.recorder_session_pauses (
+    pause_id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    session_id INT NOT NULL,
+    paused_at DATETIME2(0) NOT NULL,
+    resumed_at DATETIME2(0) NULL,
+    elapsed_seconds_when_paused INT NOT NULL DEFAULT 0,
+    pause_duration_seconds INT NULL,
+    CONSTRAINT fk_recorder_session_pauses_session FOREIGN KEY (session_id)
+        REFERENCES dbo.recorder_sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_recorder_session_pauses_session
+    ON dbo.recorder_session_pauses (session_id, paused_at DESC, pause_id DESC);
 
 CREATE TABLE dbo.sprints (
     id INT IDENTITY(1,1) PRIMARY KEY,
@@ -346,3 +416,39 @@ CREATE TABLE dbo.config_deploy_user_paths (
     CONSTRAINT uq_config_deploy_user_paths UNIQUE (group_key, target_name, username),
     CONSTRAINT fk_config_deploy_user_paths_group FOREIGN KEY (group_key) REFERENCES dbo.config_groups([key]) ON DELETE CASCADE
 );
+
+CREATE TABLE dbo.cards_ai_inputs (
+    input_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    card_id BIGINT NOT NULL,
+    tipo VARCHAR(20) NOT NULL,
+    descripcion NVARCHAR(MAX) NULL,
+    analisis NVARCHAR(MAX) NULL,
+    recomendaciones NVARCHAR(MAX) NULL,
+    cosas_prevenir NVARCHAR(MAX) NULL,
+    info_adicional NVARCHAR(MAX) NULL,
+    completeness_pct TINYINT NOT NULL DEFAULT(0),
+    is_draft BIT NOT NULL DEFAULT(1),
+    created_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    updated_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT fk_cards_ai_inputs_card FOREIGN KEY (card_id) REFERENCES dbo.cards(id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_cards_ai_inputs_card_id ON dbo.cards_ai_inputs (card_id DESC, input_id DESC);
+
+CREATE TABLE dbo.cards_ai_outputs (
+    output_id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    card_id BIGINT NOT NULL,
+    input_id BIGINT NULL,
+    llm_id VARCHAR(100) NULL,
+    llm_model VARCHAR(100) NULL,
+    llm_usage_json NVARCHAR(MAX) NULL,
+    content_json NVARCHAR(MAX) NOT NULL,
+    is_best BIT NOT NULL DEFAULT(0),
+    dde_generated BIT NOT NULL DEFAULT(0),
+    created_at DATETIME2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT fk_cards_ai_outputs_card FOREIGN KEY (card_id) REFERENCES dbo.cards(id) ON DELETE CASCADE,
+    CONSTRAINT fk_cards_ai_outputs_input FOREIGN KEY (input_id) REFERENCES dbo.cards_ai_inputs(input_id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_cards_ai_outputs_card_id ON dbo.cards_ai_outputs (card_id DESC, output_id DESC);
+```
