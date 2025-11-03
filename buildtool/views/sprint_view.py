@@ -1467,8 +1467,9 @@ class SprintView(QWidget):
         self.cboCardGroup.addItem("Sin grupo", None)
         for key in group_keys:
             self.cboCardGroup.addItem(key, key)
-        if selected and selected in group_keys:
-            idx = self.cboCardGroup.findData(selected)
+        normalized = self._normalize_group_key(selected)
+        if normalized and normalized in group_keys:
+            idx = self.cboCardGroup.findData(normalized)
             if idx >= 0:
                 self.cboCardGroup.setCurrentIndex(idx)
             else:
@@ -1489,8 +1490,9 @@ class SprintView(QWidget):
         self.cboCardCompany.clear()
         self.cboCardCompany.addItem("Sin empresa", None)
         companies: Iterable[Company]
-        if group_filter:
-            companies = self._companies_by_group.get(group_filter, [])
+        normalized_group = self._normalize_group_key(group_filter)
+        if normalized_group:
+            companies = self._companies_by_group.get(normalized_group, [])
         else:
             companies = sorted(
                 self._companies.values(), key=lambda comp: (comp.name or "").lower()
@@ -1499,8 +1501,9 @@ class SprintView(QWidget):
             if company.id is None:
                 continue
             self.cboCardCompany.addItem(company.name, company.id)
-        if selected:
-            idx = self.cboCardCompany.findData(selected)
+        normalized_company = self._normalize_company_id(selected)
+        if normalized_company is not None:
+            idx = self.cboCardCompany.findData(normalized_company)
             if idx >= 0:
                 self.cboCardCompany.setCurrentIndex(idx)
             else:
@@ -1538,7 +1541,7 @@ class SprintView(QWidget):
         if not hasattr(self, "cboCardGroup"):
             return
         self.cboCardGroup.blockSignals(True)
-        target = group_key or None
+        target = self._normalize_group_key(group_key)
         index = 0
         for idx in range(self.cboCardGroup.count()):
             if self.cboCardGroup.itemData(idx) == target:
@@ -1553,7 +1556,7 @@ class SprintView(QWidget):
         if not hasattr(self, "cboCardCompany"):
             return
         self.cboCardCompany.blockSignals(True)
-        target = company_id if company_id not in (None, "") else None
+        target = self._normalize_company_id(company_id)
         index = 0
         for idx in range(self.cboCardCompany.count()):
             if self.cboCardCompany.itemData(idx) == target:
@@ -1582,9 +1585,7 @@ class SprintView(QWidget):
             previous = None
             if self._card_form_card:
                 previous = getattr(self._card_form_card, "sprint_id", None)
-            company_filter = None
-            if hasattr(self, "cboCardCompany"):
-                company_filter = self.cboCardCompany.currentData()
+            company_filter = self._current_company_value()
             self._populate_card_sprint_combo(previous, company_filter)
             return
         self._card_form_sprint = sprint
@@ -1597,7 +1598,7 @@ class SprintView(QWidget):
             self._set_card_group(self._card_form_card.group_name)
 
         current_company = self._card_form_card.company_id if self._card_form_card else None
-        filter_group = self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
+        filter_group = self._current_group_value()
         self._populate_card_company_combo(current_company, filter_group)
         if sprint and sprint.company_id:
             self._set_card_company(sprint.company_id)
@@ -1612,28 +1613,20 @@ class SprintView(QWidget):
     def _on_card_group_changed(self) -> None:
         if not hasattr(self, "cboCardGroup"):
             return
-        group_key = self.cboCardGroup.currentData()
-        current_company = self.cboCardCompany.currentData() if hasattr(self, "cboCardCompany") else None
+        group_key = self._current_group_value()
+        current_company = self._current_company_value()
         self._populate_card_company_combo(current_company, group_key)
 
     # ------------------------------------------------------------------
     def _on_card_company_changed(self) -> None:
         if not hasattr(self, "cboCardCompany"):
             return
-        data = self.cboCardCompany.currentData()
-        company_id: Optional[int] = None
-        if data not in (None, ""):
-            try:
-                company_id = int(data)
-            except (TypeError, ValueError):
-                company_id = None
+        company_id = self._current_company_value()
 
         if company_id is not None:
             company = self._companies.get(company_id)
             if company and company.group_name:
-                current_group = (
-                    self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
-                )
+                current_group = self._current_group_value()
                 if current_group != company.group_name:
                     self._set_card_group(company.group_name)
 
@@ -1843,8 +1836,8 @@ class SprintView(QWidget):
         self._card_parent_id = None
         self._selected_sprint_id = None
         card = Card(id=None, sprint_id=None)
-        card.group_name = group_key or None
-        card.company_id = company_id if company_id not in (None, "") else None
+        card.group_name = self._normalize_group_key(group_key)
+        card.company_id = self._normalize_company_id(company_id)
         card.status = card.status or "pending"
 
         self.tree.clearSelection()
@@ -2550,6 +2543,40 @@ class SprintView(QWidget):
         return text or None
 
     # ------------------------------------------------------------------
+    def _normalize_group_key(self, value: Optional[object]) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            trimmed = value.strip()
+            return trimmed or None
+        try:
+            text = str(value).strip()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        return text or None
+
+    # ------------------------------------------------------------------
+    def _normalize_company_id(self, value: Optional[object]) -> Optional[int]:
+        if value in (None, "", 0):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    # ------------------------------------------------------------------
+    def _current_group_value(self) -> Optional[str]:
+        if not hasattr(self, "cboCardGroup"):
+            return None
+        return self._normalize_group_key(self.cboCardGroup.currentData())
+
+    # ------------------------------------------------------------------
+    def _current_company_value(self) -> Optional[int]:
+        if not hasattr(self, "cboCardCompany"):
+            return None
+        return self._normalize_company_id(self.cboCardCompany.currentData())
+
+    # ------------------------------------------------------------------
     def _on_delete_sprint(self) -> None:
         if self._selected_sprint_id is None:
             return
@@ -2660,16 +2687,15 @@ class SprintView(QWidget):
         card.qa_url = self.txtCardQAUrl.text().strip() or None
         card.updated_at = now
         card.updated_by = user
-        group_value = self.cboCardGroup.currentData() if hasattr(self, "cboCardGroup") else None
+        group_value = self._current_group_value()
         card.group_name = group_value or (sprint.group_name if sprint else None)
-        company_data = self.cboCardCompany.currentData() if hasattr(self, "cboCardCompany") else None
-        try:
-            if company_data not in (None, ""):
-                card.company_id = int(company_data)
-            else:
-                card.company_id = sprint.company_id if sprint else None
-        except (TypeError, ValueError):
-            card.company_id = sprint.company_id if sprint else None
+
+        company_value = self._current_company_value()
+        if company_value is not None:
+            card.company_id = company_value
+        else:
+            fallback_company = sprint.company_id if sprint else None
+            card.company_id = self._normalize_company_id(fallback_company)
 
         if hasattr(self, "cboCardIncidence"):
             incidence_data = self.cboCardIncidence.currentData()

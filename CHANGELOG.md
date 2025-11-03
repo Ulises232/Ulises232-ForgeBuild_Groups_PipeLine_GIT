@@ -5,6 +5,11 @@ Todas las versiones notables de ForgeBuild (Grupos) se documentarán en este arc
 El formato sigue, en líneas generales, las recomendaciones de [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 
+## [1.13.9] - 2025-10-31
+
+### Corregido
+- Normalizamos los valores de grupo y empresa al guardar tarjetas nuevas o editadas, evitando que pierdan la relación y que desaparezcan de los listados pendientes o del navegador de tarjetas.
+
 ## [1.13.8] - 2025-10-30
 
 ### Corregido
