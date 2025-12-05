@@ -40,3 +40,4 @@ set GIT_TRACE_FILE=C:\tmp\git_trace.log
 
 
 python -m buildtool.app
+pause

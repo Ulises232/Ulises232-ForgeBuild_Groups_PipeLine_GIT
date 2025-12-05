@@ -119,7 +119,10 @@ class SprintView(QWidget):
         self._current_card_base: str = ""
         self._branch_override: bool = False
         self._sprint_filter_group: Optional[str] = None
-        self._sprint_filter_status: Optional[str] = None
+        self._sprint_filter_status: Optional[str] = "open"
+        self._sprint_filter_companies: Set[int] = set()
+        self._company_filter_labels: Dict[int, str] = {}
+        self._company_filter_lookup: Dict[str, int] = {}
         self._sprint_filter_users: List[str] = []
         self._sprint_filter_checks: Set[str] = set()
         self._card_form_card: Optional[Card] = None
@@ -277,12 +280,24 @@ class SprintView(QWidget):
         self.cboSprintFilterGroup.addItem("Todos los grupos", None)
         filter_row.addWidget(self.cboSprintFilterGroup, 1)
 
+        lbl_company = QLabel("Empresas:")
+        filter_row.addWidget(lbl_company)
+        self.cboSprintFilterCompanies = MultiSelectComboBox("Empresas…", show_max=2)
+        self.cboSprintFilterCompanies.enable_filter("Filtra empresas…")
+        self.cboSprintFilterCompaniesContainer = combo_with_arrow(
+            self.cboSprintFilterCompanies, arrow_tooltip="Seleccionar empresas"
+        )
+        filter_row.addWidget(self.cboSprintFilterCompaniesContainer, 1)
+
         lbl_status = QLabel("Estado:")
         filter_row.addWidget(lbl_status)
         self.cboSprintFilterStatus = QComboBox()
         self.cboSprintFilterStatus.addItem("Todos los estados", None)
         self.cboSprintFilterStatus.addItem("Abiertos", "open")
         self.cboSprintFilterStatus.addItem("Cerrados", "closed")
+        default_status_index = self.cboSprintFilterStatus.findData("open")
+        if default_status_index >= 0:
+            self.cboSprintFilterStatus.setCurrentIndex(default_status_index)
         filter_row.addWidget(self.cboSprintFilterStatus, 1)
 
         lbl_users = QLabel("Usuarios:")
@@ -353,6 +368,7 @@ class SprintView(QWidget):
         layout.addWidget(self.tree, 1)
 
         self.cboSprintFilterGroup.currentIndexChanged.connect(self._apply_sprint_filters)
+        self.cboSprintFilterCompanies.model().dataChanged.connect(self._apply_sprint_filters)
         self.cboSprintFilterStatus.currentIndexChanged.connect(self._apply_sprint_filters)
         self.cboSprintFilterUsers.model().dataChanged.connect(self._apply_sprint_filters)
         self.cboSprintFilterChecks.model().dataChanged.connect(self._apply_sprint_filters)
@@ -739,6 +755,7 @@ class SprintView(QWidget):
             values.sort(key=lambda comp: (comp.name or "").lower())
         self._companies_by_group = grouped
         self._populate_company_combo(None)
+        self._populate_sprint_filter_company_combo()
 
     # ------------------------------------------------------------------
     def _load_incidence_types(self) -> None:
@@ -834,9 +851,39 @@ class SprintView(QWidget):
             self.cboSprintFilterUsers.set_checked_items([user for user in users if user in previous])
 
     # ------------------------------------------------------------------
+    def _populate_sprint_filter_company_combo(self) -> None:
+        if not hasattr(self, "cboSprintFilterCompanies"):
+            return
+        previous = set(self._sprint_filter_companies)
+        self._company_filter_labels = {}
+        self._company_filter_lookup = {}
+        companies = sorted(
+            self._companies.values(), key=lambda comp: (comp.name or "").lower()
+        )
+        labels: List[str] = []
+        for company in companies:
+            if company.id is None:
+                continue
+            name = company.name or f"Empresa #{company.id}"
+            label = f"{name} (#{company.id})"
+            self._company_filter_labels[int(company.id)] = label
+            self._company_filter_lookup[label] = int(company.id)
+            labels.append(label)
+        self.cboSprintFilterCompanies.set_items(labels)
+        if previous:
+            selected_labels = [
+                self._company_filter_labels[cid]
+                for cid in previous
+                if cid in self._company_filter_labels
+            ]
+            if selected_labels:
+                self.cboSprintFilterCompanies.set_checked_items(selected_labels)
+
+    # ------------------------------------------------------------------
     def _populate_tree(self) -> None:
         self.tree.clear()
         group_filter = self._sprint_filter_group or None
+        company_filters = {cid for cid in self._sprint_filter_companies if cid not in (None, "")}
         status_filter = (self._sprint_filter_status or "").lower() if self._sprint_filter_status else None
         user_filter = {user for user in self._sprint_filter_users if user}
         checks_filter = set(self._sprint_filter_checks)
@@ -862,6 +909,13 @@ class SprintView(QWidget):
         ):
             if group_filter and (sprint.group_name or None) != group_filter:
                 continue
+            if company_filters:
+                try:
+                    sprint_company_id = int(sprint.company_id) if sprint.company_id is not None else None
+                except (TypeError, ValueError):
+                    sprint_company_id = None
+                if sprint_company_id not in company_filters:
+                    continue
             if status_filter and (sprint.status or "").lower() != status_filter:
                 continue
 
@@ -1320,6 +1374,17 @@ class SprintView(QWidget):
                 self._sprint_filter_group = None
         else:
             self._sprint_filter_group = None
+        if hasattr(self, "cboSprintFilterCompanies"):
+            labels = [label for label in self.cboSprintFilterCompanies.checked_items() if label]
+            selected_ids: Set[int] = set()
+            for label in labels:
+                value = self._company_filter_lookup.get(label)
+                if value is None:
+                    continue
+                selected_ids.add(int(value))
+            self._sprint_filter_companies = selected_ids
+        else:
+            self._sprint_filter_companies = set()
         if hasattr(self, "cboSprintFilterStatus"):
             self._sprint_filter_status = self.cboSprintFilterStatus.currentData()
             if self._sprint_filter_status in ("", None):
