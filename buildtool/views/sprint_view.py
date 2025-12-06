@@ -3339,6 +3339,9 @@ class CardBrowser(QWidget):
         self.cboSprint = QComboBox()
         filter_row.addWidget(self.cboSprint, 1)
 
+        self.chkSprintless = QCheckBox("Solo sin sprint")
+        filter_row.addWidget(self.chkSprintless)
+
         lbl_status = QLabel("Estado:")
         filter_row.addWidget(lbl_status)
         self.cboStatus = QComboBox()
@@ -3366,6 +3369,10 @@ class CardBrowser(QWidget):
         self.btnDownloadTemplate = QPushButton("Descargar plantilla")
         self.btnDownloadTemplate.setIcon(get_icon("cloud-download"))
         button_row.addWidget(self.btnDownloadTemplate)
+        self.btnAssignSprint = QPushButton("Asignar sprint")
+        self.btnAssignSprint.setIcon(get_icon("branch"))
+        self.btnAssignSprint.setEnabled(False)
+        button_row.addWidget(self.btnAssignSprint)
         button_row.addStretch(1)
         self.btnNewCard = QPushButton("Nueva tarjeta")
         self.btnNewCard.setIcon(get_icon("build"))
@@ -3389,7 +3396,7 @@ class CardBrowser(QWidget):
             ]
         )
         self.tree.setRootIsDecorated(False)
-        self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         layout.addWidget(self.tree, 1)
 
         self.cboGroup.currentIndexChanged.connect(self._on_group_filter_changed)
@@ -3397,11 +3404,14 @@ class CardBrowser(QWidget):
         self.cboSprint.currentIndexChanged.connect(self._apply_filters)
         self.cboStatus.currentIndexChanged.connect(self._apply_filters)
         self.txtSearch.textChanged.connect(self._apply_filters)
+        self.chkSprintless.stateChanged.connect(self._on_no_sprint_filter_changed)
+        self.tree.itemSelectionChanged.connect(self._on_tree_selection_changed)
         self.tree.itemActivated.connect(self._on_item_activated)
         self.tree.itemDoubleClicked.connect(self._on_item_activated)
         self.btnNewCard.clicked.connect(self._on_new_card_clicked)
         self.btnImportCards.clicked.connect(self._on_import_cards_clicked)
         self.btnDownloadTemplate.clicked.connect(self._on_download_template_clicked)
+        self.btnAssignSprint.clicked.connect(self._on_assign_sprint_clicked)
 
         self._initialize_filters()
 
@@ -3810,12 +3820,18 @@ class CardBrowser(QWidget):
         self._populate_tree(cards)
 
     # ------------------------------------------------------------------
+    def _on_no_sprint_filter_changed(self, _: int) -> None:
+        self.cboSprint.setEnabled(not self.chkSprintless.isChecked())
+        self._apply_filters()
+
+    # ------------------------------------------------------------------
     def _filtered_cards(self) -> List[Card]:
         group_filter = self._current_group_filter()
         company_filter = self._current_company_filter()
         status_filter = self._current_status_filter()
         sprint_filter = self._current_sprint_filter()
         search = self.txtSearch.text().strip().lower()
+        only_without_sprint = self.chkSprintless.isChecked()
 
         results: List[Card] = []
         for card in self._cards.values():
@@ -3829,7 +3845,11 @@ class CardBrowser(QWidget):
                 status_value = (card.status or "pending").lower()
                 if status_value != status_filter:
                     continue
-            if sprint_filter and card.sprint_id != sprint_filter:
+            has_assigned_sprint = _card_has_assigned_sprint(card)
+            if only_without_sprint:
+                if has_assigned_sprint:
+                    continue
+            elif sprint_filter and card.sprint_id != sprint_filter:
                 continue
             if search:
                 sprint = self._sprints.get(card.sprint_id)
@@ -3901,6 +3921,7 @@ class CardBrowser(QWidget):
         self.tree.setUpdatesEnabled(True)
         self.tree.resizeColumnToContents(0)
         self.tree.resizeColumnToContents(1)
+        self._update_assign_sprint_state()
 
     # ------------------------------------------------------------------
     def _apply_card_style(
@@ -3932,6 +3953,162 @@ class CardBrowser(QWidget):
                 item.setForeground(column, foreground)
             else:
                 item.setForeground(column, QBrush())
+
+    # ------------------------------------------------------------------
+    def _on_tree_selection_changed(self) -> None:
+        self._update_assign_sprint_state()
+
+    # ------------------------------------------------------------------
+    def _update_assign_sprint_state(self) -> None:
+        if hasattr(self, "btnAssignSprint"):
+            self.btnAssignSprint.setEnabled(bool(self._selected_card_ids()))
+
+    # ------------------------------------------------------------------
+    def _selected_card_ids(self) -> List[int]:
+        selected = []
+        for item in self.tree.selectedItems():
+            card_id = item.data(0, Qt.UserRole)
+            if card_id in (None, ""):
+                continue
+            try:
+                selected.append(int(card_id))
+            except (TypeError, ValueError):
+                continue
+        return selected
+
+    # ------------------------------------------------------------------
+    def _selected_cards_by_company(self, card_ids: List[int]) -> Dict[Optional[int], List[Card]]:
+        grouped: Dict[Optional[int], List[Card]] = {}
+        for card_id in card_ids:
+            card = self._cards.get(card_id)
+            if not card:
+                continue
+            company_id = self._effective_company(card)
+            grouped.setdefault(company_id, []).append(card)
+        return grouped
+
+    # ------------------------------------------------------------------
+    def _open_sprints_for_company(self, company_id: Optional[int]) -> List[Sprint]:
+        target = self._normalize_company_id(company_id)
+        if target is None:
+            return []
+        results = []
+        for sprint in self._sprints.values():
+            normalized = self._normalize_company_id(sprint.company_id)
+            if normalized != target:
+                continue
+            status_value = (sprint.status or "open").lower()
+            if status_value == "closed":
+                continue
+            results.append(sprint)
+        results.sort(
+            key=lambda sprint: (
+                (sprint.version or "").lower(),
+                (sprint.name or "").lower(),
+                sprint.id or 0,
+            )
+        )
+        return results
+
+    # ------------------------------------------------------------------
+    def _show_mixed_company_error(self, grouped: Dict[Optional[int], List[Card]]) -> None:
+        total = sum(len(cards) for cards in grouped.values())
+        lines = [
+            f"No se puede asignar el sprint de forma masiva porque hay {total} tarjeta(s) de diferentes empresas.",
+            "",
+        ]
+        sorted_groups = sorted(
+            grouped.items(),
+            key=lambda item: (self._company_name(item[0]) or "Sin empresa").lower(),
+        )
+        for company_id, cards in sorted_groups:
+            company_label = self._company_name(company_id) or "Sin empresa"
+            lines.append(f"{company_label}:")
+            for card in cards:
+                label = card.ticket_id or card.title or f"Tarjeta #{card.id}"
+                lines.append(f"  • {label}")
+            lines.append("")
+        message = "\n".join(line for line in lines if line.strip())
+        QMessageBox.warning(self, "Asignar sprint", message)
+
+    # ------------------------------------------------------------------
+    def _prompt_sprint_selection(self, company_id: int, sprints: List[Sprint]) -> Optional[int]:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Asignar sprint")
+        layout = QVBoxLayout(dialog)
+        company_label = self._company_name(company_id) or "Sin empresa"
+        prompt = QLabel(f"Selecciona un sprint abierto para {company_label}:")
+        prompt.setWordWrap(True)
+        layout.addWidget(prompt)
+        combo = QComboBox()
+        for sprint in sprints:
+            if sprint.id is None:
+                continue
+            label = self._sprint_label(sprint) or f"Sprint #{sprint.id}"
+            combo.addItem(label, sprint.id)
+        layout.addWidget(combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        combo.setCurrentIndex(0 if combo.count() else -1)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        value = combo.currentData()
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    # ------------------------------------------------------------------
+    def _on_assign_sprint_clicked(self) -> None:
+        card_ids = self._selected_card_ids()
+        if not card_ids:
+            QMessageBox.information(self, "Asignar sprint", "Selecciona al menos una tarjeta.")
+            return
+        grouped = self._selected_cards_by_company(card_ids)
+        if not grouped:
+            QMessageBox.warning(
+                self,
+                "Asignar sprint",
+                "Las tarjetas seleccionadas ya no están disponibles. Actualiza la lista e inténtalo nuevamente.",
+            )
+            self._apply_filters()
+            return
+        if len(grouped) > 1:
+            self._show_mixed_company_error(grouped)
+            return
+        company_id, cards = next(iter(grouped.items()))
+        normalized_company = self._normalize_company_id(company_id)
+        if normalized_company is None:
+            QMessageBox.warning(
+                self,
+                "Asignar sprint",
+                "Las tarjetas seleccionadas no tienen empresa configurada. Ajusta la empresa antes de continuar.",
+            )
+            return
+        open_sprints = self._open_sprints_for_company(normalized_company)
+        if not open_sprints:
+            QMessageBox.information(
+                self,
+                "Asignar sprint",
+                "No hay sprints abiertos disponibles para la empresa seleccionada.",
+            )
+            return
+        sprint_id = self._prompt_sprint_selection(normalized_company, open_sprints)
+        if sprint_id is None:
+            return
+        try:
+            assign_cards_to_sprint(int(sprint_id), card_ids)
+        except Exception as exc:
+            QMessageBox.critical(self, "Asignar sprint", f"No se pudieron asignar las tarjetas: {exc}")
+            return
+        QMessageBox.information(
+            self,
+            "Asignar sprint",
+            f"Se asignaron {len(card_ids)} tarjeta(s) al sprint seleccionado.",
+        )
+        self.cardsImported.emit()
 
     # ------------------------------------------------------------------
     def _on_item_activated(self, item: QTreeWidgetItem, _: int) -> None:
