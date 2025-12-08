@@ -239,6 +239,78 @@ class CardImporterTests(unittest.TestCase):
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0].group_name, "ELLIS")
 
+    def test_apply_card_entries_keeps_assignees_when_blank(self) -> None:
+        entries = [
+            CardImportEntry(
+                row=5,
+                group_name="Alpha",
+                company_name="Acme",
+                ticket_id="ABC-9",
+                title="Mantener responsables",
+            )
+        ]
+
+        existing = [
+            Card(
+                id=11,
+                sprint_id=None,
+                branch_key=None,
+                title="Original",
+                ticket_id="ABC-9",
+                branch="",
+                group_name="Alpha",
+                assignee="dev-existente",
+                qa_assignee="qa-existente",
+                description="",
+                unit_tests_url=None,
+                qa_url=None,
+                unit_tests_done=False,
+                qa_done=False,
+                unit_tests_by=None,
+                qa_by=None,
+                unit_tests_at=None,
+                qa_at=None,
+                status="pending",
+                company_id=10,
+                closed_at=None,
+                closed_by=None,
+                branch_created_by=None,
+                branch_created_at=None,
+                branch_created_flag=False,
+                created_at=0,
+                created_by="",
+                updated_at=0,
+                updated_by="",
+            )
+        ]
+
+        captured: list[Card] = []
+
+        def list_cards_stub() -> list[Card]:
+            return list(existing)
+
+        def upsert_stub(card: Card) -> Card:
+            captured.append(card)
+            return card
+
+        companies = [Company(id=10, name="Acme", group_name="Alpha")]
+
+        summary = apply_card_entries(
+            entries,
+            username="tester",
+            list_cards_fn=list_cards_stub,
+            upsert_card_fn=upsert_stub,
+            list_companies_fn=lambda: companies,
+            list_incidence_types_fn=lambda: [],
+        )
+
+        self.assertEqual(summary.updated, 1)
+        self.assertFalse(summary.errors)
+        self.assertEqual(len(captured), 1)
+        updated = captured[0]
+        self.assertEqual(updated.assignee, "dev-existente")
+        self.assertEqual(updated.qa_assignee, "qa-existente")
+
 
 if __name__ == "__main__":  # pragma: no cover - permite ejecución directa
     unittest.main()

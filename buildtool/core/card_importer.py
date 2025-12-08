@@ -208,8 +208,15 @@ def apply_card_entries(
         base_card.title = entry.title
         base_card.group_name = canonical_group or None
         base_card.company_id = company.id
-        base_card.assignee = entry.assignee or None
-        base_card.qa_assignee = entry.qa_assignee or None
+        if entry.assignee:
+            base_card.assignee = entry.assignee
+        elif is_new:
+            base_card.assignee = None
+
+        if entry.qa_assignee:
+            base_card.qa_assignee = entry.qa_assignee
+        elif is_new:
+            base_card.qa_assignee = None
         if entry.incidence_type_provided:
             if entry.incidence_type_name:
                 try:
