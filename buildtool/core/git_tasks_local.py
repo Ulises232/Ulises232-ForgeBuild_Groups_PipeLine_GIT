@@ -323,6 +323,18 @@ def _fetch_repo(mname: str, mpath: Path, emit=None) -> bool:
     return True
 
 
+def _pull_repo(mname: str, mpath: Path, emit=None) -> bool:
+    """Ejecuta `git pull` para sincronizar la rama activa antes de continuar."""
+
+    rc, out = _run(["git", "pull"], mpath, emit=emit)
+    if rc != 0:
+        reason = _last_nonempty(out) or "pull falló"
+        _out(emit, f"[{mname}] ❌ Pull falló: {reason}")
+        return False
+    _out(emit, f"[{mname}] ✅ Pull completado")
+    return True
+
+
 def fetch_all(
     cfg,
     gkey,
@@ -344,6 +356,34 @@ def fetch_all(
             ok_all = False
             continue
         if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+    return ok_all
+
+
+def pull_all(
+    cfg,
+    gkey,
+    pkey,
+    emit=None,
+    only_modules: Optional[Iterable[str]] = None,
+) -> bool:
+    """Realiza fetch y pull global para todos los módulos del proyecto o grupo."""
+
+    repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
+    ok_all = True
+    for mname, mpath in repos:
+        if not mpath.exists():
+            _out(emit, f"[{mname}] ⚠️ Ruta no existe: {mpath}")
+            ok_all = False
+            continue
+        if not _is_git_repo(mpath, emit=emit):
+            _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
+            ok_all = False
+            continue
+        if not _fetch_repo(mname, mpath, emit=emit):
+            ok_all = False
+            continue
+        if not _pull_repo(mname, mpath, emit=emit):
             ok_all = False
     return ok_all
 
@@ -868,6 +908,11 @@ def merge_into_current_branch(
         if not _fetch_repo(mname, mpath, emit=emit):
             ok_all = False
             issues.append((mname, "fetch falló"))
+            continue
+
+        if not _pull_repo(mname, mpath, emit=emit):
+            ok_all = False
+            issues.append((mname, "pull falló"))
             continue
 
         current = _current_branch_name(mpath) or "?"

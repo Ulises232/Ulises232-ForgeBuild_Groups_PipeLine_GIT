@@ -33,7 +33,7 @@ from ..core.config_queries import find_project, get_group, iter_group_projects
 from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
     push_branch, delete_local_branch_by_name, merge_into_current_branch,
-    fetch_all,
+    fetch_all, pull_all,
 )
 from ..core import sprint_queries
 from ..core.branch_store import upsert_card
@@ -124,6 +124,7 @@ class GitView(QWidget):
             self.btnMerge,
             self.btnRefresh,
             self.btnFetch,
+            self.btnPull,
             self.btnReconcile,
         ):
             try: w.setEnabled(not busy)
@@ -276,9 +277,11 @@ class GitView(QWidget):
         misc = QHBoxLayout()
         misc.setSpacing(10)
         self.btnFetch = self._make_tool_button("Fetch (global)", "cloud-download")
+        self.btnPull = self._make_tool_button("Pull (global)", "cloud-download")
         self.btnReconcile = self._make_tool_button("Reconciliar con Git (solo local)", "sync")
         misc.addStretch(1)
         misc.addWidget(self.btnFetch)
+        misc.addWidget(self.btnPull)
         misc.addWidget(self.btnReconcile)
         opsl.addLayout(misc, 3, 0, 1, 2)
 
@@ -365,6 +368,7 @@ class GitView(QWidget):
         self.btnRunCreateVersion.clicked.connect(self._do_create_version)
         self.btnMerge.clicked.connect(self._do_merge)
         self.btnFetch.clicked.connect(self._do_fetch)
+        self.btnPull.clicked.connect(self._do_pull)
         self.btnClearLog.clicked.connect(self.log.clear)
 
 
@@ -853,6 +857,20 @@ class GitView(QWidget):
             "Reconciliar con Git (local)", reconcile_task, None, self.cfg, gkey, pkey,
             success="Reconciliación completa",
             error="Error al reconciliar"
+        )
+
+    @safe_slot
+    def _do_pull(self):
+        gkey, pkey = self._current_keys()
+        self._start_task(
+            "Pull global",
+            lambda cfg, gk, pk, emit=self.logger.line.emit: pull_all(cfg, gk, pk, emit, only_modules=None),
+            None,
+            self.cfg,
+            gkey,
+            pkey,
+            success="Pull completado",
+            error="Pull con errores"
         )
 
     @safe_slot

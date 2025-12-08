@@ -20,6 +20,7 @@ if /I "%~1"=="--skip-deps" (
 ) else if /I "%~1"=="--deploy" (
   if "%~2"=="" (
     echo Debe especificar una ruta despues de --deploy
+    pause
     exit /b 1
   )
   set "DEPLOY_PATH=%~f2"
@@ -27,6 +28,7 @@ if /I "%~1"=="--skip-deps" (
 ) else (
   echo Opcion desconocida: %~1
   echo Opciones disponibles: --skip-deps --force-deps --deploy ^<ruta^>
+  pause
   exit /b 1
 )
 shift
@@ -40,6 +42,7 @@ if not exist "%VENV_DIR%" (
   python -m venv "%VENV_DIR%"
   if errorlevel 1 (
     echo No fue posible crear el entorno virtual.
+    pause
     exit /b 1
   )
 )
@@ -96,6 +99,7 @@ echo Preparando icono...
 python -m buildtool.icon_factory
 if errorlevel 1 (
   echo No se pudo generar el icono requerido para el ejecutable.
+  pause
   exit /b 1
 )
 
@@ -115,6 +119,7 @@ pyinstaller --noconfirm ^
 if errorlevel 1 (
   echo.
   echo Hubo un error al generar el ejecutable.
+  pause
   exit /b 1
 )
 
@@ -124,6 +129,7 @@ echo Build terminado. Ejecutable en: dist\ForgeBuild\ForgeBuild.exe
 if not "%DEPLOY_PATH%"=="" (
   if not exist "%DEPLOY_PATH%" (
     echo La ruta de despliegue "%DEPLOY_PATH%" no existe.
+    pause
     exit /b 1
   )
 
@@ -131,6 +137,7 @@ if not "%DEPLOY_PATH%"=="" (
   copy /y "dist\ForgeBuild\ForgeBuild.exe" "%DEPLOY_PATH%" >nul
   if errorlevel 1 (
     echo No se pudo copiar el ejecutable a la ruta indicada.
+    pause
     exit /b 1
   )
   echo Copia completada.
@@ -139,14 +146,16 @@ if not "%DEPLOY_PATH%"=="" (
   copy /y "VERSION" "%DEPLOY_PATH%/_internal" >nul
   if errorlevel 1 (
     echo No se pudo copiar el ejecutable a la ruta indicada.
+    pause
     exit /b 1
   )
   echo Copia completada.
 )
-
+pause
 exit /b 0
 
 :deps_error
 echo.
 echo Hubo un error instalando o actualizando las dependencias.
+pause
 exit /b 1
