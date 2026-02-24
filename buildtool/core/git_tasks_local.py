@@ -22,6 +22,14 @@ from buildtool.core.git_tasks import _iter_modules as _iter_modules_cfg
 from .config import groups_for_user
 from .session import current_username
 
+# Último reporte de merge global (leído desde la UI para mostrar alertas).
+_LAST_MERGE_REPORT: Dict[str, Any] = {}
+
+
+def get_last_merge_report() -> Dict[str, Any]:
+    """Devuelve una copia del reporte del último merge global ejecutado."""
+    return dict(_LAST_MERGE_REPORT)
+
 # --------------------- helpers de salida y ejecución ---------------------
 
 
@@ -890,72 +898,114 @@ def merge_into_current_branch(
         _out(emit, "❌ Nombre de rama de origen vacío en merge.")
         raise RuntimeError("Nombre de rama de origen vacío en merge.")
 
+    # reinicia reporte para lectura desde UI
+    global _LAST_MERGE_REPORT
+    _LAST_MERGE_REPORT = {
+        "branch": branch,
+        "merged": [],
+        "available_origin": [],
+        "missing_origin": [],
+        "errors": [],
+        "warnings": [],
+    }
+
     repos = _discover_repos(cfg, gkey, pkey, only_modules, emit=emit)
-    ok_all = True
-    issues: List[Tuple[str, str]] = []
+    merged: List[str] = []
+    available_origin: List[str] = []
+    missing_origin: List[str] = []
+    errors: List[Tuple[str, str]] = []
+    warnings: List[Tuple[str, str]] = []
     for mname, mpath in repos:
         if not mpath.exists():
             _out(emit, f"[{mname}] ⚠️ Ruta no existe: {mpath}")
-            ok_all = False
-            issues.append((mname, "ruta inexistente"))
+            errors.append((mname, "ruta inexistente"))
             continue
         if not _is_git_repo(mpath, emit=emit):
             _out(emit, f"[{mname}] ⚠️ No es repo Git: {mpath}")
-            ok_all = False
-            issues.append((mname, "no es un repositorio Git"))
+            errors.append((mname, "no es un repositorio Git"))
             continue
 
         if not _fetch_repo(mname, mpath, emit=emit):
-            ok_all = False
-            issues.append((mname, "fetch falló"))
+            errors.append((mname, "fetch falló"))
             continue
 
         if not _pull_repo(mname, mpath, emit=emit):
-            ok_all = False
-            issues.append((mname, "pull falló"))
-            continue
+            warn_msg = "pull falló (se continúa con merge local)"
+            _out(emit, f"[{mname}] ⚠️ {warn_msg}")
+            warnings.append((mname, warn_msg))
+            # No se detiene el flujo: se intenta merge de todas formas.
 
         current = _current_branch_name(mpath) or "?"
         _out(emit, f"[{mname}] ▶ merge '{branch}' sobre '{current}'")
 
-        exists_local = _branch_exists_local(mpath, branch)
         exists_remote = _branch_exists_remote(mpath, branch)
-        if not exists_local and not exists_remote:
-            _out(emit, f"[{mname}] ❌ La rama '{branch}' no existe (local ni origin)")
-            ok_all = False
-            issues.append((mname, "rama inexistente"))
+        if not exists_remote:
+            _out(emit, f"[{mname}] ⚠️ La rama '{branch}' no existe en origin; se omite el merge.")
+            missing_origin.append(mname)
             continue
 
+        available_origin.append(mname)
+        exists_local = _branch_exists_local(mpath, branch)
+
         merge_target = branch
-        if exists_remote:
-            _run(["git", "fetch", "origin", branch], mpath, emit=emit)
-            if not exists_local:
-                merge_target = f"origin/{branch}"
+        _run(["git", "fetch", "origin", branch], mpath, emit=emit)
+        if not exists_local:
+            merge_target = f"origin/{branch}"
 
         rc, out = _run(["git", "merge", "--no-edit", merge_target], mpath, emit=emit)
         if rc != 0:
             reason = _last_nonempty(out) or "conflictos durante el merge"
             _out(emit, f"[{mname}] ❌ Merge con conflictos: {reason}")
-            ok_all = False
-            issues.append((mname, reason))
+            errors.append((mname, reason))
             continue
 
         _out(emit, f"[{mname}] ✅ Merge completado")
+        merged.append(mname)
         if push:
             rc_push, out_push = _run(["git", "push"], mpath, emit=emit)
             if rc_push != 0:
                 reason = _last_nonempty(out_push) or "push falló"
                 _out(emit, f"[{mname}] ⚠️ Push falló después del merge: {reason}")
-                ok_all = False
-                issues.append((mname, f"push falló: {reason}"))
+                errors.append((mname, f"push falló: {reason}"))
             else:
                 _out(emit, f"[{mname}] ☁️ Push origin")
 
-    if ok_all:
-        return True
+    if merged:
+        _out(emit, f"✅ Merge aplicado en: {', '.join(merged)}")
+    if available_origin:
+        _out(emit, f"ℹ️ Rama '{branch}' existe en origin para: {', '.join(available_origin)}")
+    if missing_origin:
+        _out(emit, f"⚠️ Rama '{branch}' no existe en origin para: {', '.join(missing_origin)}")
 
-    if issues:
-        _out(emit, "❌ Merge global incompleto. Detalles:")
-        for mname, reason in issues:
+    if errors:
+        _out(emit, "❌ Merge global con incidencias:")
+        for mname, reason in errors:
             _out(emit, f"   - {mname}: {reason}")
-    return False
+        _LAST_MERGE_REPORT.update(
+            merged=merged,
+            available_origin=available_origin,
+            missing_origin=missing_origin,
+            errors=errors,
+            warnings=warnings,
+        )
+        return False
+
+    if not merged:
+        _out(emit, f"❌ Ningún repositorio tenía la rama '{branch}' en origin; no se aplicó merge.")
+        _LAST_MERGE_REPORT.update(
+            merged=merged,
+            available_origin=available_origin,
+            missing_origin=missing_origin,
+            errors=[("todos", "rama inexistente en origin")],
+            warnings=warnings,
+        )
+        return False
+
+    _LAST_MERGE_REPORT.update(
+        merged=merged,
+        available_origin=available_origin,
+        missing_origin=missing_origin,
+        errors=errors,
+        warnings=warnings,
+    )
+    return True

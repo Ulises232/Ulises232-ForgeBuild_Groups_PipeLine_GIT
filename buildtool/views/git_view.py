@@ -33,7 +33,7 @@ from ..core.config_queries import find_project, get_group, iter_group_projects
 from ..core.git_tasks_local import (
     switch_branch, create_version_branches, create_branches_local,
     push_branch, delete_local_branch_by_name, merge_into_current_branch,
-    fetch_all, pull_all,
+    fetch_all, pull_all, get_last_merge_report,
 )
 from ..core import sprint_queries
 from ..core.branch_store import upsert_card
@@ -776,6 +776,29 @@ class GitView(QWidget):
         card_id = card.id if card else None
 
         def _after(ok: bool):
+            # Mostrar resumen detallado en alerta
+            report = get_last_merge_report()
+            merged = report.get("merged") or []
+            missing = report.get("missing_origin") or []
+            errors = report.get("errors") or []
+            warnings = report.get("warnings") or []
+            lines = []
+            if merged:
+                lines.append(f"Merge aplicado en: {', '.join(merged)}")
+            if missing:
+                lines.append(f"Rama sin origin en: {', '.join(missing)}")
+            if warnings:
+                lines.append("Advertencias:")
+                for mod, reason in warnings:
+                    lines.append(f" - {mod}: {reason}")
+            if errors:
+                lines.append("Incidencias:")
+                for mod, reason in errors:
+                    lines.append(f" - {mod}: {reason}")
+            if not lines:
+                lines.append("No hubo repositorios procesados.")
+            self._alert("\n".join(lines), error=bool(errors))
+
             if ok:
                 STATE.add_history(gkey, pkey, source)
             if card_id:
@@ -788,8 +811,8 @@ class GitView(QWidget):
             f"Merge {source} -> rama actual (global)",
             lambda cfg, gk, pk, br, do_push, emit=self.logger.line.emit: merge_into_current_branch(cfg, gk, pk, br, do_push, emit, only_modules=None),
             _after, self.cfg, gkey, pkey, source, push,
-            success=f"Merge de {source} completado",
-            error=f"Merge de {source} tuvo errores"
+            success=None,
+            error=None
         )
 
     @safe_slot
